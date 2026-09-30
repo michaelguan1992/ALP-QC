@@ -1,0 +1,210 @@
+                                                                                                                IQC Inspection specification 来料检验规范
+                                                   Batch Qty                                                    Batch Date                                               Recorded by                                                                                                            Page
+ Item Name 品名              HyperSmoke 14                                          384                                                             2026.8.27                                                       张慧敏/ZHM                                      Version 版本         25.10.29               1/1
+                                                   批次数量                                                          批次日期                                                     记录人员                                                                                                                  页数
+
+
+
+  Special Notes       本批发货数量 Quantity of this wholesale:
+ 本批次特殊情况              S14-red：384
+
+
+
+                                                                                                                                         Quality control points      Defective rate history
+                                                                                                                              Loging          品质管制点                    历史不良率记录                      Average
+                                                                                                                                                                                                            Video 视频
+                                                    Specifications and                       Inspection           Inspection Frequenc                                                         Time time per
+                                                                                                                                                                                                            Procedure              Remarks
+序号                QC Task 检验项目                 dimensions/inspection points               devices/methods        Frequencey      y                                                            时数     unit/
+                                                                                                                                                                                                             操作程序                    备注
+                                                   规格尺寸 /检验要点                              检测仪器 /方法              检查百分比 记录百分 Inspectio Defective Defective                                     (sec) 单件平均
+                                                                                                                                       n qty      qty        rate                                            Log 记录
+                                                                                                                                比                                                                   工时(sec)
+                                                                                                                                      检验数量 不良数             不良率
+
+                                            The resistence of the heating coil is                                                                                                                            Video 视频 31PCS发热丝欧姆值 >3.3，修复后正
+                                                                                          Resistance tester                   2%+all
+                  Heating Coil Test                  3.0-3.3Ω, 20 loops                                                                                                                                      Procedure 常
+1                                                                                           /Multimeter           100.00%     failed    384       31      8.07%                                5      5
+                    发热丝测试                   发热丝欧姆值为 3.0-3.3Ω , 圈数为20                                                                                                                                          操作程序 31 PCS heating elements: resistance
+                                                                                         电阻测试仪 /万用表                            units
+                                                             圈                                                                                                                                                Log 记录 value ＞3.3Ω, normal after repair.
+
+
+                                                                                    DC power supply / air
+                                                                                     pump / differential                                                                                                     Video 视频
+                                            After applying grease, the valve can                                              5%+all
+         DN10-1.5KPA Check Valve Test                                               pressure gauge / flow                                                                                                    Procedure
+2                                                  be opened with 3 KPA                                            20.00%     failed    5000      80          1.6%                            30      6
+           DN10-止回阀芯测试测试                                                                    meter                                                                                                             操作程序
+                                             涂油后测试阀值范围 3KPA内通气                                                                 units
+                                                                                    直流电源 /气泵/差压表/                                                                                                             Log 记录
+                                                                                           流量计
+
+
+                                           After applying grease, test with 8KPA
+                                                                                 DC power supply / air
+                                             and 6KPA air pressure. The valve
+                                                                                  pump / differential                                                                                                        Video 视频
+                                            should allow ventilation with 8 KPA                                              35%+all
+          DN8-7KPA Check Valve Test                                              pressure gauge / flow                                                                                                       Procedure
+3                                          and should not allow ventilation at 6                                   20.00%     failed    5000      18      0.36%                               45      9
+             DN8-止回阀芯测试                                                                  meter                                                                                                                操作程序
+                                                            KPA                                                                units
+                                                                                 直流电源 /气泵/差压表/                                                                                                                Log 记录
+                                           涂油后测试阀值范围 6-8KPA，8KPA
+                                                                                        流量计
+                                                  内通气且 6KPA不能通气
+
+
+
+                                             with 12.7V power, air pump flow
+                                           >2.0L/min, time to reach 6 PSI within
+                                             100 seconds with a 2L container,
+                                            observe flow rate change when the
+                                                                                 DC power supply / air
+                                             bleeding port of the air pump is
+                                                                                  pump / differential                                                                                                        Video 视频
+                                              blocked and then released (the                                                 10%+all
+                   Air Pump Test                                                 pressure gauge / flow                                                                                                       Procedure
+4                                             change value should be within                                       100.00%     failed    384       29      7.50%                               56      56
+                     气泵测试                                                                meter                                                                                                                操作程序
+                                                          0.1PSI).                                                             units
+                                                                                 直流电源 /气泵/差压表/                                                                                                                Log 记录
+                                            12.7V供电，气泵流量大于 2.0L/min
+                                                                                        流量计
+                                            ，给2L容器充气要在 100秒内达到
+                                            6PSI气压并记录时间 。观察气泵泄
+                                            气口堵住及松开时是否有流量变化
+                                                  （变化值在 0.1PSI 内）
+
+
+
+                  Circuit Board Test              PWM，appearnce check                       Oscilliscope
+5                                                                                                                   0.10%      0%        —        —           —                               30     0.03
+                     电路板测试                        检查占空比 ，外观检查                                 示波器
+
+
+
+                                            Hardness, length, inner & outer
+                                             diameters, and flexibility. take
+                                            pictures of 3x hoses with golden            Hardness tester /Tape                                                                                                Video 视频
+           1.25m Hose Test 1.25m发
+6                                               sample. Record hardness.                      measure               0.25%      0%        1         0          0%                              65    0.1625   Procedure
+                  烟管测试
+                                           硬度、长度、 内外直径 、柔顺不能                                硬度计/卷尺                                                                                                            操作程序
+                                           折后不通气 。抽取3条管子与封样一
+                                               起拍对比照 。记录硬度 。
+
+
+
+                                             How many KG until the oil packet
+                                              burst. Record everytime weight
+           Oil Pakcet Destructive Test                                                     Scale / Weight
+7                                                        increased.                                                 0.10%      0%        1         0          0%                              10     0.01
+                 油包破坏测试                                                                      称 / 法码
+                                            增加砝码重量直到油包破裂 。每增
+                                                   加重量做一次记录 。
+
+
+                                             The weight of the oil packet is 25                                                                                                                                                                                                   Factory
+                                                                                                                                                                                                                                                         Production
+                   Oil Packet Test             grams. Use a 5kg weight to                  Scale / Weight                                                                                                                                                                         Manager
+8                                                                                                                    1%        0%        —        —           —                               10     0.1                                                 Supervisor
+                      油包测试                        pressurize the packet                      称 / 法码                                                                                                                                                                               工厂负责
+                                                                                                                                                                                                                                                          生产主管          ZHM                          LRX
+                                              油包重量 25g,用5kg法码压油包                                                                                                                                                                                                                    人
+                                                                                                                                                                                                                                                                      2026/8/27                   2026/8/27
+                                                                                                                                                                                                                                                                         US Customer approval
+9
+                                                                                                                                                                                                                                                                             美国客户批准
+
+
+10
+
+
+
+                                                                                                              Suzhou Aotuline Precision Manufacturing Co., Ltd.苏州奥途莱精密智造有限公司
+                                                                                                                          OQC Inspection specification 成品检验规范
+                                                                     Batch Qty                                                       Batch Date                              Recorded by                                                                                                          25.10.2     Page
+    Item Name 品名                   HyperSmoke 14                                                     384                                          2026.8.27                                                                    张慧敏/ZHM                                           Version 版本                                  1/1
+                                                                     批次数量                                                             批次日期                                    记录人员                                                                                                                   9        页数
+
+                        线束来料正负极接反1PCS；线材从插头脱出1PCS.
+     Special Notes
+                        The positive and negative terminals of the incoming wire harness are reversed by 1 piece.
+    本批次特殊情况
+                        1 wire pulled out from connector housing.
+
+                                                                                                                                                                                                                                                                              黑色烟嘴封装油罐时切断、排气孔护孔环安装不良导致漏
+                                                                                                                     Quality control points         Defective rate history                                                                                                    气
+                                                                                                                         品质管制点                        历史不良率记录                                         Average                                                                 Air leakage caused by cutting‑off during encapsulation of
+                                                                                                                                                                                                                Video 视频
+                                 Specifications and                  Inspection    Inspection  Loging                                                                                                 time per                                                                black nozzle onto oil tank and improper installation of
+          QC Task                                                                                                                                                                          Time 时              Procedure 操                      Remarks
+序号                           dimensions/inspection points         devices/methods Frequencey Frequency                                                                                                  unit/                                                                 vent hole grommet.
+          检验项目                                                                                                                                                                             数 (sec)                作程序                            备注
+                                 规格尺寸/检验要点                         检测仪器/方法 检查百分比 记录百分比 Inspection Defective Defective                                                                                单件平均工
+                                                                                                        qty  qty  rate                                                                                           Log 记录
+                                                                                                                                                                                                       时 (sec)
+                                                                                                       检验数量 不良数  不良率
+
+
+
+                        Power on to check whether the air
+        Air Pump Test            pump and EVAP            DC power supply                                                                                                                                                    重新测试正常 3PCS ;
+1                                                                                       100%          0%            384        4         1.04%                                               15         15
+          气泵测试                knob is working properly       直流电源                                                                                                                                                            3 PCS show normal performance after re‑test.
+                        通电检查气泵,气压调节钮是否正常工作
+
+
+                                                                                                                                                                                                                           功率偏高2PCS，更换油槽1PCS；重新测试正
+                          12.7V power on test. Passing power                                                                                                                                                               常 1PCS ;
+                                  consumption ranges                                                                                                                                                                       功率偏低2PCS，重新测试正常 1PCS ；
+                         are : S11/S13 : 32.3~34.0W,S12/S14 :                                                                                                                                                   Video 视频 无功率1PCS，更换线束后正常。
+                                                                                                   25%+all
+         Power Test                  30.1~31.8W).             DC power supply                                                                                                                                  Procedure 操 Power over‑spec: 2 PCS; oil sump replaced for
+2                                                                                       100%        failed          384        5         1.30%                                               20         20
+          功率测试          12.7V电源通电测试 ，开机3秒功耗在规                    直流电源                                                                                                                                             作程序      1 PCS, re‑test passed for 1 PCS.
+                                                                                                    units
+                               定范围内（S11/S13范围为                                                                                                                                                                   Log 记录 Power under‑spec: 2 PCS; re‑test passed for 1
+                              32.3~34.0W,S12/S14 范围为                                                                                                                                                                       PCS.
+                                30.1~31.8W ）则为合格                                                                                                                                                                           No power output: 1 PCS, function normal after
+                                                                                                                                                                                                                           wire harness replacement.
+
+
+                        12PSI pressure decay test to check seal
+                                        - after                 Differential                                                                                                                                    Video 视频
+       Smoke Machine                                                                               25%+all                                                                                                                 更换油槽2PCS；重新测试正常1PCS
+                                30seconds >=11.8PSI.             pressure                                                                                                                                      Procedure 操
+3        Leak Test                                                                      100%        failed          384        3         0.78%                                                           0                 Oil sump replaced for 2 PCS; re‑test passed for
+                         充气测试 ，是否漏气 ，12PSI气压衰 gauge / Air pump                                                                                                                                                    作程序
+       发烟器漏气测试                                                                                      units                                                                                                                  1 PCS.
+                               减,30秒后气压不能低于                     差压计/气泵                                                                                                                                           Log 记录
+                                      11.8PSI。
+
+
+
+
+                       EVAP knob pointing to EVAP, check                                                                                                                                                                     外壳划痕1PCS、螺丝滑丝1PCS、拉铆螺母直
+       Final Packaging         accessories,and                         Visual                                                                                                                                                径大1PCS
+4                                                                                       100%          0%            384        3         0.78%                                               8           8
+        最终包装检查 support sticker 旋钮位置指向EVAP，物                            目测                                                                                                                                                    Housing scratch: 1 PCS; stripped screw: 1 PCS;
+                              品放置位置 ，贴纸                                                                                                                                                                                      over‑size diameter of rivet nut: 1 PCS
+
+
+
+
+                                                                                                                                                                                                                                                                              Production                     Factory
+                                                                                                                                                                                                                                                                              Supervisor                     Manager
+                                                                                                                                                                                                                                                                               生产主管            ZHM          工厂负责人            LRX
+                                                                                                                                                                                                                                                                                           2026年8月27日                  2026年8月27日
+
+                                                                                                                                                                                                                                                                                               US Customer approval
+                                                                                                                                                                                                                                                                                                   美国客户批准
+
+
+
+
+                                                                                                                      Suzhou Aotuline Precision Manufacturing Co., Ltd.苏州奥途莱精密智造有限公司
+

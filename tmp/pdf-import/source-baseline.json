@@ -1,0 +1,242 @@
+[
+  {
+    "key": "S1-01",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+    "text": "tmp/pdf-import/S1-01.txt",
+    "bytes": 1117009,
+    "sha256": "8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+    "pages": 5
+  },
+  {
+    "key": "S1-02",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+    "text": "tmp/pdf-import/S1-02.txt",
+    "bytes": 832947,
+    "sha256": "ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+    "pages": 5
+  },
+  {
+    "key": "S1-03",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+    "text": "tmp/pdf-import/S1-03.txt",
+    "bytes": 782235,
+    "sha256": "f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+    "pages": 5
+  },
+  {
+    "key": "S1-04",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+    "text": "tmp/pdf-import/S1-04.txt",
+    "bytes": 749216,
+    "sha256": "9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+    "pages": 5
+  },
+  {
+    "key": "S1-05",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+    "text": "tmp/pdf-import/S1-05.txt",
+    "bytes": 1016329,
+    "sha256": "3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+    "pages": 5
+  },
+  {
+    "key": "S1-06",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+    "text": "tmp/pdf-import/S1-06.txt",
+    "bytes": 714188,
+    "sha256": "72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+    "pages": 5
+  },
+  {
+    "key": "S1-07",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+    "text": "tmp/pdf-import/S1-07.txt",
+    "bytes": 648608,
+    "sha256": "c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+    "pages": 5
+  },
+  {
+    "key": "S1-08",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+    "text": "tmp/pdf-import/S1-08.txt",
+    "bytes": 685805,
+    "sha256": "d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+    "pages": 5
+  },
+  {
+    "key": "S1-09",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+    "text": "tmp/pdf-import/S1-09.txt",
+    "bytes": 999606,
+    "sha256": "90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+    "pages": 5
+  },
+  {
+    "key": "S1-10",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+    "text": "tmp/pdf-import/S1-10.txt",
+    "bytes": 758531,
+    "sha256": "b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+    "pages": 5
+  },
+  {
+    "key": "S1-11",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+    "text": "tmp/pdf-import/S1-11.txt",
+    "bytes": 842069,
+    "sha256": "c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+    "pages": 5
+  },
+  {
+    "key": "S1-12",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+    "text": "tmp/pdf-import/S1-12.txt",
+    "bytes": 660195,
+    "sha256": "2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+    "pages": 5
+  },
+  {
+    "key": "S1-13",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+    "text": "tmp/pdf-import/S1-13.txt",
+    "bytes": 663860,
+    "sha256": "a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+    "pages": 5
+  },
+  {
+    "key": "S1-14",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/8.27.26AP自制-检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.27(2)(1).pdf",
+    "text": "tmp/pdf-import/S1-14.txt",
+    "bytes": 470600,
+    "sha256": "e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7",
+    "pages": 2
+  },
+  {
+    "key": "S1-15",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+    "text": "tmp/pdf-import/S1-15.txt",
+    "bytes": 714509,
+    "sha256": "1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+    "pages": 5
+  },
+  {
+    "key": "S15-01",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/5.21.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.5.25.pdf",
+    "text": "tmp/pdf-import/S15-01.txt",
+    "bytes": 756500,
+    "sha256": "4e9b697b497b4688ae3c92d76c3fc4c65521987735835691da2f3e996e2b9841",
+    "pages": 5
+  },
+  {
+    "key": "S15-02",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/5.25.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+    "text": "tmp/pdf-import/S15-02.txt",
+    "bytes": 637130,
+    "sha256": "5e467722aea54c9b9ce9478f4375fa3aa9b6073bcd5dc432011335c09ed944c6",
+    "pages": 5
+  },
+  {
+    "key": "S15-03",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/6.11.26-AP检查资HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+    "text": "tmp/pdf-import/S15-03.txt",
+    "bytes": 780759,
+    "sha256": "8086d0b050ae1f3a984b4cd50bd0b55a02423273761ece10fb73115af1117ed4",
+    "pages": 5
+  },
+  {
+    "key": "S15-04",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/6.18.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+    "text": "tmp/pdf-import/S15-04.txt",
+    "bytes": 657765,
+    "sha256": "6050a0665f32ce5d0c32a2f9b681c3ec0a64ff3a1a131dba88fe5c0b4e1b5b34",
+    "pages": 5
+  },
+  {
+    "key": "S15-05",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/6.25.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.3.pdf",
+    "text": "tmp/pdf-import/S15-05.txt",
+    "bytes": 708645,
+    "sha256": "4022220bd3d2930243a9bfb9c8b6ea6d16278c849d29aef5e2256fdd0848a0a9",
+    "pages": 5
+  },
+  {
+    "key": "S15-06",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/6.3.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List- 2026.6.8.pdf",
+    "text": "tmp/pdf-import/S15-06.txt",
+    "bytes": 772938,
+    "sha256": "d31b1b409eb36aba03d375a169924fbc240644903ae7efc90286ee9a66f131c1",
+    "pages": 5
+  },
+  {
+    "key": "S15-07",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/7.10.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+    "text": "tmp/pdf-import/S15-07.txt",
+    "bytes": 625192,
+    "sha256": "4ae413145af7110d7663511531514e2b71687a501b88709f0d1c2f10d4ced9b8",
+    "pages": 5
+  },
+  {
+    "key": "S15-08",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/7.20.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+    "text": "tmp/pdf-import/S15-08.txt",
+    "bytes": 721413,
+    "sha256": "a307b488eaebcb35d31bd0c1c5f9db6b6f4919b9fef62e6ff11abc21c1caf11e",
+    "pages": 5
+  },
+  {
+    "key": "S15-09",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/7.27.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+    "text": "tmp/pdf-import/S15-09.txt",
+    "bytes": 829381,
+    "sha256": "44170521239a6b1560d54ae25a730394110b3d68a4d0dd5a02eec362e58894f2",
+    "pages": 5
+  },
+  {
+    "key": "S15-10",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/7.3.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+    "text": "tmp/pdf-import/S15-10.txt",
+    "bytes": 645149,
+    "sha256": "ec5d239772439cda939e72697215b8023cbca1335961132e709e2b51465f3c02",
+    "pages": 5
+  },
+  {
+    "key": "S15-11",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/8.12.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+    "text": "tmp/pdf-import/S15-11.txt",
+    "bytes": 838687,
+    "sha256": "4557c3896e9b2b3c9671e606b7002f89064919a4f73df6706ba3faddb9e989b7",
+    "pages": 5
+  },
+  {
+    "key": "S15-12",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/8.19.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+    "text": "tmp/pdf-import/S15-12.txt",
+    "bytes": 743340,
+    "sha256": "ee1403868ee0878f596f858947aa35ef373bfd63e7d90642626421a51bfbd957",
+    "pages": 5
+  },
+  {
+    "key": "S15-13",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/8.27.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.27(1).pdf",
+    "text": "tmp/pdf-import/S15-13.txt",
+    "bytes": 555124,
+    "sha256": "8cbca43bbc06df922f7e34e721b1ad4261459792e11dc4fae40b83586de08ad4",
+    "pages": 5
+  },
+  {
+    "key": "S15-14",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/8.5.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.7.df.pdf",
+    "text": "tmp/pdf-import/S15-14.txt",
+    "bytes": 911748,
+    "sha256": "f46d9feab7eebd66436c090eecb749577c4a6137fd25ddb4c4fe877546665f17",
+    "pages": 5
+  },
+  {
+    "key": "S15-15",
+    "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/9.3.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+    "text": "tmp/pdf-import/S15-15.txt",
+    "bytes": 555147,
+    "sha256": "7616e6664f505652a3ef0667b2c2aa235c59401e32494b4fe4c878295e04d603",
+    "pages": 5
+  }
+]

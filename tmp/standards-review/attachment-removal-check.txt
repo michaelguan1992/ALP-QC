@@ -1,0 +1,2 @@
+Temporary attachment acceptance fixture.
+Upload, reopen, remove, and reload.

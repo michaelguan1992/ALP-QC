@@ -1,0 +1,81 @@
+{
+  "generatedAt": "2026-09-29T00:00:00.000Z",
+  "format": "masterqc-pdf-history",
+  "sourceCount": 2,
+  "sourcePageCount": 10,
+  "inspectionPageCount": 6,
+  "originalInspectionRowCount": 33,
+  "supplementalMissingRowCount": 0,
+  "referenceDraftCount": 2,
+  "families": {
+    "s11-s14": {
+      "sources": 1,
+      "sourcePages": 5,
+      "inspectionPages": 3,
+      "originalInspectionRows": 16,
+      "supplementalMissingRows": 0,
+      "referenceDraft": {
+        "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+        "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+        "printedVersion": "25.10.29",
+        "effectiveDate": "2026-05-26"
+      }
+    },
+    "s15": {
+      "sources": 1,
+      "sourcePages": 5,
+      "inspectionPages": 3,
+      "originalInspectionRows": 17,
+      "supplementalMissingRows": 0,
+      "referenceDraft": {
+        "sourceId": "pdf-7616e6664f505652a3ef0667b2c2aa235c59401e32494b4fe4c878295e04d603",
+        "fileName": "9.3.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+        "printedVersion": "25.10.29",
+        "effectiveDate": "2026-09-03"
+      }
+    }
+  },
+  "sourcePdfBytesApprox": 1672158,
+  "sourcePdfMiBApprox": 1.59,
+  "unresolvedBuilderFindingCount": 3,
+  "anomalies": [
+    {
+      "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+      "inspectionId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 2,
+      "message": "The printed specification names model(s) outside the S11-S14 source family. The printed specification is preserved and no product model is inferred from it.",
+      "referencedModels": [
+        "S15"
+      ]
+    },
+    {
+      "sourceId": "pdf-7616e6664f505652a3ef0667b2c2aa235c59401e32494b4fe4c878295e04d603",
+      "inspectionId": "pdf-7616e6664f505652a3ef0667b2c2aa235c59401e32494b4fe4c878295e04d603-page-001",
+      "page": 1,
+      "code": "source-inspected-quantity-exceeds-batch-quantity",
+      "rowNo": 2,
+      "message": "The printed inspected quantity exceeds the printed page batch quantity; both printed values are preserved without correction.",
+      "batchQuantity": 1152,
+      "sourceInspectedQty": 4000,
+      "sourceInspectedQtyRaw": "4000"
+    },
+    {
+      "sourceId": "pdf-7616e6664f505652a3ef0667b2c2aa235c59401e32494b4fe4c878295e04d603",
+      "inspectionId": "pdf-7616e6664f505652a3ef0667b2c2aa235c59401e32494b4fe4c878295e04d603-page-001",
+      "page": 1,
+      "code": "source-inspected-quantity-exceeds-batch-quantity",
+      "rowNo": 3,
+      "message": "The printed inspected quantity exceeds the printed page batch quantity; both printed values are preserved without correction.",
+      "batchQuantity": 1152,
+      "sourceInspectedQty": 4000,
+      "sourceInspectedQtyRaw": "4000"
+    }
+  ],
+  "purchaseOrdersLinked": 0,
+  "operationalBatchesCreated": 0,
+  "purchaseOrderProgressContribution": 0,
+  "packageBytes": 2447174,
+  "packageMiB": 2.33
+}

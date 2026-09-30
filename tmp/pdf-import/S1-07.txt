@@ -1,0 +1,371 @@
+                                                                                                                                   IQC Inspection specification 来料检验规范
+      Item Name 品名                                      HyperSmoke                              Batch Qty 批次数量                      4512              Batch Date 批次日期                      2026.7.10                    Recorded by 记录人员                                       闫鹏/YP                 Version 版本    25.10.29    Page 页数        1/1
+
+
+
+      Special Notes            UI-051526C 本批发货数量 Quantity of this wholesale: ：
+      本批次特殊情况                  S11：1440PCS    S12：768PCS       S14：2304PCS
+
+                                                                                                                                             Quality control points                        Defective rate history
+                                                                                                                                                   品质管制点                                       历史不良率记录
+                                                                                                     Inspection                                                                                                                        Time   Average time
+                                                                                                                         Inspection   Loging                                                                                                                      Video 视频
+                                    Specifications and dimensions/inspection points                                                                                                                                                           per unit/单                               Remarks
+序号      QC Task 检验项目                                                                              devices/methods        Frequencey Frequency                                                                                          时数      件平均工时
+                                                                                                                                                                                                                                                              Procedure 操作程序
+                                                   规格尺寸/检验要点                                                             检查百分比 记录百分比 Inspection      Defective   Defective   7/3    6/25    6/22   6/11    6/3   5/26   5/21   5/13                                Log 记录                备注
+                                                                                                   检测仪器/方法                                                                                                                            (sec)       (sec)
+                                                                                                                                               qty      qty         rate     qty    qty      qty   qty     qty   qty     qty   qty
+                                                                                                                                              检验数量     不良数         不良率       4512   4128    4512   4896   4896   4512   4896   4176
+
+
+
+
+                                                                                               Resistance tester /                 2%+all                                                                                                                        Video 视频
+        Heating Coil Test        The resistence of the heating coil is 3.0-3.3Ω, 20
+1                                                                                                   Multimeter             100%    failed    4512       26        0.58%      0.29% 0.10% 0.04% 0.49% 0.39% 0.04% 0.02% 0.07%            5          5         Procedure 操作程序
+            发热丝测试                      loops发热丝欧姆值为 3.0-3.3Ω，圈数为20圈
+                                                                                                电阻测试仪 /万用表                          units                                                                                                                         Log 记录
+
+
+
+                                                                                               DC power supply / air
+                                                                                                pump / differential
+     DN10-1.5KPA Check Valve    After applying grease, the valve can be opened with 3                                                                                                                                                                            Video 视频
+                                                                                               pressure gauge / flow               5%+all
+2    Test DN10-止回阀芯测试测                                   KPA                                                               20%                —         —           —         —     —       —      —      —      —      —      —       30          6         Procedure 操作程序
+                                                                                                       meter                       failed
+                试                            涂油后测试阀值范围 3KPA内通气                                直流电源/气泵/差压表/流量                                                                                                                                                      Log 记录
+                                                                                                                                    units
+                                                                                                         计
+
+
+                                                                                                DC power supply / air
+                                  After applying grease, test with 8KPA and 6KPA air     pump / differential
+                                                                                                                                                                                                                                                                 Video 视频
+      DN8-7KPA Check Valve     presusre. The valve should allow ventilation with 8 KPA  pressure gauge / flow                      35%+all
+3                                                                                                                          20%                —         —           —         —     —       —      —      —      —      —      —       45          9         Procedure 操作程序
+      Test DN8-止回阀芯测试                  and should not allow ventilation at 6 KPA                meter                              failed
+                                                                                       直流电源/气泵/差压表/流量                                                                                                                                                             Log 记录
+                                  涂油后测试阀值范围 6-8KPA，8KPA内通气且6KPA不能通气                                                                 units
+                                                                                                         计
+
+
+                                 with 12.7V power, air pump flow >2.0L/min, time to reach 6 PSI  DC power supply / air
+                                within 100 seconds with a 2L container, observe flow rate change  pump / differential
+                                   when the bleeding port of the air pump is blocked and then                                                                                                                                                                    Video 视频
+          Air Pump Test                                                                          pressure gauge / flow             10%+all
+4                                     released (the change value should be within 0.1PSI).                                 100%              4512      170        3.77%      3.88% 3.08% 2.88% 14.58% 1.98% 1.60% 1.10% 2.30%          56         56         Procedure 操作程序
+             气泵测试              12.7V供电，气泵流量大于2.0L/min，给2L容器充气要在100秒内达到6PSI气                              meter                     failed
+                                                                                                                                                                                                                                                                  Log 记录
+                                压并记录时间。观察气泵泄气口堵住及松开时是否有流量变化 （变化值在 直流电源/气泵/差压表/                                                      units
+                                                           0.1PSI内）                                      流量计
+
+                                                                                                                                                                                                                                                                                                         样品         来料
+
+       Circuit Board Test                          PWM，appearnce check                             Oscilliscope
+5                                                                                                                          0.1%      0%       —         —           —         —     —       0%     0%     0%     0%     0%     —       30        0.03
+           电路板测试                                   检查占空比 ，外观检查                                        示波器
+
+
+
+                                 Hardness, length, inner & outer diameters, and
+                                                                                    Hardness tester /                                                                                                                                                            Video 视频
+     1.25m Hose Test 1.25m发    flexibility. take pictures of 3x hoses with golden
+6                                                                                 Tape measure硬度计/卷                       0.25%      0%       24        0         0.0%        0%    0%      0%     0%      _      _      _     0%      65      0.1625        Procedure 操作程序
+             烟管测试           sample. Record hardness. 硬度、长度、内外直径、柔顺不能折
+                                                                                            尺
+                               后不通气。抽取3条管子与封样一起拍对比照 。记录硬度。
+
+
+
+                               How many KG until the oil packet burst. Record everytime
+     Oil Pakcet Destructive                                                                       Scale / Weight
+7                                                  weight increased.                                                      0.10%      0%        5        0           0%       0.00% 0.00% 0.00% 0.00% 0.00% 0.00% 0.00% 0.00%           10        0.01
+        Test 油包破坏测试                                                                                  称 / 法码
+                                   增加砝码重量直到油包破裂 。每增加重量做一次记录 。
+
+
+
+                                 The weight of the oil packet is 25 grams. Use a 5kg                                                                                                                                                                                                             Production                    Factory
+         Oil Packet Test                                                                          Scale / Weight
+8
+             油包测试
+                                           weight to pressurize the packet
+                                             油包重量25g,用5kg法码压油包
+                                                                                                     称 / 法码
+                                                                                                                            1%       0%       45        0           0%       0.00% 0.00% 0.00% 0.00% 0.00% 0.00% 0.00% 0.00%           10        0.1                                             Supervisor
+                                                                                                                                                                                                                                                                                                  生产主管            JXY
+                                                                                                                                                                                                                                                                                                                               Manager
+                                                                                                                                                                                                                                                                                                                              工厂负责人
+                                                                                                                                                                                                                                                                                                                                             TYF
+                                                                                                                                                                                                                                                                                                              2026年7月10日                  2026年7月10日
+
+
+                                                                                                                                                                                                                                                                                                                   US Customer approval
+9
+                                                                                                                                                                                                                                                                                                                       美国客户批准
+
+
+
+
+10
+
+
+
+
+                                                                                                                                  Suzhou Youmite Intelligent Technology Co., Ltd.苏州优米特智能科技有限公司
+
+
+
+
+      d:\Users\DELL\Desktop\ 出货资料 \主控文件\7月\7月10日\UI检查资料 HyperSmoke检验规范 （主控文件 ） HyperSmoke Master QC List 25.10.29.xlsx
+                                                                                                                           OQC Inspection specification 成品检验规范
+      Item Name 品名                                     HyperSmoke                         Batch Qty 批次数量                   4512               Batch Date 批次日期                      2026.7.10              Recorded by 记录人员                                                        闫鹏/YP                                                Version 版本     25.10.29   Page 页数        1/1
+
+
+
+      Special Notes
+      本批次特殊情况
+
+
+                                                                                                                                     Quality control points                          Defective rate history
+                                                                                                                                           品质管制点                                         历史不良率记录
+                                                                                               Inspection        Inspection   Loging                                                                                                   Average time         Video 视频
+                                   Specifications and dimensions/inspection points                                                                                                                                            Time 时                                                             Remarks
+序号      QC Task 检验项目                                                                        devices/methods      Frequencey Frequency
+                                                                                                                                                                                                                              数 (sec)
+                                                                                                                                                                                                                                      per unit/单件       Procedure 操作程序
+                                                  规格尺寸/检验要点                                                      检查百分比 记录百分比 Inspection      Defective   Defective   7/3    6/25   6/22   6/11    6/3    5/26   5/21   5/13           平均工时(sec)              Log 记录                                备注
+                                                                                             检测仪器/方法
+                                                                                                                                       qty      qty         rate     qty    qty     qty   qty     qty    qty     qty   qty
+                                                                                                                                      检验数量     不良数         不良率       4512   4128   4512   4512   4896    4512   4896   4176
+
+
+
+
+                                Power   on    to  check whether the air pump and EVAP                                                                                                                                                                                    18PCS无功率，更换线束后正常
+          Air Pump Test                                                                     DC power supply
+1                                                knob is working properly                                          100%      0%      4512       18        0.40%      0.00% 0.07% 0.11% 0.09% 0.18% 0.20% 0.02% 0.29%            15         15                            18PCS of no power, normal after replacing the wiring
+             气泵测试                                                                               直流电源
+                                             通电检查气泵 ,气压调节钮是否正常工作                                                                                                                                                                                                         harness
+
+
+
+                                                                                                                                                                                                                                                                     43PCS功率偏高：28PCS更换油槽后正常 ，15PCS重新测试正常 ；
+                                                                                                                                                                                                                                                                     功率偏低40PCS：30PCS更换油槽后正常 ，锁紧主板螺母 2PCS，重
+                                                                                                                                                                                                                                                                     新测试正常 8PCS
+                                 12.7V power on test. Passing power consumption ranges                                                                                                                                                                               The power of 43PCS was too high: 28PCS were normal after
+                                                                                                                           25%+all                                                                                                                        Video 视频
+                                    are: S11/S13: 32.3~34.0W,S12/S14: 30.1~31.8W).          DC power supply                                                                                                                                                          replacing the oil tank, and 15PCS were normal after
+2      Power Test功率测试                                                                                              100%     failed   4512       83        1.84%      2.02% 3.00% 2.44% 1.11% 1.47% 0.64% 1.10% 1.56%            20         20         Procedure 操作程序
+                               12.7V电源通电测试 ，开机3秒功耗在规定范围内 （S11/S13范围为                            直流电源                         units                                                                                                                                   retesting.
+                                                                                                                                                                                                                                                           Log 记录
+                                     32.3~34.0W,S12/S14 范围为 30.1~31.8W ）则为合格                                                                                                                                                                                         The power was 40PCS low: After replacing the oil tank
+                                                                                                                                                                                                                                                                     with 30PCS, it was normal. After tightening the main
+                                                                                                                                                                                                                                                                     board nut for 2PCS and retesting, it was normal for 8PCS
+
+
+
+
+                                                                                                                                                                                                                                                                     86PCS更换油槽；10PCS更换气泵；23PCS重新测试正常 ；2PCS重新
+                                  12PSI pressure decay test to check seal - after
+                                                                                         Differential pressure             25%+all                                                                                                                        Video 视频   安装进气管
+     Smoke Machine Leak Test                    30seconds >=11.8PSI.
+3                                                                                         gauge / Air pump差压       100%     failed   4512      121        2.68%      1.57% 0.51% 1.26% 0.69% 1.21% 4.72% 2.41% 1.96%                        0         Procedure 操作程序 Replace the oil tank with 86PCS; Replace the air pump
+          发烟器漏气测试                充气测试，是否漏气，12PSI气压衰减,30秒后气压不能低于                                                              units
+                                                                                                 计/气泵                                                                                                                                                      Log 记录    with 10PCS. 23PCS were retested and found normal.
+                                                      11.8PSI。
+                                                                                                                                                                                                                                                                     Reinstall the intake pipe of 2PCS
+
+
+
+
+                                                                                                                                                                                                                                                                         贴纸凸起、折痕、上盖脏污等
+     Final Packaging 最终包装         EVAP knob pointing to EVAP, check accessories,and
+4                                                                                             Visual 目测            100%      0%      4512       11        0.24%      0.27% 0.29% 0.27% 0.24% 0.29% 0.33% 0.22% 0.23%             8          8                            Stickers have protrusions, creases, and the upper cover
+               检查                support sticker 旋钮位置指向 EVAP，物品放置位置 ，贴纸
+                                                                                                                                                                                                                                                                         is dirty, etc
+
+
+
+
+                                                                                                                                                                                                                                                                                                                                   Production                     Factory
+                                                                                                                                                                                                                                                                                                                                   Supervisor
+                                                                                                                                                                                                                                                                                                                                    生产主管            JXY           Manager
+                                                                                                                                                                                                                                                                                                                                                                 工厂负责人        TYF
+                                                                                                                                                                                                                                                                                                                                                2026年7月10日                  2026年7月10日
+
+                                                                                                                                                                                                                                                                                                                                                     US Customer approval
+                                                                                                                                                                                                                                                                                                                                                         美国客户批准
+
+
+
+
+                                                                                                                          Suzhou Youmite Intelligent Technology Co., Ltd.苏州优米特智能科技有限公司
+
+
+
+
+      d:\Users\DELL\Desktop\ 出货资料 \主控文件\7月\7月10日\UI检查资料 HyperSmoke检验规范 （主控文件 ） HyperSmoke Master QC List 25.10.29.xlsx
+                                                                                              OQC Inspection specification 成品检验规范
+                                                                   Batch Qty                                Batch Date                                                   Recorded by                                                                                          25.10.2       Page
+     Item Name 品名                     HyperSmoke                                       4512                                               2026/7/15                                                                  张慧敏/ZHM                              Version 版本                                           1/1
+                                                                   批次数量                                      批次日期                                                         记录人员                                                                                                   9          页数
+
+                           UI-051526C
+      Special Notes
+     本批次特殊情况               本批发货数量 Quantity of this wholesale:
+                           S11：1440PCS S12：768PCS S14：2304PCS
+                                                                                              Quality control points                        Defective rate history
+                                                                               Inepection/re       品质管制点                                      历史不良率记录                                               Link
+                                                                   Inspection
+                                   Specifications and                              cord                                                                                                  Time Video/Procedu
+                                                                 devices/metho                                                                                                                                                 Remarks
+序号      QC Task 检验项目          dimensions/inspection points                      percentage Inspecti                                                                                      时数      re/Repor
+                                                                       ds                                                                                                                                                       备注
+                                  规格尺寸/检验要点                                    抽检/记录 百 on qty Defectiv Defectiv          7.7     6.24    6.16    6.8     6.1     5.26    5.19    5.11    (sec) 是否有视频 /标
+                                                                 检测仪器/方法                               e qty   e rate    qty     qty     qty     qty     qty     qty     qty     qty
+                                                                                   分比        检验数                                                                                                准程序/报告
+                                                                                                      不良数 不良率            304     367     308     404     319     488     296     333
+                                                                                              量
+
+
+                            Power on to check whether the air
+                             pump and EVAP knob is working         DC power
+         Air Pump Test
+1                                       properly                    supply       10% / 0%      380      0      0.00%     0.00%   0.00%   0.32%   0.00%   0.00%   0.00%   0.00%   0.00%    15      Y/Y/Y
+            气泵测试
+                           通电检查气泵,气压调节钮是否正常工                       直流电源
+                                           作
+
+
+
+                            12.7V power on test. Passing power
+                              consumption ranges are : S15 :                       10% /
+                                                                   DC power
+           Power Test                  30.1~31.8W.                                50%+all
+2                                                                   supply                     380      0      0.00%     0.00%   0.82%   0.65%   0.00%   0.31%   0.00%   0.68%   0.60%    80      Y/Y/Y
+            功率测试           12.7V电源通电测试 ，开机3秒功耗在                                    failed
+                                                                   直流电源
+                                 规定范围内 （S15范围为                                     units
+                                  30.1~31.8W ）则为合格
+
+
+
+                                                                  Differential
+                           20PSI pressure decay test to check                      10% /
+      Smoke Machine Leak                                            pressure
+                           seal - after 30seconds >=19.8PSI.                      50%+all
+3            Test                                                  gauge/Air                   380      0      0.00%     0.00%   0.27%   0.32%   0.00%   0.00%   0.00%   0.34%   0.30%    80      Y/Y/Y
+                           充气测试，是否漏气，20PSI气压衰                                      failed
+        发烟器漏气测试                                                      pump
+                           减,30秒后气压不能低于 19.8PSI。                                   units
+                                                                  差压计/气泵
+
+
+                                                                                                                                                                                                              2个银色标签未贴好
+                                                                                                                                                                                                              2 silver labels are improperly affixed.
+                                                                                                                                                                                                              4个拉铆螺栓口有刻痕
+                                                                                                                                                                                                              4 rivet nut hole scratched.
+
+
+                           EVAP knob pointing to EVAP, check
+         Final Packaging     accessories,and support sticker
+4                                                                 Visual 目测      10% / 0%      380      6      1.58      1.64%   5.45%   6.17%   3.71%   4.70%   12.50% 13.18% 17.11%     8       Y/Y/Y
+          最终包装检查           旋钮位置指向 EVAP，物品放置位置，
+                                          贴纸
+
+
+
+
+                                                                                                                                                                                                                                                          Production                       Factory
+                                                                                                                                                                                                                                                          Supervisor                       Manager
+                                                                                                                                                                                                                                                           生产主管                           工厂负责人
+
+                                                                                                                                                                                                                                                        2026年7月15日           ZHM        2026年7月15日         LRX
+                                                                                                                                                                                                                                                        QC Manger Approval              US Customer approval
+                                                                                                                                                                                                                                                           品管经理批准                           美国客户批准
+
+
+
+
+                                                                                                                                                                                                                                                                LRX
+                                                                                                                                                                                                                                                             2026/7/15
+
+                                                                                   Suzhou Aotulai Precision Manufacturing Co., Ltd.苏州奥途莱精密智造有限公司
+日期/版本号
+                                                修改内容 Change log
+Date/Version#
+
+                1. IQC 发热丝的测试记录百分比下调到2%+所有不良品/IQC heating coil,
+                    test's record percentage reduced to 2%+all failed units
+                2.调整DN10测试抽检/记录百分比到 20%/5%+所有不良品/update DN10
+                    inspection/record percentage to 20%/5%+all failed units。
+                3调整DN8测试抽检/记录百分比到 20%/35%+所有不良品/update DN8
+                    inspection/record percentage to 20%/35%+all failed units
+                4. OQC功率测试/记录百分比下调到100%/25%+所有不良品/The OQC power test/record
+   26.4.24      percentage has been adjusted to 100%/25% + all defective items.
+                5.OQC发烟器漏气测试/记录百分比下调到100%/25%+所有不良品/The OQC smoke
+                generator's air leakage test/recorded percentage has been adjusted to 100%/25% + all
+                defective items.
+                6.IQC油包测试/记录百分比下调到1%/0% /The IQC oil encapsulation test/record
+                percentage has been reduced to 1%/0%.
+                7.IQC\OQC更新工时系数、新增单件平均检验工时/Added average inspection time per unit
+                for IQC/OQC
+                1. 取消IQC油罐半成品密封测试/cancel IQC chamber pressure decay test
+  25.10.29      2. 调整DN10测试抽检/记录百分比到 20%/50%+所有不良品/update DN10
+                inspection/record percentage to 20%/50%+all failed units
+
+                1. IQC 气泵测试电压设定在12.7V/set IQC pump test with 12.7V power
+  25.10.15      2. OQC 功率测试通过范围改成S11/S13: 32.3~34.0W,S12/S14: 30.1~31.8W/update OQC
+                power test passing range to S11/S13: 32.3~34.0W,S12/S14: 30.1~31.8W
+
+                1. 删除IQC项目排气宝塔密封圈测试，气泵橡胶旋钮，烟嘴，气孔旁路，圆锥/remove
+  25.09.09
+                IQC item Exhaust Barb O-Ring, Pump Bleeding Knob, Nozzle, Gas Port Bypass, Cone
+
+
+                1. 调整DN10测试抽检/记录百分比到 50%/50%+所有不良品/update DN10
+  25.08.13
+                inspection/record percentage to 50%/50%+all failed units
+
+                1. 调整DN8和DN10测试抽检/记录百分比到 20%/50%+所有不良品/update DN8 and DN10
+  25.06.17      inspection/record percentage to 20%/50%+all failed units
+                2. 降低气泵记录百分比到10%+所有不良品/reduce pump test record percentage to 10%+all
+                failed units
+                1. 调整表格宽度以便阅读/adjust column width for easy reading
+  25.06.02
+                2. 调整OQC #2，#3顺序/switched OQC #2,#3 test item order
+           1. IQC气泵测试记录百分比下调到50%+所有不良品/reduced record percentage of the
+           pump test in IQC to 50%+all failed units
+           2. IQC发烟管测试增加硬度记录，下调抽检百分比到0.25%/added hardness record in IQC
+           hose test and reduce inpection rate to 0.25%
+           3. IQC圆锥检测百分比降到0.5%/reduced IQC cone inspection to 1%
+           4. IQC气孔旁路检测百分比降到0.5%/reduced IQC gas port bypass inspection to 0.5%
+25.05.09
+           5. OQC功率测试记录百分比下调到50%+所有不良品/reduced record percentage of the
+           power on test in OQC to 50%+all failed units
+           6. IQC增加油包破坏测试/added oil packet destructive test
+           7. IQC 发热丝，DN0和DN8的检测记录百分比下调到10%+所有不良品/IQC heating coil,
+           DN-10 and DN-8 test's record percentage reduced to 10%+all failed units
+           8. OQC气泵测试记录百分比下调到0%/OQC air pump test record percentage reduced to 0%
+
+
+           1. 使用主控文件新模版 / use new master QC list template
+           2. 增加1.25m发烟管测试 照片记录要求 / added picture record requirement to 1.25m hose
+           Test in OQC
+           3. 增加OQC发烟器漏气测试通过范围 / added OQC Leak Test passing range
+           4. 减去DN8，DN10噪音检测 / remove DN8, DN10 noise check
+           5. 修改电路板检测方法 / changed circuit board testing method
+           6. 修改油罐检测方法，增加气压衰减测试及通过条件 / changed oil chamber testing
+25.04.14   method and added passing pressure decay test pressure
+           7. 删除螺丝松紧检测 / removed screw tightness test
+           8. 删除钩链检测 / removed chain hook test
+           9. 更新油包测试方法 / updated oil packet test method
+           10. 油罐和成品气压衰减时间缩短到30秒，标准改成不低于11.8PSI / oil chamber and
+           assembled S1 pressure decay testing time reduced to 30secs, and pressure cannot be lower
+           than 11.8PSI.
+           11. 删除包装盒检测 / removed packing box inspection
+           12. 删除油箱盖粘性圆盘检测 / removed gas cap adhesive inspection
+

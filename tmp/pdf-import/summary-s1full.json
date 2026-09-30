@@ -1,0 +1,3372 @@
+{
+  "generatedAt": "2026-09-29T00:00:00.000Z",
+  "format": "masterqc-pdf-history",
+  "sourceCount": 16,
+  "sourcePageCount": 77,
+  "inspectionPageCount": 47,
+  "originalInspectionRowCount": 253,
+  "supplementalMissingRowCount": 0,
+  "referenceDraftCount": 2,
+  "families": {
+    "s11-s14": {
+      "sources": 15,
+      "sourcePages": 72,
+      "inspectionPages": 44,
+      "originalInspectionRows": 236,
+      "supplementalMissingRows": 0,
+      "referenceDraft": {
+        "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+        "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+        "printedVersion": "25.10.29",
+        "effectiveDate": "2026-09-03"
+      }
+    },
+    "s15": {
+      "sources": 1,
+      "sourcePages": 5,
+      "inspectionPages": 3,
+      "originalInspectionRows": 17,
+      "supplementalMissingRows": 0,
+      "referenceDraft": {
+        "sourceId": "pdf-7616e6664f505652a3ef0667b2c2aa235c59401e32494b4fe4c878295e04d603",
+        "fileName": "9.3.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+        "printedVersion": "25.10.29",
+        "effectiveDate": "2026-09-03"
+      }
+    }
+  },
+  "sourcePdfBytesApprox": 12210867,
+  "sourcePdfMiBApprox": 11.65,
+  "unresolvedBuilderFindingCount": 57,
+  "anomalies": [
+    {
+      "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+      "inspectionId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 2,
+      "message": "The printed specification names model(s) outside the S11-S14 source family. The printed specification is preserved and no product model is inferred from it.",
+      "referencedModels": [
+        "S15"
+      ]
+    },
+    {
+      "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+      "inspectionId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 3,
+      "message": "The printed generic S1-family OQC row uses a 20 PSI leak threshold, which conflicts with the S11-S14 draft criterion. The source wording is preserved and no model is inferred.",
+      "mismatchBasis": "20 PSI OQC leak threshold",
+      "modelReferencePrinted": false
+    },
+    {
+      "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+      "inspectionId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 2,
+      "message": "The printed specification names model(s) outside the S11-S14 source family. The printed specification is preserved and no product model is inferred from it.",
+      "referencedModels": [
+        "S15"
+      ]
+    },
+    {
+      "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+      "inspectionId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 3,
+      "message": "The printed generic S1-family OQC row uses a 20 PSI leak threshold, which conflicts with the S11-S14 draft criterion. The source wording is preserved and no model is inferred.",
+      "mismatchBasis": "20 PSI OQC leak threshold",
+      "modelReferencePrinted": false
+    },
+    {
+      "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+      "inspectionId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 2,
+      "message": "The printed specification names model(s) outside the S11-S14 source family. The printed specification is preserved and no product model is inferred from it.",
+      "referencedModels": [
+        "S15"
+      ]
+    },
+    {
+      "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+      "inspectionId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 3,
+      "message": "The printed generic S1-family OQC row uses a 20 PSI leak threshold, which conflicts with the S11-S14 draft criterion. The source wording is preserved and no model is inferred.",
+      "mismatchBasis": "20 PSI OQC leak threshold",
+      "modelReferencePrinted": false
+    },
+    {
+      "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+      "inspectionId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 2,
+      "message": "The printed specification names model(s) outside the S11-S14 source family. The printed specification is preserved and no product model is inferred from it.",
+      "referencedModels": [
+        "S15"
+      ]
+    },
+    {
+      "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+      "inspectionId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 3,
+      "message": "The printed generic S1-family OQC row uses a 20 PSI leak threshold, which conflicts with the S11-S14 draft criterion. The source wording is preserved and no model is inferred.",
+      "mismatchBasis": "20 PSI OQC leak threshold",
+      "modelReferencePrinted": false
+    },
+    {
+      "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+      "inspectionId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184-page-003",
+      "page": 3,
+      "code": "mixed-or-partial-product-allocation",
+      "message": "Special Notes report one or more model quantities, but the page does not establish a single full-batch model; model and color remain null.",
+      "reportedProductQuantities": [
+        {
+          "model": "S11",
+          "color": null,
+          "printedColorRaw": null,
+          "quantity": 1440,
+          "raw": "S11:1440PCS",
+          "rawMentions": [
+            "S11:1440PCS"
+          ]
+        },
+        {
+          "model": "S13",
+          "color": null,
+          "printedColorRaw": null,
+          "quantity": 384,
+          "raw": "S13:384PCS",
+          "rawMentions": [
+            "S13:384PCS"
+          ]
+        },
+        {
+          "model": "S14",
+          "color": null,
+          "printedColorRaw": null,
+          "quantity": 2304,
+          "raw": "S14：2304PCS",
+          "rawMentions": [
+            "S14：2304PCS"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+      "inspectionId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 2,
+      "message": "The printed specification names model(s) outside the S11-S14 source family. The printed specification is preserved and no product model is inferred from it.",
+      "referencedModels": [
+        "S15"
+      ]
+    },
+    {
+      "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+      "inspectionId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 3,
+      "message": "The printed generic S1-family OQC row uses a 20 PSI leak threshold, which conflicts with the S11-S14 draft criterion. The source wording is preserved and no model is inferred.",
+      "mismatchBasis": "20 PSI OQC leak threshold",
+      "modelReferencePrinted": false
+    },
+    {
+      "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+      "inspectionId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4-page-001",
+      "page": 1,
+      "code": "mixed-or-partial-product-allocation",
+      "message": "Special Notes report one or more model quantities, but the page does not establish a single full-batch model; model and color remain null.",
+      "reportedProductQuantities": [
+        {
+          "model": "S11",
+          "color": null,
+          "printedColorRaw": null,
+          "quantity": 1440,
+          "raw": "S11：1440PCS",
+          "rawMentions": [
+            "S11：1440PCS"
+          ]
+        },
+        {
+          "model": "S12",
+          "color": null,
+          "printedColorRaw": null,
+          "quantity": 768,
+          "raw": "S12：768PCS",
+          "rawMentions": [
+            "S12：768PCS"
+          ]
+        },
+        {
+          "model": "S14",
+          "color": null,
+          "printedColorRaw": null,
+          "quantity": 2304,
+          "raw": "S14：2304PCS",
+          "rawMentions": [
+            "S14：2304PCS"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+      "inspectionId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 2,
+      "message": "The printed specification names model(s) outside the S11-S14 source family. The printed specification is preserved and no product model is inferred from it.",
+      "referencedModels": [
+        "S15"
+      ]
+    },
+    {
+      "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+      "inspectionId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 3,
+      "message": "The printed generic S1-family OQC row uses a 20 PSI leak threshold, which conflicts with the S11-S14 draft criterion. The source wording is preserved and no model is inferred.",
+      "mismatchBasis": "20 PSI OQC leak threshold",
+      "modelReferencePrinted": false
+    },
+    {
+      "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+      "inspectionId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4-page-003",
+      "page": 3,
+      "code": "mixed-or-partial-product-allocation",
+      "message": "Special Notes report one or more model quantities, but the page does not establish a single full-batch model; model and color remain null.",
+      "reportedProductQuantities": [
+        {
+          "model": "S11",
+          "color": null,
+          "printedColorRaw": null,
+          "quantity": 1440,
+          "raw": "S11：1440PCS",
+          "rawMentions": [
+            "S11：1440PCS"
+          ]
+        },
+        {
+          "model": "S12",
+          "color": null,
+          "printedColorRaw": null,
+          "quantity": 768,
+          "raw": "S12：768PCS",
+          "rawMentions": [
+            "S12：768PCS"
+          ]
+        },
+        {
+          "model": "S14",
+          "color": null,
+          "printedColorRaw": null,
+          "quantity": 2304,
+          "raw": "S14：2304PCS",
+          "rawMentions": [
+            "S14：2304PCS"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+      "inspectionId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6-page-001",
+      "page": 1,
+      "code": "special-note-product-quantities-do-not-match-batch-quantity",
+      "message": "Printed model quantities in Special Notes do not sum to the page batch quantity; the printed values are preserved.",
+      "batchQuantity": 3744,
+      "reportedQuantityTotal": 768
+    },
+    {
+      "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+      "inspectionId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6-page-001",
+      "page": 1,
+      "code": "mixed-or-partial-product-allocation",
+      "message": "Special Notes report one or more model quantities, but the page does not establish a single full-batch model; model and color remain null.",
+      "reportedProductQuantities": [
+        {
+          "model": "S12",
+          "color": "Yellow",
+          "printedColorRaw": "黄色",
+          "quantity": 384,
+          "raw": "S12：黄色384PCS",
+          "rawMentions": [
+            "S12：黄色384PCS",
+            "S12: Yellow 384PCS"
+          ]
+        },
+        {
+          "model": "S13",
+          "color": "Yellow",
+          "printedColorRaw": "黄色",
+          "quantity": 384,
+          "raw": "S13：黄色384PCS",
+          "rawMentions": [
+            "S13：黄色384PCS",
+            "S13: Yellow 384PCS"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+      "inspectionId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6-page-003",
+      "page": 3,
+      "code": "special-note-product-quantities-do-not-match-batch-quantity",
+      "message": "Printed model quantities in Special Notes do not sum to the page batch quantity; the printed values are preserved.",
+      "batchQuantity": 3744,
+      "reportedQuantityTotal": 2592
+    },
+    {
+      "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+      "inspectionId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6-page-003",
+      "page": 3,
+      "code": "mixed-or-partial-product-allocation",
+      "message": "Special Notes report one or more model quantities, but the page does not establish a single full-batch model; model and color remain null.",
+      "reportedProductQuantities": [
+        {
+          "model": "S11",
+          "color": "Red",
+          "printedColorRaw": "red",
+          "quantity": 720,
+          "raw": "S11-red：720PCS",
+          "rawMentions": [
+            "S11-red：720PCS"
+          ]
+        },
+        {
+          "model": "S14",
+          "color": "Red",
+          "printedColorRaw": "red",
+          "quantity": 384,
+          "raw": "S14-red：384PCS",
+          "rawMentions": [
+            "S14-red：384PCS"
+          ]
+        },
+        {
+          "model": "S11",
+          "color": "Yellow",
+          "printedColorRaw": "yellow",
+          "quantity": 720,
+          "raw": "S11-yellow：720pcs",
+          "rawMentions": [
+            "S11-yellow：720pcs"
+          ]
+        },
+        {
+          "model": "S12",
+          "color": "Yellow",
+          "printedColorRaw": "yellow",
+          "quantity": 384,
+          "raw": "S12-yellow：384pcs",
+          "rawMentions": [
+            "S12-yellow：384pcs"
+          ]
+        },
+        {
+          "model": "S13",
+          "color": "Yellow",
+          "printedColorRaw": "yellow",
+          "quantity": 384,
+          "raw": "S13-yellow 384pcs",
+          "rawMentions": [
+            "S13-yellow 384pcs"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+      "inspectionId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0-page-001",
+      "page": 1,
+      "code": "mixed-or-partial-product-allocation",
+      "message": "Special Notes report one or more model quantities, but the page does not establish a single full-batch model; model and color remain null.",
+      "reportedProductQuantities": [
+        {
+          "model": "S11",
+          "color": "Red",
+          "printedColorRaw": "红色",
+          "quantity": 1440,
+          "raw": "S11：红色1440PCS",
+          "rawMentions": [
+            "S11：红色1440PCS",
+            "S11: Red 1440PCS"
+          ]
+        },
+        {
+          "model": "S12",
+          "color": "Red",
+          "printedColorRaw": "红色",
+          "quantity": 384,
+          "raw": "S12：红色384PCS",
+          "rawMentions": [
+            "S12：红色384PCS",
+            "S12: Red 384PCS"
+          ]
+        },
+        {
+          "model": "S13",
+          "color": "Red",
+          "printedColorRaw": "红色",
+          "quantity": 384,
+          "raw": "S13：红色384PCS",
+          "rawMentions": [
+            "S13：红色384PCS",
+            "S13: Red 384PCS"
+          ]
+        },
+        {
+          "model": "S14",
+          "color": "Red",
+          "printedColorRaw": "红色",
+          "quantity": 2688,
+          "raw": "S14：红色2688",
+          "rawMentions": [
+            "S14：红色2688",
+            "S14: Red 2688"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+      "inspectionId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 2,
+      "message": "The printed specification names model(s) outside the S11-S14 source family. The printed specification is preserved and no product model is inferred from it.",
+      "referencedModels": [
+        "S15"
+      ]
+    },
+    {
+      "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+      "inspectionId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5-page-003",
+      "page": 3,
+      "code": "specification-model-mismatch",
+      "rowNo": 3,
+      "message": "The printed generic S1-family OQC row uses a 20 PSI leak threshold, which conflicts with the S11-S14 draft criterion. The source wording is preserved and no model is inferred.",
+      "mismatchBasis": "20 PSI OQC leak threshold",
+      "modelReferencePrinted": false
+    },
+    {
+      "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+      "inspectionId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96-page-001",
+      "page": 1,
+      "code": "special-note-product-quantities-do-not-match-batch-quantity",
+      "message": "Printed model quantities in Special Notes do not sum to the page batch quantity; the printed values are preserved.",
+      "batchQuantity": 2592,
+      "reportedQuantityTotal": 1872
+    },
+    {
+      "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+      "inspectionId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96-page-001",
+      "page": 1,
+      "code": "mixed-or-partial-product-allocation",
+      "message": "Special Notes report one or more model quantities, but the page does not establish a single full-batch model; model and color remain null.",
+      "reportedProductQuantities": [
+        {
+          "model": "S11",
+          "color": "Red",
+          "printedColorRaw": "红色",
+          "quantity": 720,
+          "raw": "S11：红色720PCS",
+          "rawMentions": [
+            "S11：红色720PCS",
+            "S11: Red 720PCS"
+          ]
+        },
+        {
+          "model": "S14",
+          "color": "Yellow",
+          "printedColorRaw": "黄色",
+          "quantity": 1152,
+          "raw": "S14:黄色1152PCS",
+          "rawMentions": [
+            "S14:黄色1152PCS",
+            "S14: yellow 1152PCS"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+      "inspectionId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96-page-003",
+      "page": 3,
+      "code": "mixed-or-partial-product-allocation",
+      "message": "Special Notes report one or more model quantities, but the page does not establish a single full-batch model; model and color remain null.",
+      "reportedProductQuantities": [
+        {
+          "model": "S11",
+          "color": "Red",
+          "printedColorRaw": "red",
+          "quantity": 720,
+          "raw": "S11-red：720PCS",
+          "rawMentions": [
+            "S11-red：720PCS"
+          ]
+        },
+        {
+          "model": "S11",
+          "color": "Yellow",
+          "printedColorRaw": "yellow",
+          "quantity": 720,
+          "raw": "S11-yellow：720PCS",
+          "rawMentions": [
+            "S11-yellow：720PCS"
+          ]
+        },
+        {
+          "model": "S14",
+          "color": "Yellow",
+          "printedColorRaw": "yellow",
+          "quantity": 1152,
+          "raw": "S14-yellow：1152PCS",
+          "rawMentions": [
+            "S14-yellow：1152PCS"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+      "inspectionId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a-page-001",
+      "page": 1,
+      "code": "special-note-product-quantities-do-not-match-batch-quantity",
+      "message": "Printed model quantities in Special Notes do not sum to the page batch quantity; the printed values are preserved.",
+      "batchQuantity": 2592,
+      "reportedQuantityTotal": 1872
+    },
+    {
+      "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+      "inspectionId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a-page-001",
+      "page": 1,
+      "code": "mixed-or-partial-product-allocation",
+      "message": "Special Notes report one or more model quantities, but the page does not establish a single full-batch model; model and color remain null.",
+      "reportedProductQuantities": [
+        {
+          "model": "S11",
+          "color": "Red",
+          "printedColorRaw": "红色",
+          "quantity": 720,
+          "raw": "S11：红色720PCS",
+          "rawMentions": [
+            "S11：红色720PCS",
+            "S11: Red 720PCS"
+          ]
+        },
+        {
+          "model": "S14",
+          "color": "Yellow",
+          "printedColorRaw": "黄色",
+          "quantity": 1152,
+          "raw": "S14:黄色1152PCS",
+          "rawMentions": [
+            "S14:黄色1152PCS",
+            "S14:yellow 1152PCS"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+      "inspectionId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a-page-003",
+      "page": 3,
+      "code": "mixed-or-partial-product-allocation",
+      "message": "Special Notes report one or more model quantities, but the page does not establish a single full-batch model; model and color remain null.",
+      "reportedProductQuantities": [
+        {
+          "model": "S11",
+          "color": "Red",
+          "printedColorRaw": "red",
+          "quantity": 720,
+          "raw": "S11-red：720PCS",
+          "rawMentions": [
+            "S11-red：720PCS"
+          ]
+        },
+        {
+          "model": "S11",
+          "color": "Yellow",
+          "printedColorRaw": "yellow",
+          "quantity": 720,
+          "raw": "S11-yellow：720PCS",
+          "rawMentions": [
+            "S11-yellow：720PCS"
+          ]
+        },
+        {
+          "model": "S14",
+          "color": "Red",
+          "printedColorRaw": "red",
+          "quantity": 1152,
+          "raw": "S14-red：1152PCS",
+          "rawMentions": [
+            "S14-red：1152PCS"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+      "inspectionId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d-page-001",
+      "page": 1,
+      "code": "source-inspected-quantity-exceeds-batch-quantity",
+      "rowNo": 2,
+      "message": "The printed source inspected quantity exceeds the page batch quantity; both printed values are preserved without correction.",
+      "batchQuantity": 1440,
+      "sourceInspectedQty": 4000,
+      "sourceInspectedQtyRaw": "4000"
+    },
+    {
+      "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+      "inspectionId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d-page-001",
+      "page": 1,
+      "code": "source-inspected-quantity-exceeds-batch-quantity",
+      "rowNo": 3,
+      "message": "The printed source inspected quantity exceeds the page batch quantity; both printed values are preserved without correction.",
+      "batchQuantity": 1440,
+      "sourceInspectedQty": 4000,
+      "sourceInspectedQtyRaw": "4000"
+    },
+    {
+      "sourceId": "pdf-e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7",
+      "inspectionId": "pdf-e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7-page-001",
+      "page": 1,
+      "code": "source-inspected-quantity-exceeds-batch-quantity",
+      "rowNo": 2,
+      "message": "The printed source inspected quantity exceeds the page batch quantity; both printed values are preserved without correction.",
+      "batchQuantity": 384,
+      "sourceInspectedQty": 5000,
+      "sourceInspectedQtyRaw": "5000"
+    },
+    {
+      "sourceId": "pdf-e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7",
+      "inspectionId": "pdf-e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7-page-001",
+      "page": 1,
+      "code": "source-inspected-quantity-exceeds-batch-quantity",
+      "rowNo": 3,
+      "message": "The printed source inspected quantity exceeds the page batch quantity; both printed values are preserved without correction.",
+      "batchQuantity": 384,
+      "sourceInspectedQty": 5000,
+      "sourceInspectedQtyRaw": "5000"
+    },
+    {
+      "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+      "inspectionId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795-page-001",
+      "page": 1,
+      "code": "special-note-product-quantities-do-not-match-batch-quantity",
+      "message": "Printed model quantities in Special Notes do not sum to the page batch quantity; the printed values are preserved.",
+      "batchQuantity": 3744,
+      "reportedQuantityTotal": 1872
+    },
+    {
+      "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+      "inspectionId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795-page-001",
+      "page": 1,
+      "code": "mixed-or-partial-product-allocation",
+      "message": "Special Notes report one or more model quantities, but the page does not establish a single full-batch model; model and color remain null.",
+      "reportedProductQuantities": [
+        {
+          "model": "S11",
+          "color": "Red",
+          "printedColorRaw": "红色",
+          "quantity": 720,
+          "raw": "S11：红色720PCS",
+          "rawMentions": [
+            "S11：红色720PCS",
+            "S11: Red 720PCS"
+          ]
+        },
+        {
+          "model": "S14",
+          "color": "Red",
+          "printedColorRaw": "红色",
+          "quantity": 1152,
+          "raw": "S14：红色1152PCS",
+          "rawMentions": [
+            "S14：红色1152PCS",
+            "S14: Red 1152PCS"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+      "inspectionId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795-page-003",
+      "page": 3,
+      "code": "mixed-or-partial-product-allocation",
+      "message": "Special Notes report one or more model quantities, but the page does not establish a single full-batch model; model and color remain null.",
+      "reportedProductQuantities": [
+        {
+          "model": "S11",
+          "color": "Red",
+          "printedColorRaw": "red",
+          "quantity": 720,
+          "raw": "S11-red：720PCS",
+          "rawMentions": [
+            "S11-red：720PCS"
+          ]
+        },
+        {
+          "model": "S11",
+          "color": "Yellow",
+          "printedColorRaw": "yellow",
+          "quantity": 720,
+          "raw": "S11-yellow：720PCS",
+          "rawMentions": [
+            "S11-yellow：720PCS"
+          ]
+        },
+        {
+          "model": "S14",
+          "color": "Red",
+          "printedColorRaw": "red",
+          "quantity": 1152,
+          "raw": "S14-red：1152PCS",
+          "rawMentions": [
+            "S14-red：1152PCS"
+          ]
+        },
+        {
+          "model": "S14",
+          "color": "Yellow",
+          "printedColorRaw": "yellow",
+          "quantity": 1152,
+          "raw": "S14-yellow：1152PCS",
+          "rawMentions": [
+            "S14-yellow：1152PCS"
+          ]
+        }
+      ]
+    },
+    {
+      "sourceId": "pdf-7616e6664f505652a3ef0667b2c2aa235c59401e32494b4fe4c878295e04d603",
+      "inspectionId": "pdf-7616e6664f505652a3ef0667b2c2aa235c59401e32494b4fe4c878295e04d603-page-001",
+      "page": 1,
+      "code": "source-inspected-quantity-exceeds-batch-quantity",
+      "rowNo": 2,
+      "message": "The printed inspected quantity exceeds the printed page batch quantity; both printed values are preserved without correction.",
+      "batchQuantity": 1152,
+      "sourceInspectedQty": 4000,
+      "sourceInspectedQtyRaw": "4000"
+    },
+    {
+      "sourceId": "pdf-7616e6664f505652a3ef0667b2c2aa235c59401e32494b4fe4c878295e04d603",
+      "inspectionId": "pdf-7616e6664f505652a3ef0667b2c2aa235c59401e32494b4fe4c878295e04d603-page-001",
+      "page": 1,
+      "code": "source-inspected-quantity-exceeds-batch-quantity",
+      "rowNo": 3,
+      "message": "The printed inspected quantity exceeds the printed page batch quantity; both printed values are preserved without correction.",
+      "batchQuantity": 1152,
+      "sourceInspectedQty": 4000,
+      "sourceInspectedQtyRaw": "4000"
+    },
+    {
+      "code": "same-task-has-standard-field-conflicts",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "AP|OQC",
+      "taskIdentity": "airpumptest气泵测试",
+      "conflicts": [
+        {
+          "field": "specification",
+          "values": [
+            "Power on to check whether the air\npump and EVAP knob is working\nproperly\n通电检查气泵,气压调节钮是否正常\n工作",
+            "Power on to check whether the air\npump and EVAP\nknob is working properly\n通电检查气泵,气压调节钮是否正常工作",
+            "Power on to check whether the air pump\nand EVAP knob is working properly\n通电检查气泵,气压调节钮是否正常工作",
+            "Power on to check whether the air\npump and EVAP knob is working\nproperly\n通电检查气泵,气压调节钮是否正常工作",
+            "Power on to check whether the air\npump and EVAP knob is working\nproperly\n通电检查气泵,气压调节钮是否正常工\n作",
+            "Power on to check whether the air pump and\nEVAP knob is working properly\n通电检查气泵,气压调节钮是否正常工作"
+          ]
+        },
+        {
+          "field": "devices",
+          "values": [
+            "DC power\nsupply\n直流电源",
+            "DC power supply\n直流电源"
+          ]
+        },
+        {
+          "field": "samplingPercent",
+          "values": [
+            10,
+            100
+          ]
+        }
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7",
+          "fileName": "8.27.26AP自制-检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.27(2)(1).pdf",
+          "page": 2,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-standard-field-conflicts",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "AP|OQC",
+      "taskIdentity": "powertest功率测试",
+      "conflicts": [
+        {
+          "field": "specification",
+          "values": [
+            "12.7V power on test. Passing\npower consumption ranges are :\nS11/S13: 32.3~34.0W,S12/S14:\n30.1~31.8W).\n12.7V电源通电测试，开机3秒功耗\n在规定范围内（S11/S13范围为\n32.3~34.0W,S12/S14 范围为\n30.1~31.8W）则为合格",
+            "12.7V power on test. Passing power\nconsumption ranges\nare : S11/S13 : 32.3~34.0W,S12/S14 :\n30.1~31.8W).\n12.7V电源通电测试 ，开机3秒功耗在规\n定范围内（S11/S13范围为\n32.3~34.0W,S12/S14 范围为\n30.1~31.8W ）则为合格",
+            "12.7V power on test. Passing power\nconsumption ranges are : S11/S13:\n32.3~34.0W,S12/S14: 30.1~31.8W).\n12.7V电源通电测试，开机3秒功耗在规\n定范围内（S11/S13范围为\n32.3~34.0W,S12/S14 范围为\n30.1~31.8W）则为合格",
+            "12.7V power on test. Passing power\nconsumption ranges are : S15 :\n30.1~31.8W.\n12.7V电源通电测试，开机3秒功耗在\n规定范围内（S15范围为\n30.1~31.8W）则为合格",
+            "12.7V power on test. Passing power\nconsumption ranges are : S15 : 30.1~31.8W.\n12.7V电源通电测试，开机3秒功耗在规定范围内\n（S15范围为30.1~31.8W）则为合格"
+          ]
+        },
+        {
+          "field": "devices",
+          "values": [
+            "DC power\nsupply\n直流电源",
+            "DC power supply\n直流电源"
+          ]
+        },
+        {
+          "field": "samplingPercent",
+          "values": [
+            10,
+            100
+          ]
+        },
+        {
+          "field": "recordingRule",
+          "values": [
+            "50%+all\nfailed\nunits",
+            "25%+all\nfailed\nunits"
+          ]
+        },
+        {
+          "field": "timeSeconds",
+          "values": [
+            80,
+            20
+          ]
+        }
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7",
+          "fileName": "8.27.26AP自制-检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.27(2)(1).pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-title-variants",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "AP|OQC",
+      "taskIdentity": "smokemachineleaktest发烟器漏气测试",
+      "titleEvidence": [
+        "Smoke Machine Leak Test 发烟器漏气测试",
+        "Smoke Machine Leak Test 发烟器漏气测 试"
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7",
+          "fileName": "8.27.26AP自制-检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.27(2)(1).pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke\nMachine Leak\nTest\n发烟器漏气测\n试"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-standard-field-conflicts",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "AP|OQC",
+      "taskIdentity": "smokemachineleaktest发烟器漏气测试",
+      "conflicts": [
+        {
+          "field": "specification",
+          "values": [
+            "12PSI pressure decay test to check\nseal - after 30 seconds >=11.8PSI.\n充气测试，是否漏气，12PSI气压\n衰减,30秒后气压不能低于11.8PSI\n。",
+            "12PSI pressure decay test to check seal\n- after\n30seconds >=11.8PSI.\n充气测试 ，是否漏气 ，12PSI气压衰\n减,30秒后气压不能低于\n11.8PSI。",
+            "12PSI pressure decay test to check seal -\nafter 30 seconds >=11.8PSI.\n充气测试，是否漏气，12PSI气压衰\n减,30秒后气压不能低于11.8PSI。",
+            "12PSI pressure decay test to check seal\n- after 30 seconds >=11.8PSI.\n充气测试，是否漏气，12PSI气压衰\n减,30秒后气压不能低于11.8PSI。",
+            "20PSI pressure decay test to check\nseal - after 30seconds >=19.8PSI.\n充气测试，是否漏气，20PSI气压衰\n减,30秒后气压不能低于19.8PSI。",
+            "20PSI pressure decay test to check seal - after\n30seconds >=19.8PSI.\n充气测试，是否漏气，20PSI气压衰减,30秒后气\n压不能低于19.8PSI。"
+          ]
+        },
+        {
+          "field": "devices",
+          "values": [
+            "Differential\npressure\ngauge/Air\npump\n差压计/气泵",
+            "Differential\npressure\ngauge / Air pump\n差压计/气泵",
+            "Differential\npressure\ngauge/Air pump\n差压计/气泵"
+          ]
+        },
+        {
+          "field": "samplingPercent",
+          "values": [
+            10,
+            100
+          ]
+        },
+        {
+          "field": "recordingRule",
+          "values": [
+            "50%+all\nfailed\nunits",
+            "25%+all\nfailed\nunits"
+          ]
+        },
+        {
+          "field": "timeSeconds",
+          "values": [
+            80,
+            null
+          ]
+        }
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7",
+          "fileName": "8.27.26AP自制-检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.27(2)(1).pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke\nMachine Leak\nTest\n发烟器漏气测\n试"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-standard-field-conflicts",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "AP|OQC",
+      "taskIdentity": "finalpackaging最终包装检查",
+      "conflicts": [
+        {
+          "field": "specification",
+          "values": [
+            "EVAP knob pointing to EVAP, check\naccessories,and support sticker\n旋钮位置指向EVAP，物品放置位\n置，贴纸",
+            "EVAP knob pointing to EVAP, check\naccessories,and\nsupport sticker 旋钮位置指向EVAP，物\n品放置位置 ，贴纸",
+            "EVAP knob pointing to EVAP, check\naccessories,and support sticker\n旋钮位置指向EVAP，物品放置位置，贴\n纸",
+            "EVAP knob pointing to EVAP, check\naccessories,and support sticker\n旋钮位置指向EVAP，物品放置位置，\n贴纸",
+            "EVAP knob pointing to EVAP, check\naccessories,and support sticker\n旋钮位置指向EVAP，物品放置位置，贴纸"
+          ]
+        },
+        {
+          "field": "devices",
+          "values": [
+            "Visual 目测",
+            "Visual\n目测"
+          ]
+        },
+        {
+          "field": "samplingPercent",
+          "values": [
+            10,
+            100
+          ]
+        },
+        {
+          "field": "important",
+          "values": [
+            true,
+            false
+          ]
+        }
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7",
+          "fileName": "8.27.26AP自制-检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.27(2)(1).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final\nPackaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-standard-field-conflicts",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "UI|IQC",
+      "taskIdentity": "heatingcoiltest发热丝测试",
+      "conflicts": [
+        {
+          "field": "specification",
+          "values": [
+            "The resistence of the heating coil is 3.0-3.3Ω, 20\nloops发热丝欧姆值为3.0-3.3Ω，圈数为20圈",
+            "The resistence of the heating coil is 2.9-3.3Ω, 20\nloops发热丝欧姆值为2.9-3.3Ω，圈数为20圈"
+          ]
+        }
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-title-variants",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "UI|OQC",
+      "taskIdentity": "powertest功率测试",
+      "titleEvidence": [
+        "Power Test 功率测试",
+        "Power Test功率测试"
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-standard-field-conflicts",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "UI|OQC",
+      "taskIdentity": "smokemachineleaktest发烟器漏气测试",
+      "conflicts": [
+        {
+          "field": "devices",
+          "values": [
+            "Differential pressure\ngauge / Air pump\n差压计/气泵",
+            "Differential pressure\ngauge / Air pump差压\n计/气泵"
+          ]
+        },
+        {
+          "field": "timeSeconds",
+          "values": [
+            null,
+            50
+          ]
+        }
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-title-variants",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "UI|OQC",
+      "taskIdentity": "finalpackaging最终包装检查",
+      "titleEvidence": [
+        "Final Packaging 最终包装检查",
+        "Final Packaging 最终包装 检查"
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-standard-field-conflicts",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "UI|OQC",
+      "taskIdentity": "finalpackaging最终包装检查",
+      "conflicts": [
+        {
+          "field": "devices",
+          "values": [
+            "Visual\n目测",
+            "Visual 目测"
+          ]
+        }
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-standard-field-conflicts",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "UI",
+      "taskIdentity": "heatingcoiltest发热丝测试",
+      "conflicts": [
+        {
+          "field": "specification",
+          "values": [
+            "The resistence of the heating coil is 3.0-3.3Ω, 20\nloops发热丝欧姆值为3.0-3.3Ω，圈数为20圈",
+            "The resistence of the heating coil is 2.9-3.3Ω, 20\nloops发热丝欧姆值为2.9-3.3Ω，圈数为20圈"
+          ]
+        }
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 1,
+          "printedNo": 1,
+          "printedTitle": "Heating Coil Test\n发热丝测试"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-title-variants",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "UI",
+      "taskIdentity": "powertest功率测试",
+      "titleEvidence": [
+        "Power Test 功率测试",
+        "Power Test功率测试"
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test功率测试"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-standard-field-conflicts",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "UI",
+      "taskIdentity": "smokemachineleaktest发烟器漏气测试",
+      "conflicts": [
+        {
+          "field": "devices",
+          "values": [
+            "Differential pressure\ngauge / Air pump\n差压计/气泵",
+            "Differential pressure\ngauge / Air pump差压\n计/气泵"
+          ]
+        },
+        {
+          "field": "timeSeconds",
+          "values": [
+            null,
+            50
+          ]
+        }
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak Test\n发烟器漏气测试"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-title-variants",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "UI",
+      "taskIdentity": "finalpackaging最终包装检查",
+      "titleEvidence": [
+        "Final Packaging 最终包装检查",
+        "Final Packaging 最终包装 检查"
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-standard-field-conflicts",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "UI",
+      "taskIdentity": "finalpackaging最终包装检查",
+      "conflicts": [
+        {
+          "field": "devices",
+          "values": [
+            "Visual\n目测",
+            "Visual 目测"
+          ]
+        }
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging 最终包装\n检查"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-standard-field-conflicts",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "AP",
+      "taskIdentity": "airpumptest气泵测试",
+      "conflicts": [
+        {
+          "field": "specification",
+          "values": [
+            "Power on to check whether the air\npump and EVAP knob is working\nproperly\n通电检查气泵,气压调节钮是否正常\n工作",
+            "Power on to check whether the air\npump and EVAP\nknob is working properly\n通电检查气泵,气压调节钮是否正常工作",
+            "Power on to check whether the air pump\nand EVAP knob is working properly\n通电检查气泵,气压调节钮是否正常工作",
+            "Power on to check whether the air\npump and EVAP knob is working\nproperly\n通电检查气泵,气压调节钮是否正常工作",
+            "Power on to check whether the air\npump and EVAP knob is working\nproperly\n通电检查气泵,气压调节钮是否正常工\n作",
+            "Power on to check whether the air pump and\nEVAP knob is working properly\n通电检查气泵,气压调节钮是否正常工作"
+          ]
+        },
+        {
+          "field": "devices",
+          "values": [
+            "DC power\nsupply\n直流电源",
+            "DC power supply\n直流电源"
+          ]
+        },
+        {
+          "field": "samplingPercent",
+          "values": [
+            10,
+            100
+          ]
+        }
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7",
+          "fileName": "8.27.26AP自制-检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.27(2)(1).pdf",
+          "page": 2,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 3,
+          "printedNo": 1,
+          "printedTitle": "Air Pump Test\n气泵测试"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-standard-field-conflicts",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "AP",
+      "taskIdentity": "powertest功率测试",
+      "conflicts": [
+        {
+          "field": "specification",
+          "values": [
+            "12.7V power on test. Passing\npower consumption ranges are :\nS11/S13: 32.3~34.0W,S12/S14:\n30.1~31.8W).\n12.7V电源通电测试，开机3秒功耗\n在规定范围内（S11/S13范围为\n32.3~34.0W,S12/S14 范围为\n30.1~31.8W）则为合格",
+            "12.7V power on test. Passing power\nconsumption ranges\nare : S11/S13 : 32.3~34.0W,S12/S14 :\n30.1~31.8W).\n12.7V电源通电测试 ，开机3秒功耗在规\n定范围内（S11/S13范围为\n32.3~34.0W,S12/S14 范围为\n30.1~31.8W ）则为合格",
+            "12.7V power on test. Passing power\nconsumption ranges are : S11/S13:\n32.3~34.0W,S12/S14: 30.1~31.8W).\n12.7V电源通电测试，开机3秒功耗在规\n定范围内（S11/S13范围为\n32.3~34.0W,S12/S14 范围为\n30.1~31.8W）则为合格",
+            "12.7V power on test. Passing power\nconsumption ranges are : S15 :\n30.1~31.8W.\n12.7V电源通电测试，开机3秒功耗在\n规定范围内（S15范围为\n30.1~31.8W）则为合格",
+            "12.7V power on test. Passing power\nconsumption ranges are : S15 : 30.1~31.8W.\n12.7V电源通电测试，开机3秒功耗在规定范围内\n（S15范围为30.1~31.8W）则为合格"
+          ]
+        },
+        {
+          "field": "devices",
+          "values": [
+            "DC power\nsupply\n直流电源",
+            "DC power supply\n直流电源"
+          ]
+        },
+        {
+          "field": "samplingPercent",
+          "values": [
+            10,
+            100
+          ]
+        },
+        {
+          "field": "recordingRule",
+          "values": [
+            "50%+all\nfailed\nunits",
+            "25%+all\nfailed\nunits"
+          ]
+        },
+        {
+          "field": "timeSeconds",
+          "values": [
+            80,
+            20
+          ]
+        }
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7",
+          "fileName": "8.27.26AP自制-检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.27(2)(1).pdf",
+          "page": 2,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 3,
+          "printedNo": 2,
+          "printedTitle": "Power Test\n功率测试"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-title-variants",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "AP",
+      "taskIdentity": "smokemachineleaktest发烟器漏气测试",
+      "titleEvidence": [
+        "Smoke Machine Leak Test 发烟器漏气测试",
+        "Smoke Machine Leak Test 发烟器漏气测 试"
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7",
+          "fileName": "8.27.26AP自制-检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.27(2)(1).pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke\nMachine Leak\nTest\n发烟器漏气测\n试"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-standard-field-conflicts",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "AP",
+      "taskIdentity": "smokemachineleaktest发烟器漏气测试",
+      "conflicts": [
+        {
+          "field": "specification",
+          "values": [
+            "12PSI pressure decay test to check\nseal - after 30 seconds >=11.8PSI.\n充气测试，是否漏气，12PSI气压\n衰减,30秒后气压不能低于11.8PSI\n。",
+            "12PSI pressure decay test to check seal\n- after\n30seconds >=11.8PSI.\n充气测试 ，是否漏气 ，12PSI气压衰\n减,30秒后气压不能低于\n11.8PSI。",
+            "12PSI pressure decay test to check seal -\nafter 30 seconds >=11.8PSI.\n充气测试，是否漏气，12PSI气压衰\n减,30秒后气压不能低于11.8PSI。",
+            "12PSI pressure decay test to check seal\n- after 30 seconds >=11.8PSI.\n充气测试，是否漏气，12PSI气压衰\n减,30秒后气压不能低于11.8PSI。",
+            "20PSI pressure decay test to check\nseal - after 30seconds >=19.8PSI.\n充气测试，是否漏气，20PSI气压衰\n减,30秒后气压不能低于19.8PSI。",
+            "20PSI pressure decay test to check seal - after\n30seconds >=19.8PSI.\n充气测试，是否漏气，20PSI气压衰减,30秒后气\n压不能低于19.8PSI。"
+          ]
+        },
+        {
+          "field": "devices",
+          "values": [
+            "Differential\npressure\ngauge/Air\npump\n差压计/气泵",
+            "Differential\npressure\ngauge / Air pump\n差压计/气泵",
+            "Differential\npressure\ngauge/Air pump\n差压计/气泵"
+          ]
+        },
+        {
+          "field": "samplingPercent",
+          "values": [
+            10,
+            100
+          ]
+        },
+        {
+          "field": "recordingRule",
+          "values": [
+            "50%+all\nfailed\nunits",
+            "25%+all\nfailed\nunits"
+          ]
+        },
+        {
+          "field": "timeSeconds",
+          "values": [
+            80,
+            null
+          ]
+        }
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7",
+          "fileName": "8.27.26AP自制-检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.27(2)(1).pdf",
+          "page": 2,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine\nLeak Test\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke\nMachine Leak\nTest\n发烟器漏气测\n试"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 3,
+          "printedNo": 3,
+          "printedTitle": "Smoke Machine Leak\nTest\n发烟器漏气测试"
+        }
+      ]
+    },
+    {
+      "code": "same-task-has-standard-field-conflicts",
+      "family": "s11-s14",
+      "printedVersion": "25.10.29",
+      "context": "AP",
+      "taskIdentity": "finalpackaging最终包装检查",
+      "conflicts": [
+        {
+          "field": "specification",
+          "values": [
+            "EVAP knob pointing to EVAP, check\naccessories,and support sticker\n旋钮位置指向EVAP，物品放置位\n置，贴纸",
+            "EVAP knob pointing to EVAP, check\naccessories,and\nsupport sticker 旋钮位置指向EVAP，物\n品放置位置 ，贴纸",
+            "EVAP knob pointing to EVAP, check\naccessories,and support sticker\n旋钮位置指向EVAP，物品放置位置，贴\n纸",
+            "EVAP knob pointing to EVAP, check\naccessories,and support sticker\n旋钮位置指向EVAP，物品放置位置，\n贴纸",
+            "EVAP knob pointing to EVAP, check\naccessories,and support sticker\n旋钮位置指向EVAP，物品放置位置，贴纸"
+          ]
+        },
+        {
+          "field": "devices",
+          "values": [
+            "Visual 目测",
+            "Visual\n目测"
+          ]
+        },
+        {
+          "field": "samplingPercent",
+          "values": [
+            10,
+            100
+          ]
+        },
+        {
+          "field": "important",
+          "values": [
+            true,
+            false
+          ]
+        }
+      ],
+      "sourceEvidence": [
+        {
+          "sourceId": "pdf-a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
+          "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7",
+          "fileName": "8.27.26AP自制-检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.27(2)(1).pdf",
+          "page": 2,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
+          "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
+          "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
+          "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
+          "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
+          "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
+          "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
+          "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
+          "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
+          "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
+          "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final\nPackaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
+          "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
+          "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        },
+        {
+          "sourceId": "pdf-8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
+          "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
+          "page": 3,
+          "printedNo": 4,
+          "printedTitle": "Final Packaging\n最终包装检查"
+        }
+      ]
+    }
+  ],
+  "purchaseOrdersLinked": 0,
+  "operationalBatchesCreated": 0,
+  "purchaseOrderProgressContribution": 0,
+  "packageBytes": 17933286,
+  "packageMiB": 17.1
+}
