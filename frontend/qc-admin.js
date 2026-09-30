@@ -368,9 +368,26 @@ function confirmPublish(ctx, version) {
   ));
 }
 
-function renderOperationalVersion(ctx, version, latestPublished) {
-  const isLatest = version.id === latestPublished?.id;
+function renderOperationalVersion(ctx, version) {
   const notes = visibleVersionNotes(version.notes);
+  if (version.status === "published" || version.status === "superseded") {
+    return h("article", { className: "version-card" },
+      h("header", { className: "version-card-header" },
+        h("div", {}, h("div", { className: "button-row version-title-row" },
+          h("h3", {}, version.label),
+          version.status === "published"
+            ? statusBadge("Published", "green")
+            : statusBadge("Status: 已作废 Superseded"),
+          renderVersionAttachmentControl(ctx, version),
+        ),
+          h("p", {}, `Effective ${text(version.effectiveDate)}`),
+        ),
+      ),
+      h("details", {}, h("summary", {}, "Change description"),
+        notes ? h("p", { className: "source-preserve-text" }, notes) : null,
+      ),
+    );
+  }
   const actionButtons = version.status === "draft"
     ? [button("Edit draft", () => renderVersionEditor(ctx, version), "button-secondary"), button("Publish…", () => confirmPublish(ctx, version), "button-primary")]
     : [button("Clone to draft", () => openCloneDialog(ctx, version), "button-secondary")];
@@ -378,8 +395,7 @@ function renderOperationalVersion(ctx, version, latestPublished) {
     h("header", { className: "version-card-header" },
       h("div", {}, h("div", { className: "button-row version-title-row" },
         h("h3", {}, version.label),
-        statusBadge(version.status === "published" ? "Published" : "Draft", version.status === "published" ? "green" : "warn"),
-        isLatest ? statusBadge("Latest", "green") : null,
+        statusBadge("Draft", "warn"),
         renderVersionAttachmentControl(ctx, version),
       ),
         h("p", {}, `Effective ${text(version.effectiveDate)} · ${version.items.length} inspection row${version.items.length === 1 ? "" : "s"}${version.publishedAt ? ` · published ${new Date(version.publishedAt).toLocaleDateString()}` : ""}`),
@@ -408,11 +424,10 @@ function renderStandards(root, ctx) {
       .filter((version) => String(version.label ?? "").trim().toLocaleLowerCase() !== "ventus")
       .sort(sortSourceVersions);
     const visibleVersionCount = familyVersions.length + recordedVersions.length;
-    const latestPublished = familyVersions.find((version) => version.status === "published");
     const visibleVersions = recordedVersions.map((version) => renderRecordedVersion(ctx, version))
-      .concat(familyVersions.map((version) => renderOperationalVersion(ctx, version, latestPublished)));
+      .concat(familyVersions.map((version) => renderOperationalVersion(ctx, version)));
     return h("section", { className: "admin-card admin-card-wide card" },
-      h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, family.name), h("p", {}, `${family.models.join(", ")} · latest published: ${latestPublished ? latestPublished.label : "none"}`)), statusBadge(`${visibleVersionCount} visible version${visibleVersionCount === 1 ? "" : "s"}`)),
+      h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, family.name), h("p", {}, family.models.join(", "))), statusBadge(`${visibleVersionCount} visible version${visibleVersionCount === 1 ? "" : "s"}`)),
       button(`Create ${family.name} draft`, () => openNewVersion(ctx, family.id), "button-secondary"),
       h("h4", { className: "version-group-heading" }, "Versions"),
       h("div", { className: "version-list" }, visibleVersions),
@@ -815,7 +830,7 @@ function renderLibrary(root, ctx) {
 }
 
 function renderBackup(root, ctx) {
-  pageHeading(root, "Local data", "Backup and restore", "Export a JSON snapshot with records and attachments. Restore adds valid records to this browser and reports conflicts without replacing existing data.");
+  pageHeading(root, "Local data", "Backup and restore", "Export a JSON snapshot with records and attachments. Restore adds valid records to this local workspace and stops on conflicts without changing it.");
   const exportButton = button("Download full backup", async () => {
     try {
       const backup = await ctx.service.exportBackup();
@@ -863,6 +878,20 @@ function renderBackup(root, ctx) {
       notify(error instanceof Error ? error.message : "The backup could not be restored.", true);
     }
   });
+  const migrationButton = !ctx.isDemo ? button("Migrate data from this browser", async () => {
+    try {
+      const backup = await ctx.exportLegacyBrowserBackup();
+      const result = await ctx.service.importBackup(backup, ctx.state.revision);
+      ctx.announceChange?.(result.revision);
+      const counts = result.counts ?? {};
+      const added = Object.values(counts.added ?? {}).reduce((sum, count) => sum + count, 0);
+      const skipped = Object.values(counts.skipped ?? {}).reduce((sum, count) => sum + count, 0);
+      notify(`Migration complete: ${added} records added; ${skipped} identical records skipped. The original browser data remains available.`);
+      ctx.refresh();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Browser data could not be migrated.", true);
+    }
+  }, "button-primary") : null;
   const assetBytes = ctx.state.assets.reduce((sum, asset) => sum + bytesInDataUrl(asset.dataUrl), 0);
   const metrics = h("div", { className: "progress-grid" },
     h("div", { className: "progress-stat" }, h("span", {}, "Design versions"), h("strong", {}, String(ctx.state.versions.length))),
@@ -874,7 +903,11 @@ function renderBackup(root, ctx) {
     h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Export current workspace"), h("p", {}, "Keep a copy outside this browser and computer."))), exportButton,
       h("p", { className: "file-size" }, `Serialized backup limit: ${formatBytes(BACKUP_MAX_BYTES)}.`)),
     h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Restore into this workspace"), h("p", {}, "Choose a backup file and let the service validate the complete data graph."))), form),
-    h("section", { className: "admin-card admin-card-wide card" }, h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Current local workspace"), h("p", {}, "IndexedDB records are local to this browser profile and origin."))), metrics),
+    !ctx.isDemo ? h("section", { className: "admin-card card" },
+      h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Move existing browser data"), h("p", {}, "Add the QC records and attachments from this browser’s previous workspace. The source data stays in place, and any conflict stops the migration without partial changes."))),
+      migrationButton,
+    ) : null,
+    h("section", { className: "admin-card admin-card-wide card" }, h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, ctx.isDemo ? "Current demo workspace" : "Current shared workspace"), h("p", {}, "Stored in a local SQLite database on this computer."))), metrics),
   ));
 }
 

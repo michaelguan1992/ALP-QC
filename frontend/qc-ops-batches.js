@@ -17,6 +17,7 @@ import {
 import { closeDialog, downloadFile, readFileAsDataURL, showDialog } from "./qc-ui.js";
 import { historicalBatchImportControl } from "./qc-history.js";
 import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
+import { getBatchVersionItems, getBatchVersions, getBatchVersionReadiness } from "../core/qc-batch-versions.js";
 
 const rowDrafts = new Map();
 const batchDetailDrafts = new Map();
@@ -593,19 +594,20 @@ function attachmentActions(asset, batch, ctx) {
   if (asset.dataUrl) {
     actions.push(button("Download", () => {
       void downloadFile(asset.name, asset.dataUrl, asset.mimeType).catch((error) => notify(errorText(error, "The attachment could not be downloaded."), true));
-    }, "button-secondary qc-ops-small-button"));
+    }, "button-quiet qc-ops-small-button"));
   } else {
     actions.push(el("span", { className: "qc-ops-hint" }, "File unavailable"));
   }
   const locked = batch.status === "released" || asset.sourcePdf === true;
-  const remove = button(asset.sourcePdf ? "Source PDF" : "Remove", () => {
-    if (!window.confirm(`Remove “${text(asset.name, "this attachment")}” from this batch? The file remains in the file library.`)) return;
-    void runCommand(ctx, "removeBatchAttachment", { batchId: batch.id, assetId: asset.id });
-  }, asset.sourcePdf ? "button-quiet qc-ops-small-button" : "button-danger qc-ops-small-button");
-  remove.disabled = locked;
-  if (asset.sourcePdf) remove.title = "The original source PDF association is preserved.";
-  else if (batch.status === "released") remove.title = "Released batch attachments are read-only.";
-  actions.push(remove);
+  if (!asset.sourcePdf) {
+    const remove = button("Remove", () => {
+      if (!window.confirm(`Remove “${text(asset.name, "this attachment")}” from this batch? The file remains in the file library.`)) return;
+      void runCommand(ctx, "removeBatchAttachment", { batchId: batch.id, assetId: asset.id });
+    }, "button-danger qc-ops-small-button");
+    remove.disabled = locked;
+    if (batch.status === "released") remove.title = "Released batch attachments are read-only.";
+    actions.push(remove);
+  }
   return el("div", { className: "qc-ops-attachment-actions" }, actions);
 }
 
@@ -648,14 +650,13 @@ function renderBatchAttachments(workspace, state, ctx) {
   const attachmentList = list(workspace.attachments);
   const items = attachmentList.length
     ? attachmentList.map((asset) => el("li", { className: "qc-ops-attachment-item" },
-      el("div", {}, el("strong", {}, text(asset.name, "Attachment")), asset.sourcePdf ? el("span", { className: "qc-ops-historical-badge" }, "Original PDF") : null,
-        el("small", {}, text(asset.mimeType, "File"))),
+      el("div", {}, el("strong", {}, text(asset.name, "Attachment"))),
       attachmentActions(asset, batch, ctx),
     ))
-    : [el("li", { className: "qc-ops-attachment-empty" }, "No attachments. Attachments are optional for every batch.")];
+    : [el("li", { className: "qc-ops-attachment-empty" }, "No attachments")];
   return el("section", { className: "card qc-ops-attachments-card" },
     el("div", { className: "qc-ops-section-heading" },
-      el("div", {}, el("h2", {}, "Attachments"), el("p", {}, "Files stay linked to this batch. The original source PDF remains attached to historical batches.")),
+      el("h2", {}, "Attachments"),
       add,
     ),
     el("ul", { className: "qc-ops-attachment-list" }, items),
@@ -678,31 +679,28 @@ function renderHistoricalBatchDetail(root, ctx, workspace) {
   const anomalies = [...list(source?.anomalies), ...list(inspection?.anomalies)];
   const metadata = el("section", { className: "card qc-ops-batch-meta-card qc-ops-historical-meta-card" },
     el("div", { className: "qc-ops-section-heading" },
-      el("div", {},
-        el("p", { className: "eyebrow" }, "Batch inspection"),
-        el("h2", {}, historicalBatchLabel(workspace.displayNumber)),
-        el("p", {}, "Review this batch’s recorded inspection results and attachments."),
-      ),
+      el("h2", {}, historicalBatchLabel(workspace.displayNumber)),
     ),
-    el("div", { className: "qc-ops-batch-facts" },
-      el("span", {}, el("strong", {}, "Family"), text(family?.name || batch.familyId)),
-      el("span", {}, el("strong", {}, "Model"), text(batch.model)),
-      el("span", {}, el("strong", {}, "Color"), text(batch.color)),
-      el("span", {}, el("strong", {}, "Factory / stage"), [batch.factory, batch.stage].filter((value) => value !== null && value !== undefined && value !== "").join(" · ") || "—"),
-      el("span", {}, el("strong", {}, "Batch quantity"), sourceValue(batch.quantity)),
-      el("span", {}, el("strong", {}, "Inspection date"), dateLabel(batch.date)),
-      el("span", {}, el("strong", {}, "Printed version"), text(batch.versionLabel)),
-      el("span", {}, el("strong", {}, "Recorded by"), text(inspection?.recorder)),
+    el("dl", { className: "qc-ops-historical-facts" },
+      el("div", {}, el("dt", {}, "Product"), el("dd", {}, batchProductLabel({ ...batch, productLabel: batch.model || batch.productLabel }, state))),
+      el("div", {}, el("dt", {}, "Factory / stage"), el("dd", {}, [batch.factory, batch.stage].filter((value) => value !== null && value !== undefined && value !== "").join(" · ") || "—")),
+      el("div", {}, el("dt", {}, "Quantity"), el("dd", {}, sourceValue(batch.quantity))),
+      el("div", {}, el("dt", {}, "Date"), el("dd", {}, dateLabel(batch.date))),
+      el("div", {}, el("dt", {}, "Version"), el("dd", {}, text(batch.versionLabel))),
+      el("div", {}, el("dt", {}, "Recorded by"), el("dd", {}, text(inspection?.recorder))),
     ),
-    batch.notes ? el("p", { className: "qc-ops-historical-notes" }, batch.notes) : null,
     el("details", { className: "qc-ops-historical-provenance" },
-      el("summary", {}, "Source and transcription details"),
+      el("summary", {}, "More details"),
       el("dl", { className: "qc-ops-historical-source-facts" },
-        el("dt", {}, "Source PDF"), el("dd", {}, text(source?.fileName, "Unavailable")),
-        el("dt", {}, "Source page"), el("dd", {}, inspection?.page ? `${inspection.page} of ${source?.pageCount ?? "?"}` : "—"),
+        el("dt", {}, "Family"), el("dd", {}, text(family?.name || batch.familyId)),
+        el("dt", {}, "Model"), el("dd", {}, sourceValue(batch.model)),
+        el("dt", {}, "Color"), el("dd", {}, sourceValue(batch.color)),
+        el("dt", {}, "Source PDF"), el("dd", {}, sourceValue(source?.fileName)),
+        el("dt", {}, "Source page"), el("dd", {}, inspection?.page ? `${inspection.page} of ${sourceValue(source?.pageCount)}` : "—"),
         el("dt", {}, "Printed date"), el("dd", {}, dateLabel(inspection?.printedDate)),
         el("dt", {}, "Recorded by"), el("dd", {}, text(inspection?.recorder)),
       ),
+      batch.notes ? el("p", { className: "qc-ops-historical-notes" }, el("strong", {}, "Batch notes: "), batch.notes) : null,
       inspection?.notes ? el("p", { className: "qc-ops-historical-notes" }, inspection.notes) : null,
       anomalies.length ? el("ul", { className: "qc-ops-historical-anomalies" }, anomalies.map((anomaly) => el("li", {}, typeof anomaly === "string" ? anomaly : JSON.stringify(anomaly)))) : null,
       inspection?.raw ? el("details", { className: "qc-ops-historical-raw" }, el("summary", {}, "Preserved source fields"), el("pre", {}, JSON.stringify(inspection.raw, null, 2))) : null,
@@ -718,7 +716,7 @@ function renderHistoricalBatchDetail(root, ctx, workspace) {
   );
   const attachmentsWorkspace = { ...workspace, attachments: Array.isArray(workspace.attachments) ? workspace.attachments : batchAttachments(batch, state) };
   root.replaceChildren(
-    pageHeading("Batches", "Review this batch’s recorded inspection results and attachments.", [
+    pageHeading("Batches", "", [
       button("All batches", () => ctx.navigate("batches"), "button button-secondary"),
       button("View report", () => ctx.navigate("batch-report", batch.id), "button button-secondary"),
     ]),
@@ -834,18 +832,13 @@ function orderedLines(state) {
     .filter((entry) => entry.variant);
 }
 
-function publishedVersions(state, familyId) {
-  return list(state.versions).filter((version) => version.familyId === familyId && version.status === "published")
-    .sort((left, right) => Number(right.sequence) - Number(left.sequence));
-}
-
 function lineOptionLabel(entry) {
   return `${text(entry.order.number)} · ${text(entry.variant.label)} · ${quantity(entry.line.orderedQty)} ordered`;
 }
 
 function applicablePairs(version, model) {
   const pairs = new Map();
-  for (const item of list(version?.items)) {
+  for (const item of getBatchVersionItems(version)) {
     const models = list(item.models);
     if (models.length && !models.includes(model)) continue;
     if (!item.factory || !item.stage) continue;
@@ -856,8 +849,27 @@ function applicablePairs(version, model) {
   return Array.from(pairs.values());
 }
 
+function hasReadyVersionForModel(state, familyId, model) {
+  return getBatchVersions(state, familyId).some((version) => applicablePairs(version, model)
+    .some((pair) => getBatchVersionReadiness(version, pair.factory, pair.stage, model).ready));
+}
+
 function openNewBatchDialog(state, ctx) {
   const lines = orderedLines(state);
+  const orders = list(state.orders);
+  if (!lines.length) {
+    const message = orders.length
+      ? "Add a purchase order line with a product variant and ordered quantity before creating a batch."
+      : "Create a purchase order with at least one product line before creating a batch.";
+    showDialog("New inspection batch", el("div", { className: "qc-ops-new-batch-form" },
+      el("p", {}, message),
+      el("div", { className: "qc-ops-dialog-actions" },
+        button("Open purchase orders", () => { closeDialog(); ctx.navigate("orders"); }, "button-primary"),
+        button("Cancel", () => closeDialog(), "button-secondary"),
+      ),
+    ));
+    return;
+  }
   const localToday = new Date();
   const today = `${localToday.getFullYear()}-${String(localToday.getMonth() + 1).padStart(2, "0")}-${String(localToday.getDate()).padStart(2, "0")}`;
   const orderLine = el("select", { required: true, name: "orderLine" },
@@ -876,17 +888,23 @@ function openNewBatchDialog(state, ctx) {
   let countForPOTouched = false;
   const countHelp = el("small", { className: "qc-ops-hint" }, "Eligible OQC batches count the full quantity only after release. Enter the physical lot number to prevent duplicate fulfillment counting.");
   const versionHelp = el("small", { className: "qc-ops-hint" });
+  const standardsAction = button("Open standards", () => { closeDialog(); ctx.navigate("standards"); }, "button-secondary");
+  const showStandardsAction = (visible) => {
+    standardsAction.hidden = !visible;
+    standardsAction.style.display = visible ? "" : "none";
+  };
+  showStandardsAction(false);
   const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
   const submit = el("button", { type: "submit", className: "button button-primary" }, "Create batch");
   const cancel = button("Cancel", () => closeDialog(), "button button-secondary");
-  const versionOptionsForSelection = () => {
+  const selectedOrderLine = () => {
     const [orderId, lineId] = orderLine.value.split("::");
-    const entry = lines.find((item) => item.order.id === orderId && item.line.id === lineId);
-    const versions = publishedVersions(state, entry?.variant?.familyId);
+    return lines.find((entry) => entry.order.id === orderId && entry.line.id === lineId);
+  };
+  const versionOptionsForSelection = () => {
+    const entry = selectedOrderLine();
+    const versions = getBatchVersions(state, entry?.variant?.familyId);
     setOptions(versionSelect, versions.map((version) => ({ value: version.id, label: version.label })), versions[0]?.id || "");
-    versionHelp.textContent = versions.length
-      ? `The latest published version is selected. You may choose a historical published version; the selected basis is locked on this batch.`
-      : "No published version exists for this inspection family. Publish a valid version before creating a batch.";
     refreshApplicability();
   };
   const refreshApplicability = () => {
@@ -901,10 +919,30 @@ function openNewBatchDialog(state, ctx) {
     const priorStage = stageSelect.value;
     setOptions(stageSelect, stages.map((stage) => ({ value: stage, label: stage })), stages.includes(priorStage) ? priorStage : stages[0] || "");
     updateCountEligibility();
-    submit.disabled = !lines.length || !versionSelect.value || !factorySelect.value || !stageSelect.value;
-    if (versionSelect.value && !factorySelect.value) {
-      versionHelp.textContent = "This published version has no standards applicable to the selected variant. Choose another published version or update the standards.";
+    const versions = getBatchVersions(state, selectedLine?.variant?.familyId);
+    const hasApplicableVersion = versions.some((candidate) => applicablePairs(candidate, selectedLine?.variant?.model).length > 0);
+    if (!versionSelect.value) {
+      versionHelp.textContent = "No design version is available for this product family. Review the family’s versions in Standards.";
+      showStandardsAction(true);
+    } else if (!factorySelect.value) {
+      versionHelp.textContent = hasApplicableVersion
+        ? "The selected version does not provide an inspection basis for this product. Choose another version or review Standards."
+        : "No available version provides an inspection basis for this product. Review the version records in Standards.";
+      showStandardsAction(true);
+    } else {
+      const readiness = getBatchVersionReadiness(version, factorySelect.value, stageSelect.value, selectedLine?.variant?.model);
+      submit.disabled = !readiness.ready;
+      if (!readiness.ready) {
+        versionHelp.textContent = "The selected version is not ready for this product, factory, and stage. Review the version in Standards or choose another version.";
+        showStandardsAction(true);
+      } else {
+        versionHelp.textContent = versionSelect.value === versions[0]?.id
+          ? "The latest available version is selected. You may choose an earlier version; the selected basis is locked on this batch."
+          : "An earlier available version is selected. The selected basis is locked on this batch.";
+        showStandardsAction(false);
+      }
     }
+    if (!factorySelect.value || !stageSelect.value || !versionSelect.value) submit.disabled = true;
   };
   const updateCountEligibility = () => {
     const eligibleOqc = stageSelect.value.toUpperCase() === "OQC";
@@ -918,13 +956,13 @@ function openNewBatchDialog(state, ctx) {
   orderLine.addEventListener("change", versionOptionsForSelection);
   versionSelect.addEventListener("change", refreshApplicability);
   factorySelect.addEventListener("change", refreshApplicability);
-  stageSelect.addEventListener("change", updateCountEligibility);
+  stageSelect.addEventListener("change", refreshApplicability);
   countForPO.addEventListener("change", () => { countForPOTouched = true; });
   versionOptionsForSelection();
   const form = el("form", { className: "qc-ops-form qc-ops-new-batch-form" },
     field("Purchase order line 采购订单行", orderLine),
     field("Product variant 产品规格", el("output", { className: "qc-ops-derived-output" }, "Selected from PO line")),
-    field("Published version 设计版本", versionSelect), versionHelp,
+    field("Design version 设计版本", versionSelect), versionHelp, standardsAction,
     el("div", { className: "qc-ops-form-grid" }, field("Factory 工厂", factorySelect), field("Inspection stage 检验阶段", stageSelect)),
     field("Batch number 批次编号", numberInput),
     field("Batch quantity 批次数量", quantityInput),
@@ -949,7 +987,7 @@ function openNewBatchDialog(state, ctx) {
     formError.textContent = "";
     const [orderId, lineId] = orderLine.value.split("::");
     if (!orderId || !lineId || !versionSelect.value || !factorySelect.value || !stageSelect.value) {
-      formError.textContent = "Choose an order line with a published version and applicable factory/stage standards.";
+      formError.textContent = "Choose an order line, a design version, and applicable factory/stage inspection items.";
       return;
     }
     if (!form.reportValidity()) return;
@@ -976,10 +1014,6 @@ function openNewBatchDialog(state, ctx) {
     if (createdId) ctx.navigate("batches", createdId);
     else ctx.navigate("batches");
   });
-  if (!lines.length) {
-    formError.textContent = "Create a purchase order and line before creating a batch.";
-    submit.disabled = true;
-  }
   showDialog("New inspection batch", form);
 }
 
@@ -990,9 +1024,8 @@ function renderBatchList(root, ctx) {
   const orders = list(state.orders);
   const variants = variantsById(state);
   const createButton = button("New batch", () => openNewBatchDialog(state, ctx), "button button-primary");
-  const createableLines = orderedLines(state).filter((entry) => publishedVersions(state, entry.variant.familyId)
-    .some((version) => applicablePairs(version, entry.variant.model).length > 0));
-  createButton.disabled = createableLines.length === 0;
+  const orderLines = orderedLines(state);
+  const createableLines = orderLines.filter((entry) => hasReadyVersionForModel(state, entry.variant.familyId, entry.variant.model));
   const actions = [createButton, historicalBatchImportControl(ctx)];
   const toolbar = el("div", { className: "qc-ops-list-toolbar" });
   const search = el("input", { type: "search", placeholder: "Search batch, product, PO, source file, or version", "aria-label": "Search batches" });
@@ -1078,10 +1111,16 @@ function renderBatchList(root, ctx) {
       el("p", {}, "A batch belongs to one explicit purchase order line and one product variant. Create an order first, then return here to create an inspection batch."),
       button("Open purchase orders", () => ctx.navigate("orders"), "button button-primary")
     ));
-  } else if (!batches.length && orders.length && !createableLines.length) {
+  } else if (!batches.length && orders.length && !orderLines.length) {
     sections.push(el("section", { className: "card qc-ops-empty-card" },
-      el("h2", {}, "Publish an inspection basis before creating batches"),
-      el("p", {}, "At least one PO line needs a published version with applicable standards for its model. Review and publish a valid design version first."),
+      el("h2", {}, "Add a purchase order line"),
+      el("p", {}, "Choose a product variant and ordered quantity on a purchase order before creating an inspection batch."),
+      button("Open purchase orders", () => ctx.navigate("orders"), "button button-primary")
+    ));
+  } else if (!batches.length && orderLines.length && !createableLines.length) {
+    sections.push(el("section", { className: "card qc-ops-empty-card" },
+      el("h2", {}, "Review design versions"),
+      el("p", {}, "Check that an available version provides inspection rows for the product, factory, and stage you need."),
       button("Open standards", () => ctx.navigate("standards"), "button button-primary")
     ));
   }
@@ -1101,7 +1140,7 @@ function renderBatchList(root, ctx) {
   }
   if (batches.length) {
     sections.push(el("section", { className: "card qc-ops-list-card" }, toolbar, el("div", { className: "qc-ops-table-scroll" }, table)));
-  } else if (orders.length && createableLines.length) {
+  } else if (orders.length && orderLines.length && createableLines.length) {
     sections.push(el("section", { className: "card qc-ops-empty-card" },
       el("h2", {}, "No batches yet"),
       el("p", {}, "Once a purchase order and published inspection version are ready, create the first batch here."),

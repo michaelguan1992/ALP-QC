@@ -14,11 +14,13 @@ import { addBatchAttachment, addDocument, addPhotos, removeBatchAttachment, remo
 import { addDiscussion, closeIssue, createIssue, saveIssue } from "./qc-issues.js";
 import { createBatch, getBatchWorkspace as readBatchWorkspace, releaseBatch, saveBatchDetails, saveInspection } from "./qc-inspections.js";
 import { createOrder, getPurchaseOrderProgress, saveOrder } from "./qc-purchasing.js";
-import { createVersion, cloneVersion, installAPReferences, publishVersion, saveVersion } from "./qc-standards.js";
+import { createVersion, cloneVersion, installAPReferences, publishVersion, saveVersion, supersedeOutdatedAPVersions } from "./qc-standards.js";
 import { clone } from "./qc-domain.js";
-import { validateQCState } from "./qc-validation.js";
+import { validateBackup, validateQCState } from "./qc-validation.js";
 import { materializeHistoricalBatches } from "./qc-historical-batches.js";
 import { importLarkVersionHistory } from "./qc-lark-versions.js";
+import { mergeSupersededAPVersionDuplicates } from "./qc-version-merge.js";
+import { removeAuthorizedS15TrialVersion, S15_TRIAL_VERSION_ID } from "./qc-version-cleanup.js";
 
 export { PHOTO_MAX_BYTES, DOCUMENT_MAX_BYTES, ASSET_TOTAL_MAX_BYTES, BACKUP_MAX_BYTES };
 
@@ -30,7 +32,24 @@ const COMMANDS = new Map([
   ["cloneVersion", cloneVersion],
   ["publishVersion", publishVersion],
   ["installAPReferences", installAPReferences],
-  ["importLarkVersionHistory", (state, data) => importLarkVersionHistory(state, data.package)],
+  ["importLarkVersionHistory", (state, data) => {
+    const outcome = importLarkVersionHistory(state, data.package);
+    const versionCorrection = supersedeOutdatedAPVersions(state);
+    const versionMerge = mergeSupersededAPVersionDuplicates(state);
+    if (!versionCorrection.versionIds.length && !versionMerge.changed) return outcome;
+    const mergedDocuments = versionMerge.assetIds.length;
+    return {
+      ...outcome,
+      changed: true,
+      summary: `${outcome.summary} Superseded ${versionCorrection.versionIds.length} verified AP version${versionCorrection.versionIds.length === 1 ? "" : "s"}; merged ${versionMerge.versionIds.length} into the existing recorded history and relinked ${mergedDocuments} document${mergedDocuments === 1 ? "" : "s"}.`,
+      counts: {
+        ...outcome.counts,
+        supersededVersions: versionCorrection.versionIds.length,
+        mergedVersions: versionMerge.versionIds.length,
+        relinkedDocuments: mergedDocuments,
+      },
+    };
+  }],
   ["createOrder", createOrder],
   ["saveOrder", saveOrder],
   ["createBatch", createBatch],
@@ -48,6 +67,8 @@ const COMMANDS = new Map([
   ["addDocument", addDocument],
   ["removeVersionAttachment", removeVersionAttachment],
 ]);
+
+export const QC_COMMAND_TYPES = Object.freeze([...COMMANDS.keys()]);
 
 function defaultIdFactory() {
   if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
@@ -75,6 +96,10 @@ function requireAdapter(adapter) {
   }
 }
 
+function hasS15TrialCleanupAudit(state) {
+  return state.audit.some((event) => event.action === "removeS15TrialVersion" && event.entityId === S15_TRIAL_VERSION_ID);
+}
+
 export function createQCService(adapter, options = {}) {
   requireAdapter(adapter);
   const idFactory = options.idFactory ?? defaultIdFactory;
@@ -92,21 +117,59 @@ export function createQCService(adapter, options = {}) {
     const existing = await adapter.readState();
     if (existing !== null) {
       validateQCState(existing);
-      if (existing.history?.inspections?.length) {
+      const correctionPreview = clone(existing);
+      const pendingVersionCorrection = supersedeOutdatedAPVersions(correctionPreview);
+      const pendingVersionMerge = mergeSupersededAPVersionDuplicates(correctionPreview);
+      const pendingTrialCleanup = removeAuthorizedS15TrialVersion(correctionPreview);
+      if (existing.history?.inspections?.length || pendingVersionCorrection.versionIds.length || pendingVersionMerge.changed || pendingTrialCleanup.versionIds.length) {
         await adapter.transact((current) => {
           if (current === null) return { state: createInitialQCState(), result: null };
           validateQCState(current);
           const state = clone(current);
-          const migration = materializeHistoricalBatches(state);
-          if (migration.added === 0) return { state: current, result: null };
+          const migration = state.history?.inspections?.length
+            ? materializeHistoricalBatches(state)
+            : { added: 0 };
+          const versionCorrection = supersedeOutdatedAPVersions(state);
+          const versionMerge = mergeSupersededAPVersionDuplicates(state);
+          const trialCleanup = removeAuthorizedS15TrialVersion(state);
+          if (migration.added === 0 && versionCorrection.versionIds.length === 0 && !versionMerge.changed && trialCleanup.versionIds.length === 0) return { state: current, result: null };
           state.revision += 1;
-          addAudit(state, {
-            idFactory,
-            now,
-            action: "migrateHistoricalBatches",
-            entityId: "historical-batch-migration",
-            summary: `Added ${migration.added} canonical historical batch record${migration.added === 1 ? "" : "s"} from preserved PDF evidence.`,
-          });
+          if (migration.added > 0) {
+            addAudit(state, {
+              idFactory,
+              now,
+              action: "migrateHistoricalBatches",
+              entityId: "historical-batch-migration",
+              summary: `Added ${migration.added} canonical historical batch record${migration.added === 1 ? "" : "s"} from preserved PDF evidence.`,
+            });
+          }
+          if (versionCorrection.versionIds.length > 0) {
+            addAudit(state, {
+              idFactory,
+              now,
+              action: "supersedeOutdatedAPVersions",
+              entityId: "ap-25.10.29-supersession",
+              summary: `Marked ${versionCorrection.versionIds.length} verified AP 25.10.29 operational version${versionCorrection.versionIds.length === 1 ? "" : "s"} as superseded.`,
+            });
+          }
+          if (versionMerge.changed) {
+            addAudit(state, {
+              idFactory,
+              now,
+              action: "mergeSupersededAPVersionDuplicates",
+              entityId: "ap-25.10.29-recorded-merge",
+              summary: `Merged ${versionMerge.versionIds.length} verified AP 25.10.29 PDF version${versionMerge.versionIds.length === 1 ? "" : "s"} into existing recorded source entries and relinked ${versionMerge.assetIds.length} document${versionMerge.assetIds.length === 1 ? "" : "s"}.`,
+            });
+          }
+          if (trialCleanup.versionIds.length > 0 && !hasS15TrialCleanupAudit(state)) {
+            addAudit(state, {
+              idFactory,
+              now,
+              action: "removeS15TrialVersion",
+              entityId: S15_TRIAL_VERSION_ID,
+              summary: "Removed the authorized empty S15 trial version 26.09.05.",
+            });
+          }
           validateQCState(state);
           return { state, result: null };
         });
@@ -132,6 +195,15 @@ export function createQCService(adapter, options = {}) {
     if (state === null) return createInitialQCState();
     validateQCState(state);
     return clone(state);
+  }
+
+  async function getRevision() {
+    await ensureOpen();
+    if (typeof adapter.getRevision === "function") {
+      const revision = await adapter.getRevision();
+      return revision === null ? 0 : revision;
+    }
+    return (await getState()).revision;
   }
 
   async function command(type, data = {}, expectedRevision) {
@@ -171,13 +243,56 @@ export function createQCService(adapter, options = {}) {
   async function importBackup(backup, expectedRevision) {
     const savedBackup = clone(backup);
     if (savedBackup?.state?.history?.sources?.length) await verifyHistoryStateAssets(savedBackup.state);
+    validateBackup(savedBackup);
+    const omittedBackupTrial = removeAuthorizedS15TrialVersion(savedBackup.state);
     await ensureOpen();
     return adapter.transact((current) => {
       const state = current === null ? createInitialQCState() : current;
       validateQCState(state);
       validateExpectedRevision(expectedRevision, state);
       const outcome = applyBackupImport(state, savedBackup, { idFactory, now });
-      return { state: outcome.state, result: outcome.result };
+      const trialCleanup = removeAuthorizedS15TrialVersion(outcome.state);
+      const shouldAuditCleanup = (trialCleanup.versionIds.length > 0 || omittedBackupTrial.versionIds.length > 0) &&
+        !hasS15TrialCleanupAudit(outcome.state);
+      if (trialCleanup.versionIds.length === 0 && !shouldAuditCleanup) {
+        if (!omittedBackupTrial.versionIds.length) return { state: outcome.state, result: outcome.result };
+        return {
+          state: outcome.state,
+          result: {
+            ...outcome.result,
+            counts: {
+              ...outcome.result.counts,
+              omittedTrialVersions: omittedBackupTrial.versionIds.length,
+              removedTrialVersions: 0,
+            },
+          },
+        };
+      }
+
+      if (!outcome.result.changed) outcome.state.revision += 1;
+      if (shouldAuditCleanup) {
+        addAudit(outcome.state, {
+          idFactory,
+          now,
+          action: "removeS15TrialVersion",
+          entityId: S15_TRIAL_VERSION_ID,
+          summary: "Removed or omitted the authorized empty S15 trial version 26.09.05 during restore.",
+        });
+      }
+      validateQCState(outcome.state);
+      return {
+        state: outcome.state,
+        result: {
+          ...outcome.result,
+          changed: true,
+          revision: outcome.state.revision,
+          counts: {
+            ...outcome.result.counts,
+            omittedTrialVersions: omittedBackupTrial.versionIds.length,
+            removedTrialVersions: trialCleanup.versionIds.length,
+          },
+        },
+      };
     });
   }
 
@@ -197,6 +312,7 @@ export function createQCService(adapter, options = {}) {
   return Object.freeze({
     initialize,
     getState,
+    getRevision,
     command,
     getBatchWorkspace,
     getPurchaseOrderProgress: getOrderProgress,

@@ -8,14 +8,14 @@ cd "$PROJECT_DIR" || {
 }
 
 if ! command -v node >/dev/null 2>&1; then
-  print "未检测到 Node.js。请安装 Node.js 22 或更高版本，然后重新启动。"
+  print "Node.js was not found. Install Node.js 22.13 or later, then restart."
   read "?按 Return 键关闭此窗口。"
   exit 1
 fi
 
-NODE_MAJOR="$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null)"
-if [[ ! "$NODE_MAJOR" =~ '^[0-9]+$' ]] || (( NODE_MAJOR < 22 )); then
-  print "当前 Node.js 版本过旧。请安装 Node.js 22 或更高版本后重新启动。"
+NODE_SQLITE_SUPPORTED="$(node -p 'const [major, minor] = process.versions.node.split(".").map(Number); Number((major === 22 && minor >= 13) || (major === 23 && minor >= 4) || major >= 24)' 2>/dev/null)"
+if [[ "$NODE_SQLITE_SUPPORTED" != "1" ]]; then
+  print "Built-in SQLite requires Node.js 22.13+ on the 22.x line, 23.4+ on the 23.x line, or 24+. Install a supported release, then restart."
   read "?按 Return 键关闭此窗口。"
   exit 1
 fi

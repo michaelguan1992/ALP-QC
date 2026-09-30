@@ -11,7 +11,8 @@ import {
   requirePositiveInteger,
   requireString,
 } from "./qc-domain.js";
-import { latestPublishedVersion, selectApplicableItems } from "./qc-standards.js";
+import { normalizeStandardItems, selectApplicableItems } from "./qc-standards.js";
+import { getBatchVersionItems, getBatchVersionReadiness, getBatchVersions } from "./qc-batch-versions.js";
 import { resolveBatchDisplayNumbers } from "./qc-batch-display.js";
 
 export function requireBatch(state, batchId) {
@@ -62,21 +63,24 @@ export function createBatch(state, data, context) {
   const countForPO = requireBoolean(data.countForPO, "Final-shipment PO counting flag");
   if (countForPO && stage !== "OQC") fail("Only OQC batches can count released quantity toward a purchase order.");
 
+  const familyVersions = getBatchVersions(state, family.id);
   let version;
   if (data.versionId == null || String(data.versionId).trim() === "") {
-    version = latestPublishedVersion(state, family.id);
-    if (!version) fail(`Publish a design version for ${family.name} before creating a batch.`);
+    version = familyVersions[0];
+    if (!version) fail(`No recorded or published design version is available for ${family.name}.`);
   } else {
-    version = state.versions.find((candidate) => candidate.id === data.versionId);
-    if (!version || version.familyId !== family.id || version.status !== "published") {
-      fail("Choose a published design version from the selected product family.");
-    }
+    version = familyVersions.find((candidate) => candidate.id === data.versionId);
+    if (!version) fail("Choose a recorded, published, or superseded design version from the selected product family.");
   }
-  const applicableItems = selectApplicableItems(version, factory, stage, variant.model);
+  const readiness = getBatchVersionReadiness(version, factory, stage, variant.model);
+  if (!readiness.ready) fail(readiness.message);
+  const projectedVersion = { ...version, items: getBatchVersionItems(version) };
+  const applicableItems = selectApplicableItems(projectedVersion, factory, stage, variant.model);
   if (!applicableItems.length) fail(`Version ${version.label} has no ${factory} ${stage} standards applicable to ${variant.model}.`);
+  const lockedItems = normalizeStandardItems(applicableItems, family, context.idFactory, applicableItems);
 
   const id = makeId(context.idFactory);
-  const rows = applicableItems.map((item) => ({
+  const rows = lockedItems.map((item) => ({
     ...structuredClone(item),
     inspectedQty: Math.ceil(quantity * item.samplingPercent / 100),
     defectiveQty: null,

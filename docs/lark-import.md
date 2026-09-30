@@ -49,7 +49,11 @@ The generated `report.counts` contains these results:
 
 Revision `recvvVYXNMjjwO` (`VENTUS`) is included once in each Web family and marked `BROAD_PRODUCT_LINKS` for review. Its raw linked-product IDs remain available in `rawRecord`; the revision is not excluded because its links include products in both Web families.
 
-The entry for S15 revision `26.09.05` preserves raw status `生效中 Active`, effective timestamp `2026-09-24T00:00:00.000-07:00`, change description `fefe`, and zero linked specs. The distinct raw version spelling `26.4.24` is also retained.
+The raw package entry for S15 revision `26.09.05` preserves raw status `生效中 Active`, effective timestamp `2026-09-24T00:00:00.000-07:00`, change description `fefe`, zero linked specs, and no attachments. The distinct raw version spelling `26.4.24` is also retained. The user identified this exact entry as a trial and authorized its exclusion from the active Web ledger; the raw JSON and report remain unchanged.
+
+### Authorized active-ledger exclusion
+
+Exclude only projection `lark:recvwbnjOo2r4P:s15` (source record `recvwbnjOo2r4P`) when its family is `s15`, label is `26.09.05`, description is `fefe`, and specs and attachments are empty. The raw snapshot and generated report continue to show 23 projections and 120 linked spec rows. The active ledger contains 22 entries: 11 for S11–S14 and 11 for S15. Initialization removes a matching active copy once and audits it; import and restore paths must not recreate it. A dependency such as a batch reference rejects removal or restore without cascading. After exclusion, the latest active versions are S15 `26.09.04` and S11–S14 `26.08.19`.
 
 Every excluded revision appears in `report.excludedVersionRecords` with `sourceRecordId`, `revisionValue`, `reasonCode`, and `linkedProductIds`. The generated exclusions are:
 

@@ -1,4 +1,5 @@
 import { deepEqual, fail, requireRecord, stableStringify } from "./qc-domain.js";
+import { isAuthorizedS15TrialPackageEntry } from "./qc-version-cleanup.js";
 
 const PACKAGE_TYPE = "masterqc-lark-version-history";
 const REVISION_FIELD = "版本号 Revision";
@@ -232,11 +233,14 @@ function recordedVersionFromPackage(packageData, entry) {
 /** Add archived version records as immutable, non-operational family entries. */
 export function importLarkVersionHistory(state, packageData) {
   verifyLarkVersionPackage(packageData);
+  const omittedTrialVersions = packageData.records.filter(isAuthorizedS15TrialPackageEntry).length;
   const currentById = new Map(state.versions.map((version) => [version.id, version]));
   const currentBySource = new Map(state.versions
     .filter((version) => version.status === "recorded" && version.source?.kind === "lark-version-record")
     .map((version) => [`${version.familyId}|${version.source.recordId}`, version]));
-  const incoming = packageData.records.map((entry) => recordedVersionFromPackage(packageData, entry));
+  const incoming = packageData.records
+    .filter((entry) => !isAuthorizedS15TrialPackageEntry(entry))
+    .map((entry) => recordedVersionFromPackage(packageData, entry));
   const pending = [];
   let skipped = 0;
   let skippedSourceRows = 0;
@@ -268,12 +272,13 @@ export function importLarkVersionHistory(state, packageData) {
     entityId: pending[0]?.id ?? incoming[0]?.id ?? "lark-version-history-import",
     changed: pending.length > 0,
     action: "importLarkVersionHistory",
-    summary: `Added ${pending.length} archived version${pending.length === 1 ? "" : "s"} and ${sourceRowsAdded} inspection item${sourceRowsAdded === 1 ? "" : "s"}; skipped ${skipped} already-present version${skipped === 1 ? "" : "s"}.`,
+    summary: `Added ${pending.length} archived version${pending.length === 1 ? "" : "s"} and ${sourceRowsAdded} inspection item${sourceRowsAdded === 1 ? "" : "s"}; skipped ${skipped} already-present version${skipped === 1 ? "" : "s"}; omitted ${omittedTrialVersions} authorized empty S15 trial version${omittedTrialVersions === 1 ? "" : "s"}.`,
     counts: {
       addedVersions: pending.length,
       skippedVersions: skipped,
       addedSourceRows: sourceRowsAdded,
       skippedSourceRows,
+      omittedTrialVersions,
     },
   };
 }

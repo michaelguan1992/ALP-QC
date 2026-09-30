@@ -21,8 +21,10 @@ import {
   stableStringify,
 } from "./qc-domain.js";
 import { normalizeStandardItems, selectApplicableItems } from "./qc-standards.js";
+import { getBatchVersionItems, getBatchVersionReadiness } from "./qc-batch-versions.js";
 import { validateHistoryState } from "./qc-history.js";
 import { createHistoricalBatch } from "./qc-historical-batches.js";
+import { validateVersionMergeEvidence } from "./qc-version-merge.js";
 
 const PHOTO_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const DOCUMENT_MIMES = new Set([...PHOTO_MIMES, "application/pdf", "text/plain", "text/csv", "text/markdown"]);
@@ -221,17 +223,18 @@ function validateVersions(state, families) {
       validateRecordedVersion(version);
       continue;
     }
-    assert(["draft", "published"].includes(version.status), `Version ${version.id} has an invalid status.`);
+    assert(["draft", "published", "superseded"].includes(version.status), `Version ${version.id} has an invalid status.`);
     assertText(version.label, "Version label", { maxLength: 160 });
     assert(!Object.hasOwn(version, "sourceRows"), `Operational version ${version.id} cannot contain recorded source rows.`);
     requirePositiveInteger(version.sequence, "Version sequence");
     requireDate(version.effectiveDate, "Version effective date");
     requireTimestamp(version.createdAt, "Version created time");
     if (version.status === "published") requireTimestamp(version.publishedAt, "Version published time");
-    else assert(version.publishedAt === null, `Draft version ${version.label} cannot have a publication time.`);
+    else if (version.status === "draft") assert(version.publishedAt === null, `Draft version ${version.label} cannot have a publication time.`);
+    else if (version.publishedAt !== null) requireTimestamp(version.publishedAt, "Superseded version publication time");
     normalizeStandardItems(version.items, family, () => fail("A persisted standard item is missing an ID."), version.items);
     sequenceKeys.push(`${version.familyId}|${version.sequence}`);
-    if (version.status === "published") {
+    if (version.status === "published" || (version.status === "superseded" && version.publishedAt !== null)) {
       const missingModels = family.models.filter((model) => !version.items.some((item) => item.models.length === 0 || item.models.includes(model)));
       assert(missingModels.length === 0, `Published version ${version.label} has no inspection items for ${missingModels.join(", ")}.`);
     }
@@ -342,7 +345,7 @@ function validateBatches(state, families, variants, orders, versions, assets) {
     const family = families.get(batch.familyId);
     assert(family && family.id === variant.familyId, `Batch ${batch.number} family does not match its product variant.`);
     const version = versions.get(batch.versionId);
-    assert(version && version.familyId === family.id && version.status === "published", `Batch ${batch.number} must reference a published version in its family.`);
+    assert(version && version.familyId === family.id && ["recorded", "published", "superseded"].includes(version.status), `Batch ${batch.number} must reference a recorded, published, or superseded version in its family.`);
     requirePositiveInteger(batch.quantity, "Batch quantity");
     const factory = normalizeFactory(batch.factory);
     const stage = normalizeStage(batch.stage);
@@ -353,7 +356,7 @@ function validateBatches(state, families, variants, orders, versions, assets) {
     assert(typeof batch.countForPO === "boolean", "PO-counting flag must be boolean.");
     if (batch.countForPO) assert(stage === "OQC", "Only OQC batches may count toward PO released quantity.");
     assertText(batch.versionLabel, "Locked version label", { maxLength: 160 });
-    assert(batch.versionLabel === version.label, `Batch ${batch.number} version label does not match its immutable published version.`);
+    assert(batch.versionLabel === version.label, `Batch ${batch.number} version label does not match its immutable inspection version.`);
     requireDate(batch.date, "Batch date");
     assertText(batch.recorder, "Recorder", { maxLength: 200, allowBlank: true });
     assertText(batch.notes, "Batch notes", { maxLength: 5000, allowBlank: true });
@@ -362,7 +365,11 @@ function validateBatches(state, families, variants, orders, versions, assets) {
     assert(Array.isArray(batch.rows) && batch.rows.length > 0, `Batch ${batch.number} must contain applicable inspection rows.`);
     assertUniqueIds(batch.rows, `Inspection row in batch ${batch.number}`);
     normalizeStandardItems(batch.rows, family, () => fail("A locked inspection row is missing an ID."), batch.rows);
-    const sourceItems = selectApplicableItems(version, factory, stage, variant.model);
+    const readiness = getBatchVersionReadiness(version, factory, stage, variant.model);
+    assert(readiness.ready, `Batch ${batch.number} uses incomplete inspection standards. ${readiness.message}`);
+    const projectedVersion = { ...version, items: getBatchVersionItems(version) };
+    const applicableSourceItems = selectApplicableItems(projectedVersion, factory, stage, variant.model);
+    const sourceItems = normalizeStandardItems(applicableSourceItems, family, () => fail("A projected inspection standard is incomplete."), applicableSourceItems);
     assert(sourceItems.length === batch.rows.length, `Batch ${batch.number} rows do not match its published version applicability.`);
     const standardFields = ["id", "key", "no", "title", "titleZh", "specification", "specificationZh", "devices", "factory", "stage", "models", "samplingPercent", "recordingRule", "important", "timeSeconds", "procedureUrl"];
     for (let index = 0; index < sourceItems.length; index += 1) {
@@ -509,6 +516,7 @@ export function validateQCState(state) {
   const families = familyMap(state);
   const variants = new Map(state.variants.map((variant) => [variant.id, variant]));
   validateVersions(state, families);
+  validateVersionMergeEvidence(state, families);
   const versions = versionMap(state);
   validateOrders(state, variants);
   const orders = new Map(state.orders.map((order) => [order.id, order]));

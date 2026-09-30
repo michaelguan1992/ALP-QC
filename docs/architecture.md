@@ -7,10 +7,10 @@ frontend/  HTML / CSS / page interactions
     ↓
 core/      business behavior / data-service interface
     ↓
-storage/   IndexedDB adapter / Dexie / database upgrades
+storage/   browser HTTP transport / SQLite adapter / legacy IndexedDB migration
 ```
 
-`launcher/` is a local startup tool, not a business backend. The browser loads the three JavaScript layers; records are written to browser-managed IndexedDB, not to the launcher's folder.
+`launcher/` starts a loopback application service and serves the allowlisted static frontend. Browser operations cross a same-origin HTTP interface; the server executes the existing core service and stores records in SQLite. The browser does not open the SQLite file directly.
 
 The core module decomposition is described in [Core Business Design](core-business-design.md). The complete local edition follows [Local App Contract](app-contract.md), which defines command inputs, state, transactional storage, and backup behavior.
 
@@ -29,30 +29,32 @@ Dynamic repeated inspection rows use HTML templates so they are easy to edit dir
 
 ## Current Storage
 
-Dexie is installed with the project, and the local server serves its browser script; the application does not use a runtime CDN. Database version 2 preserves the original `settings` store and adds `qcState`. Catalog, versions, orders, batches, issues, and bounded attachments are stored in a single aggregate document for atomic business operations in this first local edition. The core validates the current revision and all related facts inside the write transaction. Pages never directly write IndexedDB.
+The main app and demo use separate SQLite workspaces managed by the local application service. All browsers using the same `http://127.0.0.1:4173` service read the same selected workspace. The browser HTTP facade preserves the asynchronous core-service interface; the server's `createQCService` validates business commands and expected revisions inside atomic SQLite transactions. The API accepts only explicit application operations, never arbitrary SQL, caller functions, or unrestricted state replacement.
 
-The fixed address is `http://127.0.0.1:4173`. A change to the host, protocol, or port changes the website origin. Therefore, a port conflict must produce an error instead of silently choosing another port. Different browsers and browser profiles also have separate storage. Do not use a private browsing window for long-term data.
+Keep the aggregate state shape and bounded data-URL attachments for this change. This preserves source facts, IDs, backup compatibility, and all-or-nothing business writes without redesigning the domain model. The default production database lives at `data/workspace/masterqc-main.sqlite` inside the project and is eligible for Git so project copies include saved records and attachments. An explicit data-directory override remains available. The demo database and transaction files remain ignored, and the server never serves the workspace directory as static files. SQLite uses DELETE journaling and FULL synchronization. Stop the service before Git or file-copy operations on the database to avoid reading a transaction in progress.
 
-Database upgrades are handled centrally in `storage/`. Ordinary page changes do not upgrade or clear the database. Backup exports include attachment content. Restore is additive, validates references and conflicts, and never silently replaces existing records. The original initialization draft stays at the same settings key and is available through its retained page.
+The address stays `http://127.0.0.1:4173`, bound to loopback. Port conflicts fail instead of switching ports. The API validates request Host and Origin, JSON content type, request size, operation, and workspace. This is same-computer sharing, not LAN or cloud hosting.
 
-The default workspace uses `masterqc-web`. An explicit `?workspace=demo` opens the separate `masterqc-web-demo` database with a persistent demo label; neither workspace automatically creates sample orders or results. The old throwaway prototype remains memory-only and independent.
+The existing Dexie version-2 database, including `settings` and `qcState`, is retained unchanged in each browser. The original initialization draft continues to use its settings key. An explicit migration action reads the legacy QC aggregate, produces the full backup format, and invokes validated additive restore into the selected SQLite workspace. The source IndexedDB is not deleted or continuously synchronized. Conflicting records stop restore without partial changes.
+
+Pages show that data is stored on this computer. A lightweight revision check while the page is open detects changes from other clients; stale saves reject and request a reload. The interface preserves unsaved forms until the user chooses how to proceed. The demo remains separate, and the old prototype remains memory-only.
 
 Original PDF ingestion retains an optional historical-evidence section in the aggregate and creates canonical historical entries in `batches`. The batch discriminator separates preserved historical facts from newly entered operational batches, whose one-variant, one-order-line rules remain enforced. The core upgrades existing imported evidence atomically and idempotently; the frontend does not maintain a second batch collection or concatenate PDF pages into a separate history product. Optional batch attachment references use the existing document assets. Historical batches do not enter release or PO accounting, and older states/backups remain supported. See [Original PDF Import](pdf-import.md) for transcription and provenance rules.
 
 Storing the first edition as one aggregate keeps writes consistent but is intended for modest local data volumes. It is not a scalable multi-user database. A later adapter may split attachments and indexed entities after migration and backup validation; changing storage must not weaken the existing atomic business operations.
 
-## Future SQLite Option
+## Service Boundary and Future Multi-Computer Use
 
 ```text
-Same frontend/ and core/ interfaces
-    ↓
-HTTP data adapter
-    ↓
-Small shared backend
-    ↓
-SQLite file + separate attachment directory
+Browser frontend → core HTTP service facade → storage HTTP transport
+                                     ↓
+                         loopback application API
+                                     ↓
+                    existing core business service
+                                     ↓
+                      SQLite aggregate adapter
+                                     ↓
+                       persistent database file
 ```
 
-The shared backend accesses SQLite; the browser does not open the database file directly. Store the database and attachments in persistent directories outside the deployed application. Interface isolation can reduce page changes, but a future move still requires an API, data migration, and multi-client conflict handling; it is not a one-switch change.
-
-Sharing code across platforms does not sync the current data automatically. A future migration must specify record IDs, versions, and the attachment inventory, then be validated on a copy before switching over.
+SQLite is accessed only by the backend. Ordinary UI edits preserve bindings and do not reset storage. Exported backups include records and attachments. A project copy containing the production database starts with the same saved snapshot. Each computer subsequently writes its own database; Git transfers committed snapshots and does not synchronize live changes. Binary database conflicts require deliberate selection or validated data migration, not an automatic merge. A later shared deployment needs an accessible host, access controls, operational backups, and multi-client conflict handling beyond this loopback scope.

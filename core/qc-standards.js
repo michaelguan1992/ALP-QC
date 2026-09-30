@@ -17,6 +17,30 @@ const SOURCE_VERSION_IDS = {
   "s11-s14": "20000000-0000-4000-8000-000000251029",
   s15: "20000000-0000-4000-8000-00000025102a",
 };
+const SUPERSEDED_AP_VERSION_TARGETS = [
+  { id: "history-version-28472835a7113e44c0de60c15607f7cdf7fc82bc", familyId: "s11-s14", label: "25.10.29" },
+  { id: "history-version-cac6c73b7872b4fdf9493ec4c66d4509e12b9e0c", familyId: "s15", label: "25.10.29" },
+];
+const SOURCE_REFERENCE_NOTE_PREFIXES = [
+  "historical source reference draft.",
+  "masterqc-ap-oqc-reference-25.10.29.",
+];
+
+/** Apply the exact, idempotent correction for the two outdated PDF-derived operational versions. */
+export function supersedeOutdatedAPVersions(state) {
+  const supersededVersionIds = [];
+  for (const target of SUPERSEDED_AP_VERSION_TARGETS) {
+    const version = state.versions.find((candidate) => candidate.id === target.id);
+    if (!version || version.status === "superseded") continue;
+    if (version.familyId !== target.familyId || version.label !== target.label) continue;
+    if (!(["draft", "published"].includes(version.status))) continue;
+    const note = String(version.notes ?? "").trimStart().toLocaleLowerCase();
+    if (note && !SOURCE_REFERENCE_NOTE_PREFIXES.some((prefix) => note.startsWith(prefix))) continue;
+    version.status = "superseded";
+    supersededVersionIds.push(version.id);
+  }
+  return { versionIds: supersededVersionIds };
+}
 
 function familyById(state, familyId) {
   const family = state.families.find((candidate) => candidate.id === familyId);
@@ -158,6 +182,7 @@ export function saveVersion(state, data, context) {
   const version = state.versions.find((candidate) => candidate.id === id);
   if (!version) fail("That design version is no longer available.");
   if (version.status === "recorded") fail("Archived versions are immutable and cannot be edited.");
+  if (version.status === "superseded") fail("Superseded design versions are immutable and cannot be edited.");
   if (version.status !== "draft") fail("Published design versions are immutable. Clone this version to make changes.");
   const family = familyById(state, version.familyId);
   const details = validateVersionDetails(state, family, data, id);
@@ -195,6 +220,7 @@ export function publishVersion(state, data, context) {
   const version = state.versions.find((candidate) => candidate.id === id);
   if (!version) fail("That design version is no longer available.");
   if (version.status === "recorded") fail("Archived versions cannot be published for new operational batches.");
+  if (version.status === "superseded") fail("Superseded design versions cannot be published for new operational batches.");
   if (version.status === "published") {
     return { entityId: id, changed: false, action: "publishVersion", summary: `Version ${version.label} was already published.` };
   }

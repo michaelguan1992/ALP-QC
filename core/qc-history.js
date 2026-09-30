@@ -15,6 +15,8 @@ import {
 } from "./qc-domain.js";
 import { validateQCState } from "./qc-validation.js";
 import { materializeHistoricalBatches } from "./qc-historical-batches.js";
+import { supersedeOutdatedAPVersions } from "./qc-standards.js";
+import { mergeSupersededAPVersionDuplicates, reconcileHistoricalVersionPackage } from "./qc-version-merge.js";
 
 export const HISTORY_FORMAT = "masterqc-pdf-history";
 export const HISTORY_FORMAT_VERSION = 1;
@@ -300,12 +302,17 @@ function mergeAnomalies(current, incoming, counts) {
 
 export function importHistory(targetState, historyPackage, context) {
   const target = targetState === null ? createInitialQCState() : clone(targetState);
+  const versionCorrection = supersedeOutdatedAPVersions(target);
+  const versionMerge = mergeSupersededAPVersionDuplicates(target);
+  const preparedMerge = reconcileHistoricalVersionPackage(target, historyPackage);
+  historyPackage = preparedMerge.historyPackage;
   target.history ??= { sources: [], inspections: [], anomalies: [] };
   target.history.anomalies ??= [];
   const counts = {
-    added: { sources: 0, inspections: 0, assets: 0, versions: 0, anomalies: 0, batches: 0 },
-    skipped: { sources: 0, inspections: 0, assets: 0, versions: 0, anomalies: 0, batches: 0 },
+    added: { sources: 0, inspections: 0, assets: 0, versions: 0, anomalies: 0, batches: 0, versionMergeEvidence: 0 },
+    skipped: { sources: 0, inspections: 0, assets: 0, versions: 0, anomalies: 0, batches: 0, versionMergeEvidence: 0 },
   };
+  counts.added.versionMergeEvidence = versionMerge.evidenceIds.length + preparedMerge.evidenceIds.length;
   mergeById(target.assets, historyPackage.assets, "assets", counts);
   mergeById(target.versions, historyPackage.versions ?? [], "versions", counts);
   mergeById(target.history.sources, historyPackage.sources, "sources", counts);
@@ -316,7 +323,7 @@ export function importHistory(targetState, historyPackage, context) {
   counts.skipped.batches = projections.skipped;
 
   const addedCount = Object.values(counts.added).reduce((total, count) => total + count, 0);
-  if (addedCount === 0) {
+  if (addedCount === 0 && versionCorrection.versionIds.length === 0 && !versionMerge.changed) {
     validateQCState(target);
     return { state: target, result: { entityId: "history-import", changed: false, counts, revision: target.revision } };
   }
@@ -327,7 +334,7 @@ export function importHistory(targetState, historyPackage, context) {
     now: context.now,
     action: "importHistory",
     entityId: "history-import",
-    summary: `Imported ${counts.added.sources} historical PDF sources and ${counts.added.inspections} inspection records into ${counts.added.batches} canonical historical batches; no PO quantities were linked.`,
+    summary: `Imported ${counts.added.sources} historical PDF sources and ${counts.added.inspections} inspection records into ${counts.added.batches} canonical historical batches; merged ${versionMerge.versionIds.length + preparedMerge.versionIds.length} duplicate AP version records and relinked ${versionMerge.assetIds.length + preparedMerge.assetIds.length} documents; no PO quantities were linked.`,
   });
   validateQCState(target);
   return { state: target, result: { entityId: "history-import", changed: true, counts, revision: target.revision } };

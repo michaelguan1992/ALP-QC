@@ -4,3 +4,10 @@ npm-debug.log*
 
 # Local copies of original source PDFs.
 /local-source-pdfs/
+/.local-data/
+/tmp/sqlite-migration/
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+!data/workspace/masterqc-main.sqlite

@@ -1,4 +1,5 @@
-import { qcService, createDemoQCService } from "../core/qc-app.js";
+import { qcService, createDemoQCService, exportLegacyBrowserBackup } from "../core/qc-app.js";
+import { getBatchVersions } from "../core/qc-batch-versions.js";
 import { renderAdminPage } from "./qc-admin.js";
 import { renderOperationsPage } from "./qc-operations.js";
 import { button, el, notify, showDialog, closeDialog } from "./qc-ui.js";
@@ -166,6 +167,8 @@ function settingsNavItem() {
 function getContext() {
   return {
     service,
+    isDemo: demoMode,
+    exportLegacyBrowserBackup,
     state,
     navigate,
     refresh: requestRefresh,
@@ -219,24 +222,19 @@ function getContext() {
 function renderGettingStarted() {
   const hasStarted = state.orders.length > 0 || state.batches.length > 0;
   if (currentRoute !== "batches" || hasStarted) return null;
-  const publishedCount = state.versions.filter((version) => version.status === "published").length;
+  const families = Array.isArray(state.families) ? state.families : [];
+  const familiesWithVersions = families.filter((family) => getBatchVersions(state, family.id).length > 0).length;
   const intro = el("section", { className: "getting-started card", "aria-labelledby": "getting-started-title" },
     el("div", { className: "getting-started-heading" },
       el("div", {}, el("p", { className: "eyebrow" }, "First run"), el("h2", { id: "getting-started-title" }, "Set up your first inspection")),
-      el("p", { className: "muted" }, "Prepare your first operational inspection from reviewed standards and a purchase order. Historical batches remain available for reference and do not count toward purchase orders."),
+      el("p", { className: "muted" }, "Review design versions, create a purchase order, then create an inspection batch."),
     ),
     el("ol", { className: "setup-steps" },
       el("li", {},
-        el("strong", {}, "Import AP reference drafts"),
-        el("span", {}, "Adds AP OQC reference checks with model-specific requirements. Review before publishing."),
-        button("Import AP references", async () => {
-          const result = await getContext().run("installAPReferences", {});
-          if (result.ok) notify("AP reference drafts are ready to review in Standards.");
-        }, "button-secondary"),
-      ),
-      el("li", {},
-        el("strong", {}, "Review and publish standards"),
-        el("span", {}, publishedCount ? `${publishedCount} published version${publishedCount === 1 ? "" : "s"} available.` : "Choose a family version and publish a complete, applicable standard set."),
+        el("strong", {}, "Review design versions"),
+        el("span", {}, familiesWithVersions
+          ? `Version records are available for ${familiesWithVersions} product famil${familiesWithVersions === 1 ? "y" : "ies"}. Review their inspection items in Standards.`
+          : "Create or review a design version for the product family in Standards."),
         button("Open standards", () => navigate("standards"), "button-secondary"),
       ),
       el("li", {},
@@ -246,7 +244,7 @@ function renderGettingStarted() {
       ),
       el("li", {},
         el("strong", {}, "Create the inspection batch"),
-        el("span", {}, "The batch locks its design version, factory, stage, and applicable inspection rows."),
+        el("span", {}, "Choose a purchase order line and an applicable version. The selected version and inspection rows are locked on the batch."),
         button("Open batches", () => navigate("batches"), "button-secondary"),
       ),
     ),
@@ -272,7 +270,7 @@ function renderApp() {
     ),
     el("div", { className: "sidebar-footer" },
       el("span", { className: "local-dot" }),
-      el("span", {}, "Stored in this browser"),
+      el("span", {}, demoMode ? "Demo data on this computer" : "Shared on this computer"),
       el("a", { href: "/frontend/initialization.html" }, "Initialization draft"),
       el("a", { href: "/frontend/prototype.html" }, "AP table prototype"),
     ),
@@ -284,7 +282,7 @@ function renderApp() {
       el("h1", {}, routeNames[currentRoute] ?? "MasterQC Web"),
     ),
     el("div", { className: "header-status" },
-      el("span", { className: "status-pill status-ready", role: "status" }, "Local storage ready"),
+      el("span", { className: "status-pill status-ready", role: "status" }, "Local server ready"),
       el("span", { className: "revision-label" }, `Revision ${state.revision}`),
     ),
   );
@@ -295,7 +293,7 @@ function renderApp() {
     realUrl.hash = "#/batches";
     workspace.append(el("aside", { className: "demo-banner", role: "status" },
       el("strong", {}, "Demo workspace · Stored separately"),
-      el("span", {}, "Demo records use an isolated browser database."),
+      el("span", {}, "Demo records use a separate local database on this computer."),
       el("a", { href: `${realUrl.pathname}${realUrl.search}${realUrl.hash}` }, "Open your real workspace"),
     ));
   }
@@ -366,22 +364,38 @@ async function start() {
     currentRoute = initial.route;
     selectedId = initial.id;
     if (!location.hash || initial.legacyHistory || initial.legacyReports) history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
-    channel = new BroadcastChannel(`masterqc-web-qc:${demoMode ? "demo" : "local"}`);
+    channel = new BroadcastChannel(`masterqc-web-qc:${service.workspace}`);
     channel.addEventListener("message", (event) => {
       const remoteRevision = Number(event.data?.revision);
       if (Number.isFinite(remoteRevision) && remoteRevision > state.revision) {
         setStale("Another tab changed this workspace. Reload the latest data before saving again.");
       }
     });
+    const checkForSharedChanges = async () => {
+      if (!state) return;
+      try {
+        const latestRevision = await service.getRevision();
+        if (latestRevision > state.revision) {
+          setStale("Another browser or window changed this workspace. Reload the latest data before saving again.");
+        }
+      } catch {
+        // Preserve the current page and any unsaved edits if the local server is briefly unavailable.
+      }
+    };
+    window.setInterval(() => { void checkForSharedChanges(); }, 5000);
+    window.addEventListener("focus", () => { void checkForSharedChanges(); });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") void checkForSharedChanges();
+    });
     renderApp();
   } catch (error) {
     const message = error instanceof Error ? error.message : "The local workspace could not be opened.";
     app.replaceChildren(el("main", { className: "startup-error" },
       el("p", { className: "eyebrow" }, "MasterQC Web"),
-      el("h1", {}, "Local storage is unavailable"),
+      el("h1", {}, "The local QC service is unavailable"),
       el("p", {}, message),
-      el("p", {}, "Close private browsing windows, confirm the fixed local server address, and retry."),
-      button("Retry", () => { app.replaceChildren(el("p", {}, "Opening your local QC workspace…")); void start(); }, "button-primary"),
+      el("p", {}, "Start the local server and open http://127.0.0.1:4173 in a regular browser window, then retry."),
+      button("Retry", () => { app.replaceChildren(el("p", {}, "Connecting to the local QC service…")); void start(); }, "button-primary"),
       el("p", {}, el("a", { href: "/frontend/initialization.html" }, "Open the preserved initialization draft")),
     ));
   }
