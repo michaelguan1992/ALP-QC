@@ -27,6 +27,19 @@ function hasDraftsForBatch(batchId) {
 }
 
 function navigateWithDraftWarning(ctx, route, id, batchId) {
+  if (batchId && hasDraftsForBatch(batchId) && route === "batch-report") {
+    showDialog("Unsaved inspection edits", el("div", { className: "discard-prompt" },
+      el("p", {}, "This batch has unsaved row or detail edits. The report uses saved values only. Your edits will remain as drafts in this tab and will be available when you return."),
+      el("div", { className: "button-row" },
+        button("Stay on this batch", () => closeDialog(true), "button-secondary"),
+        button("View saved report", () => {
+          closeDialog(true);
+          ctx.navigate(route, id, true);
+        }, "button-primary"),
+      ),
+    ));
+    return;
+  }
   if (batchId && hasDraftsForBatch(batchId) && !window.confirm("This batch has unsaved row or detail edits. They will remain as drafts in this tab if you continue. Save all edits before release.")) return;
   ctx.navigate(route, id, true);
 }
@@ -707,6 +720,7 @@ function renderHistoricalBatchDetail(root, ctx, workspace) {
   root.replaceChildren(
     pageHeading("Batches", "Review this batch’s recorded inspection results and attachments.", [
       button("All batches", () => ctx.navigate("batches"), "button button-secondary"),
+      button("View report", () => ctx.navigate("batch-report", batch.id), "button button-secondary"),
     ]),
     metadata,
     renderBatchAttachments(attachmentsWorkspace, state, ctx),
@@ -771,6 +785,7 @@ function renderBatchDetail(root, ctx) {
     const title = batchLabel(batch, state);
     const headerActions = [
       button("All batches", () => navigateWithDraftWarning(ctx, "batches", undefined, batch.id), "button button-secondary"),
+      button("View report", () => navigateWithDraftWarning(ctx, "batch-report", batch.id, batch.id), "button button-secondary"),
       statusPill(batch.status)
     ];
     const metadata = el("section", { className: "card qc-ops-batch-meta-card" },

@@ -26,9 +26,9 @@ Raise an issue from an inspection row to preserve its source facts and evidence 
 
 Release remains a separate action. Complete every row, provide the recorder, and close linked issues before release. Released records are read-only. Only eligible final-shipment releases contribute to the order, using batch quantity rather than inspected sample quantity. Separate variants show separate shortages and excess quantities.
 
-## Reports and documents
+## Batch reports and documents
 
-Reports show saved batch facts and inspection results. Operational Draft or Released status remains visible in report detail. Use the report's print action for the browser's print/save-as-PDF dialog and CSV export for tabular results. Historical comparisons use saved prior results; empty histories remain empty.
+Open a batch detail and choose **View report** to see its read-only saved facts, inspection results, historical comparisons, linked issues, and row photos. Operational Draft or Released status remains visible in report detail. Unsaved row or batch-detail edits stay in this tab and are not included in the report; the warning explains this before you continue. Choose **Back to batch** to return to the same batch with those in-tab drafts intact. Use **Print / save as PDF** for the browser's print dialog or **Download CSV** for tabular results. Historical comparisons use saved prior results; empty histories remain empty.
 
 The library stores local documents and can associate them with a design version. Photo evidence remains attached to the specific inspection row. Exported backups contain attachment data, not just filenames.
 
@@ -36,7 +36,7 @@ The library stores local documents and can associate them with a design version.
 
 Use **Batches** for both imported inspections and newly entered batches. Filter by family, factory, or stage, or search for the batch you need. Open an imported record to see its original quantities, defects, notes, printed version, and source page. The **Attachments** column and batch detail provide its original PDF, including signatures, photographs, and the complete layout.
 
-Batch names show product/model or family, date, factory, and stage, for example `S15-20260521-UI-OQC`. An explicitly recorded original batch number takes priority when available. Only matching names receive short suffixes such as `-01` and `-02`. Original-PDF provenance and source page numbers appear in the attachment/source details; imported batches have no separate Historical status label. Operational Draft/Released status remains available in batch detail. The same names appear in reports and CSV exports.
+Batch names show product/model or family, date, factory, and stage, for example `S15-20260521-UI-OQC`. An explicitly recorded original batch number takes priority when available. Only matching names receive short suffixes such as `-01` and `-02`. Original-PDF provenance and source page numbers appear in the attachment/source details; imported batches have no separate Historical status label. Operational Draft/Released status remains available in batch detail. The same names appear in batch reports and CSV exports.
 
 Attachments are optional for newly entered batches. Batch documents and inspection-row photos have separate ownership: a PDF can describe the whole batch, while a row photo remains evidence for that particular check.
 

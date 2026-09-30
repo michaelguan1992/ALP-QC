@@ -58,11 +58,6 @@ function sourceInspection(batch, state) {
   return inspection;
 }
 
-function sourceFileName(batch, state) {
-  const inspection = sourceInspection(batch, state);
-  return list(state.history?.sources).find((source) => source.id === inspection?.sourceId)?.fileName || "";
-}
-
 function displayTitle(cell, english, chinese) {
   cell.append(h("span", { className: "qc-ops-en" }, text(english)));
   if (chinese) cell.append(h("span", { className: "qc-ops-zh", lang: "zh" }, chinese));
@@ -242,63 +237,13 @@ function printReport() {
   }, 120000);
 }
 
-function renderReportList(root, ctx) {
-  const state = ctx.state || {};
-  const batches = list(state.batches).slice().sort((left, right) => String(right.date || right.createdAt).localeCompare(String(left.date || left.createdAt)));
-  const displayNumbers = resolveBatchDisplayNumbers(state);
-  root.replaceChildren(pageHeading("Reports", "Read-only inspection report snapshots use saved batch records and row-specific photo evidence."));
-  if (!batches.length) {
-    root.append(h("section", { className: "card qc-ops-empty-card" },
-      h("h2", {}, "No inspection reports yet"),
-      h("p", {}, "Reports appear after you create a batch. The inspection table, results, history, and photos stay tied to each batch and its locked standard version."),
-      button("Open batches", () => ctx.navigate("batches"), "button button-primary"),
-    ));
-    return;
-  }
-  const filters = h("div", { className: "qc-ops-report-filters" },
-    h("label", { className: "field" }, h("span", { className: "field-label" }, "Search"), h("input", { type: "search", placeholder: "Batch, PO, variant, lot, or version", "aria-label": "Search inspection reports" })),
-  );
-  const search = filters.querySelector('input[type="search"]');
-  const tableBody = h("tbody");
-  const table = h("table", { className: "qc-ops-list-table qc-ops-report-list-table" },
-    h("thead", {}, h("tr", {}, ...["Batch", "Variant", "Purchase order", "Factory / stage", "Quantity", "Date", ""].map((label) => h("th", { scope: "col" }, label)))),
-    tableBody,
-  );
-  for (const batch of batches) {
-    const displayNumber = displayNumbers.get(batch.id) ?? batch.number;
-    const variant = lookupVariant(state, batch);
-    const order = lookupOrder(state, batch);
-    const family = list(state.families).find((item) => item.id === batch.familyId || item.id === variant?.familyId);
-    const productLabel = batchProductLabel(batch, variant);
-    const searchText = [displayNumber, batch.familyId, family?.name, batch.productLabel, batch.model, batch.color, productLabel, order?.number, batch.factory, batch.stage, batch.lotNumber, batch.versionLabel, sourceFileName(batch, state)].filter((value) => value !== null && value !== undefined).join(" ").toLocaleLowerCase();
-    const row = h("tr", { "data-search": searchText },
-      h("td", {}, h("strong", {}, text(displayNumber))), h("td", {}, text(productLabel)), h("td", {}, text(order?.number)),
-      h("td", {}, batchInspection(batch.stage, batch.factory)), h("td", { className: "qc-ops-number" }, isHistoricalBatch(batch) ? sourceText(batch.quantity) : quantity(batch.quantity)),
-      h("td", {}, dateLabel(batch.date)),
-      h("td", {}, button("View report", () => ctx.navigate("reports", batch.id), "button button-secondary qc-ops-small-button")),
-    );
-    tableBody.append(row);
-  }
-  const update = () => {
-    const query = search.value.trim().toLowerCase();
-    for (const row of tableBody.rows) {
-      row.hidden = !row.dataset.search.includes(query);
-    }
-  };
-  search.addEventListener("input", update);
-  root.append(h("section", { className: "card qc-ops-report-list-card" },
-    h("div", { className: "qc-ops-report-list-toolbar" }, filters, h("p", {}, `${batches.length} batch report${batches.length === 1 ? "" : "s"}`)),
-    h("div", { className: "qc-ops-table-scroll" }, table),
-  ));
-}
-
 async function renderReportDetail(root, ctx) {
-  root.replaceChildren(pageHeading("Reports", "Loading the selected inspection report…"), h("section", { className: "card qc-ops-loading" }, "Loading saved batch records and photos…"));
+  root.replaceChildren(pageHeading("Batch report", "Loading the selected batch report…"), h("section", { className: "card qc-ops-loading" }, "Loading saved batch records and photos…"));
   let workspace;
   try {
     workspace = await ctx.service.getBatchWorkspace(ctx.selectedId);
   } catch (error) {
-    root.replaceChildren(pageHeading("Reports", "The selected report could not be loaded.", [button("All reports", () => ctx.navigate("reports"), "button button-secondary")]),
+    root.replaceChildren(pageHeading("Batch report", "The selected report could not be loaded.", [button("Back to batch", () => ctx.navigate("batches", ctx.selectedId, true), "button button-secondary")]),
       h("section", { className: "card qc-ops-error-card", role: "alert" }, text(error instanceof Error ? error.message : "The selected batch is unavailable.")));
     return;
   }
@@ -325,8 +270,8 @@ async function renderReportDetail(root, ctx) {
       makeReadOnlyTable(workspace),
     ),
   );
-  const header = pageHeading("Reports", historical ? "Read-only report of this batch and its source-recorded values." : "Read-only report for saved batch records and their row-specific evidence.", [
-    button("All reports", () => ctx.navigate("reports"), "button button-secondary"),
+  const header = pageHeading("Batch report", historical ? "Read-only report of this batch and its source-recorded values." : "Read-only report of saved batch records and their row-specific evidence.", [
+    button("Back to batch", () => ctx.navigate("batches", batch.id, true), "button button-secondary"),
     button("Download CSV", async () => {
       try {
         const csv = exportRows(workspace, state);
@@ -341,8 +286,11 @@ async function renderReportDetail(root, ctx) {
   root.replaceChildren(header, scope);
 }
 
-export async function renderReportsPage(root, ctx) {
+export async function renderBatchReportPage(root, ctx) {
   root.classList.add("qc-ops-root");
-  if (ctx.selectedId) return renderReportDetail(root, ctx);
-  renderReportList(root, ctx);
+  if (!ctx.selectedId) {
+    root.replaceChildren(pageHeading("Batch report", "Open a report from a batch detail page.", [button("Open batches", () => ctx.navigate("batches"), "button button-secondary")]));
+    return;
+  }
+  return renderReportDetail(root, ctx);
 }

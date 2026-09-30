@@ -11,7 +11,7 @@ Status: 2026-09-28, first complete local application implemented and locally ver
 - Confirmed again on 2026-09-27: build the batch inspection workspace around the original PDF's table layout. Preserve its inspection grouping, item order, and standards presentation when translating it into an editable Web table; inspect the original PDF before implementing the layout.
 - The familiar form is an adoption requirement: staff moving from the original spreadsheet should recognize the table and experience a small change in their filling workflow. Add the new system capabilities to that familiar structure instead of replacing it with a substantially different presentation.
 - Give each inspection record within its batch its own photo association and photo cell, following the Lark approach. Do not merge photo cells into a shared photo area across inspection rows, and do not reuse one batch's evidence as another batch's evidence simply because the inspection item is the same.
-- Batch inspection is the main workspace. Products and standards, purchasing, issue handling, reports, and the library are supporting entry points in the complete local edition.
+- Batch inspection is the main workspace. Product and standards setup, purchasing, issue handling, and the library support it; each batch detail provides access to its read-only report.
 - Confirmed on 2026-09-29: visual simplicity is a standing design principle. Use it when deciding whether to add pages, navigation entries, buttons, or other visible controls. Avoid unnecessary standalone entry points when the relevant business workspace already provides access to the function.
 - Business-facing UI must not describe records as extracted from Lark. Use business labels for versions, statuses, documents, and messages. Standards must omit source provenance, original revision fields, import anomaly details, and generated technical reference notes; retain version dates, change descriptions, business notes, and attachments. Preserve the underlying records and backup compatibility.
 - Applying that principle: hide the Product catalog and File library sidebar entries. Retain product data and document storage, including opening and downloading attachments from batches; hiding navigation does not delete these capabilities or their records.
@@ -27,7 +27,7 @@ Status: 2026-09-28, first complete local application implemented and locally ver
 - The initial trust-based approach retains three blank signature fields for users to enter the voters' names. Do not add login identity verification or server-side vote validation, and do not describe a manually entered name as an identity-verified signature.
 - The rest of the closure flow follows the previous plan: the disposition owner, a formal disposition record, and confirmation from all three people must be present before manual closure. The third signature does not close the issue automatically. Any linked issue that remains open blocks batch release; closing all issues does not release the batch automatically. Details of the interaction will be refined during implementation.
 - Do not add automatic reminders that continue after the Web page is closed or background scheduled tasks for now.
-- Preserve the history of original files and archived reports. New standards or formulas must not silently overwrite archived facts.
+- Preserve the history of original files, archived reports, and saved batch facts. Generate the in-app per-batch report from saved facts without storing each report as a separate archive or listing reports as a standalone workspace. New standards or formulas must not silently overwrite archived facts.
 
 ## Design Versions, Standards, and Batch Inspections
 
@@ -82,7 +82,7 @@ Remaining decisions and scope boundaries:
 
 ## Complete Local Edition Scope
 
-The user requested the complete app on 2026-09-28 to review through practical use. Connect catalog and variants, draft/published family versions, editable inspection standards, purchase orders, batch creation and inspection, row photographs, issue disposition, explicit release, order progress, historical comparison, a local document library, printable reports, and backup export/additive restore.
+The user requested the complete app on 2026-09-28 to review through practical use. Connect catalog and variants, draft/published family versions, editable inspection standards, purchase orders, batch creation and inspection, row photographs, issue disposition, explicit release, order progress, historical comparison, a local document library, read-only per-batch reports with print and CSV export, and backup export/additive restore.
 
 Preserve the existing initialization draft and disposable prototype separately. The main app must not automatically install demonstration orders, batches, inspection outcomes, or signatures. AP `25.10.29` is represented by ordinary family versions with their original PDFs attached through the existing version-document controls. Staff review and publish those versions through the normal workflow.
 
@@ -109,6 +109,13 @@ See [Local App Contract](app-contract.md) for command interfaces, data shapes, m
 - The operational rule requiring one variant and one PO line still applies to newly created batches. Historical records can preserve mixed or incomplete source facts without being falsely marked as draft or released. They remain read-only evidence and contribute no PO fulfillment.
 - Convert existing browser records without re-importing files, duplicating batches, or changing original evidence. Older backups and import packages remain supported.
 - Batch names shown to staff use an explicitly recorded original batch number when available; otherwise use product/model (or the known inspection family), date, factory, and stage, for example `S15-20260521-UI-OQC`. Only actual naming collisions add short numeric suffixes such as `-01` and `-02`. Omit the `HIST` prefix, technical digest, and PDF page suffix from the displayed name. Superseding the earlier decision to keep historical status as a tag: imported-batch provenance appears in attachment and source details, with no separate Historical status label. Operational Draft/Released status remains available in batch detail. Internal record identities and attachment associations remain unchanged.
+
+## Reports Within Batches (2026-09-29)
+
+- Do not provide a Reports sidebar item or standalone report list. Historical, operational draft, and released batch details each provide a compact **View report** action.
+- The report is a read-only view of that batch's saved facts and results, including its locked inspection table, saved historical comparisons, linked issues, and row photos. Local unsaved inspection and detail drafts are excluded. The existing warning must explain that drafts remain in the current tab; returning with **Back to batch** opens the same batch with those in-tab drafts intact.
+- Keep **Print / save as PDF** and **Download CSV** available from the report. The report is not an independently stored or archived record, and this navigation adds no persisted fields or schema changes.
+- Use `#/batches/<encoded batch ID>/report` as the canonical report URL, with Batches remaining active in the sidebar and as the top-level context. Redirect legacy `#/reports` to Batches and `#/reports/<id>` to that batch's report. Preserve normal browser history behavior.
 
 ## Archived Design Version History (2026-09-29)
 

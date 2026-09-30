@@ -4,12 +4,12 @@ import { renderOperationsPage } from "./qc-operations.js";
 import { button, el, notify, showDialog, closeDialog } from "./qc-ui.js";
 
 const app = document.querySelector("#app");
-const routes = new Set(["batches", "issues", "reports", "catalog", "standards", "orders", "library", "settings", "backup"]);
-const operationRoutes = new Set(["batches", "issues", "reports"]);
+const routes = new Set(["batches", "batch-report", "issues", "catalog", "standards", "orders", "library", "settings", "backup"]);
+const operationRoutes = new Set(["batches", "batch-report", "issues"]);
 const routeNames = {
   batches: "Batch inspection",
+  "batch-report": "Batch inspection",
   issues: "Issues",
-  reports: "Reports",
   catalog: "Product catalog",
   standards: "Standards",
   orders: "Purchase orders",
@@ -29,10 +29,28 @@ let channel = null;
 function readRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
   const legacyHistory = parts[0] === "history";
-  const route = legacyHistory ? "batches" : routes.has(parts[0]) ? parts[0] : "batches";
+  const legacyReports = parts[0] === "reports";
+  const batchReport = parts[0] === "batches" && parts.length >= 3 && parts.at(-1) === "report";
+  let route = "batches";
   let id = null;
-  try { id = !legacyHistory && parts[1] ? decodeURIComponent(parts.slice(1).join("/")) : null; } catch { id = null; }
-  return { route, id, legacyHistory };
+  try {
+    if (!legacyHistory && legacyReports) {
+      if (parts.length > 1) {
+        route = "batch-report";
+        id = decodeURIComponent(parts.slice(1).join("/"));
+      }
+    } else if (batchReport) {
+      route = "batch-report";
+      id = decodeURIComponent(parts.slice(1, -1).join("/"));
+    } else if (!legacyHistory) {
+      route = routes.has(parts[0]) ? parts[0] : "batches";
+      id = parts[1] ? decodeURIComponent(parts.slice(1).join("/")) : null;
+    }
+  } catch {
+    route = "batches";
+    id = null;
+  }
+  return { route, id, legacyHistory, legacyReports };
 }
 
 function hasUnsavedForm() {
@@ -44,6 +62,7 @@ function dirtyForms() {
 }
 
 function routeHash(route, id) {
+  if (route === "batch-report" && id) return `#/batches/${encodeURIComponent(id)}/report`;
   return `#/${route}${id ? `/${encodeURIComponent(id)}` : ""}`;
 }
 
@@ -127,8 +146,9 @@ function navigate(route, id = null, force = false) {
 }
 
 function navItem(route, label, group) {
-  const item = button(label, () => navigate(route), `nav-item${currentRoute === route ? " is-active" : ""}`);
-  item.setAttribute("aria-current", currentRoute === route ? "page" : "false");
+  const isActive = currentRoute === route || (route === "batches" && currentRoute === "batch-report");
+  const item = button(label, () => navigate(route), `nav-item${isActive ? " is-active" : ""}`);
+  item.setAttribute("aria-current", isActive ? "page" : "false");
   item.dataset.route = route;
   group.append(item);
   return item;
@@ -246,7 +266,7 @@ function renderApp() {
     ),
     el("nav", { className: "primary-nav" },
       el("p", { className: "nav-label" }, "Inspection"),
-      (() => { const group = el("div", { className: "nav-group" }); navItem("batches", "Batches", group); navItem("issues", "Issues", group); navItem("reports", "Reports", group); return group; })(),
+      (() => { const group = el("div", { className: "nav-group" }); navItem("batches", "Batches", group); navItem("issues", "Issues", group); return group; })(),
       el("p", { className: "nav-label nav-label-spaced" }, "Setup and records"),
       (() => { const group = el("div", { className: "nav-group" }); navItem("standards", "Standards", group); navItem("orders", "Purchase orders", group); return group; })(),
     ),
@@ -330,15 +350,11 @@ window.addEventListener("popstate", () => {
     promptToDiscard("continue", () => navigate(next.route, next.id, true));
     return;
   }
-  if (next.legacyHistory) {
-    currentRoute = "batches";
-    selectedId = null;
-    history.replaceState({ route: currentRoute }, "", routeHash(currentRoute));
-    renderApp();
-    return;
-  }
   currentRoute = next.route;
   selectedId = next.id;
+  if (next.legacyHistory || next.legacyReports) {
+    history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
+  }
   renderApp();
 });
 
@@ -349,7 +365,7 @@ async function start() {
     const initial = readRoute();
     currentRoute = initial.route;
     selectedId = initial.id;
-    if (!location.hash || initial.legacyHistory) history.replaceState({ route: currentRoute }, "", routeHash(currentRoute, selectedId));
+    if (!location.hash || initial.legacyHistory || initial.legacyReports) history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
     channel = new BroadcastChannel(`masterqc-web-qc:${demoMode ? "demo" : "local"}`);
     channel.addEventListener("message", (event) => {
       const remoteRevision = Number(event.data?.revision);
