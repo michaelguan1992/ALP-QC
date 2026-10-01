@@ -29,7 +29,7 @@ An order specifying quantities to purchase for particular product variants, whos
 The quantity covered by an inspection release. Only released quantities attributable to a purchase requirement count toward its quantity completion; unreleased quantities and inspection sample counts do not.
 
 **Design version (设计版本)**:
-A version of a product's design that defines one complete inspection standard set.
+A family-specific version of a product's design that defines one complete inspection standard set. A batch may use one shared version label that resolves to a different version entity for each selected family.
 
 **Inspection standard set (整套检验规范)**:
 The collection of inspection items defined by one design version, including their applicability to different factories and inspection stages.
@@ -43,7 +43,7 @@ _Avoid_: Inspection record
 The IQC or OQC context used with the factory to identify the applicable inspection items.
 
 **Batch (批次)**:
-The business object for a batch inspection. A newly entered batch belongs to one purchase order and contains one or more products with separate quantities. Each product locks its design version and applicable inspection standards at creation. Historical batches preserve the version, standards, and results recorded in the original inspection, including unknown order or variant links. Both appear in the same Batches workspace.
+The business object for a batch inspection. A newly entered batch belongs to one purchase order and contains one or more colors of one product model with separate quantities. Existing mixed-model records remain supported, but new batches cannot mix models. It selects one shared design-version label; each product resolves that label within its inspection family and locks its applicable inspection standards at creation. Historical batches preserve the version, standards, and results recorded in the original inspection, including unknown order or variant links. Both appear in the same Batches workspace.
 
 **Batch attachment (批次附件)**:
 An optional document associated with a batch, such as its original inspection PDF. The attachment is supporting evidence, not the batch itself. One source document may support several batches, and a batch entered directly in the system need not have a PDF.

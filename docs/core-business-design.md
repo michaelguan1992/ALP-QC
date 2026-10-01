@@ -44,9 +44,11 @@ The table below preserves the original design vocabulary. The implemented entry 
 | Operation | Intended result |
 | --- | --- |
 | `createPurchaseOrder(...)` | Save an order and its variant-specific quantity requirements |
-| `createBatch(...)` | Validate context, select the version and applicable items, and persist the locked inspection basis with the batch |
+| `createBatch(...)` | Validate context, resolve one shared version label for every selected product family, and persist each product's locked inspection basis with the batch |
 | `getBatchWorkspace(...)` | Return the locked requirements, current results, evidence references, and issue summary needed by the page |
-| `saveInspection(...)` | Validate and save inspection facts for a specific batch item |
+| `saveInspection(...)` | Validate and save defects, entered numeric time, and remarks for a specific batch item |
+| `autosaveInspection(...)` | Persist valid partial or complete row results, including cleared nullable fields; complete rows alone qualify for issue snapshots, comparisons, and release |
+| `deleteBatch(...)` | Delete a draft operational batch after dependency checks while preserving shared documents and independent records |
 | `createIssueFromInspection(...)` | Create or return the existing issue for the agreed source identity |
 | `closeIssue(...)` | Check owner, formal disposition, and three confirmations before recording manual closure |
 | `releaseBatch(...)` | Validate current batch state, linked issues, release scope, and other agreed conditions before recording release |
@@ -81,7 +83,7 @@ sequenceDiagram
 
 The local edition derives purchase progress from stored release and quantity-association facts, rather than incrementing an independent total whenever a button is clicked. Repeated release requests must not count the same quantity again. A progress-query failure after a successful release does not undo that release; the UI can retry the query and should distinguish these outcomes.
 
-For each order line, released quantity is the sum of eligible, uniquely attributed released product quantities. Outstanding quantity is `max(ordered - released, 0)`; excess quantity is `max(released - ordered, 0)`. A batch may contain several products from one PO; full-batch release attributes each product's quantity to its own order line. Do not sum inspection records or inspection sample sizes as fulfilled units.
+For each order line, released quantity is the sum of eligible, uniquely attributed released product quantities. Outstanding quantity is `max(ordered - released, 0)`; excess quantity is `max(released - ordered, 0)`. A new batch may contain several colors of one model from one PO; full-batch release attributes each product's quantity to its own order line. Do not sum inspection records or inspection sample sizes as fulfilled units.
 
 When state used by a decision can change, validation and writes must operate on a consistent state. The adapter must support transactional reads/writes or an equivalent current-state check so a newly opened issue cannot be missed between validation and release.
 
@@ -97,6 +99,6 @@ Build each slice through frontend, core, and storage, with observable behavior b
 
 ## First-Edition Decisions and Remaining Boundaries
 
-Versions belong to inspection families and use numeric sequences. Published versions are immutable; batches copy applicable model/factory/stage rows and reject empty applicability. A batch contains one or more product allocations from an explicitly selected PO and releases their full quantities together. Every row must be saved, a recorder must be entered, and all linked issues must be closed before release.
+Versions belong to inspection families and use numeric sequences. Published versions are immutable; batches copy applicable model/factory/stage rows and reject empty or ambiguous applicability. A new batch selects one label common to every selected product and resolves it to the family-specific version entity for each product. Product quantities and inspection rows remain separate, and a batch releases their full quantities together. Every row must be saved, a recorder must be entered, and all linked issues must be closed before release.
 
 New OQC batches automatically contribute to PO fulfillment after release; IQC does not. There is no physical-lot entry, final-shipment choice, or batch reinspection workflow. Saved legacy flags remain intact for compatibility. Partial release, release correction, and shared multi-computer storage remain later design work. See [Requirements and Decisions](requirements.md) for which choices the user confirmed and which are initial implementation conventions.

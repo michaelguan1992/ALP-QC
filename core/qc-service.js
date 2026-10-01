@@ -12,7 +12,7 @@ import { makeBackup, importBackup as applyBackupImport } from "./qc-backup.js";
 import { importHistory as applyHistoryImport, verifyHistoryPackage, verifyHistoryStateAssets } from "./qc-history.js";
 import { addBatchAttachment, addDocument, addPhotos, removeBatchAttachment, removePhoto, removeVersionAttachment } from "./qc-assets.js";
 import { addDiscussion, closeIssue, createIssue, saveIssue } from "./qc-issues.js";
-import { createBatch, getBatchWorkspace as readBatchWorkspace, releaseBatch, saveBatchDetails, saveInspection } from "./qc-inspections.js";
+import { autosaveInspection, createBatch, deleteBatch, getBatchWorkspace as readBatchWorkspace, releaseBatch, saveBatchDetails, saveInspection } from "./qc-inspections.js";
 import { createOrder, getPurchaseOrderProgress, saveOrder } from "./qc-purchasing.js";
 import { createVersion, cloneVersion, installAPReferences, publishVersion, saveVersion, supersedeOutdatedAPVersions } from "./qc-standards.js";
 import { clone } from "./qc-domain.js";
@@ -53,8 +53,10 @@ const COMMANDS = new Map([
   ["createOrder", createOrder],
   ["saveOrder", saveOrder],
   ["createBatch", createBatch],
+  ["deleteBatch", deleteBatch],
   ["saveBatchDetails", saveBatchDetails],
   ["saveInspection", saveInspection],
+  ["autosaveInspection", autosaveInspection],
   ["addPhotos", addPhotos],
   ["removePhoto", removePhoto],
   ["addBatchAttachment", addBatchAttachment],
@@ -216,7 +218,7 @@ export function createQCService(adapter, options = {}) {
       validateExpectedRevision(expectedRevision, state);
       const outcome = handler(state, data, { idFactory, now });
       if (outcome.changed === false) {
-        return { state, result: { entityId: outcome.entityId, revision: state.revision, ...(outcome.counts ? { counts: outcome.counts } : {}) } };
+        return { state, result: { entityId: outcome.entityId, revision: state.revision, ...(type === "autosaveInspection" ? { changed: false } : {}), ...(outcome.counts ? { counts: outcome.counts } : {}) } };
       }
       state.revision += 1;
       addAudit(state, { idFactory, now, action: outcome.action || type, entityId: outcome.entityId, summary: outcome.summary || type });

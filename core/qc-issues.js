@@ -69,6 +69,7 @@ function makeSourceSnapshot(state, batch, row = null, rowProduct = null) {
       defectiveRate: rowRate(row),
       remarks: row.remarks,
       savedAt: row.savedAt,
+      ...(Object.hasOwn(row, "actualTimeSeconds") ? { actualTimeSeconds: row.actualTimeSeconds } : {}),
       photoIds: [...row.photoIds],
     } : null,
   };
@@ -145,8 +146,11 @@ export function addDiscussion(state, data, context) {
   if (!issue) fail("That issue is no longer available.");
   if (issue.status === "closed") fail("Closed issues are read-only.");
   const text = requireString(data.text, "Discussion entry", { maxLength: 5000 });
+  const authorName = typeof data.authorName === "string" ? data.authorName.trim() : "";
+  if (!authorName) fail("You must enter your name before adding a discussion entry.");
+  if (authorName.length > 200) fail("Your name must be 200 characters or fewer.");
   const entryId = makeId(context.idFactory);
-  issue.discussion.push({ id: entryId, text, createdAt: context.now() });
+  issue.discussion.push({ id: entryId, text, authorName, createdAt: context.now() });
   return { entityId: issue.id, action: "addDiscussion", summary: `Added discussion to ${issue.number}.` };
 }
 

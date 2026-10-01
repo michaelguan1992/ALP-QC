@@ -66,6 +66,7 @@ async function prepare(harness) {
   return {
     variants: {
       s11: variantFor(state, "S11"),
+      s11Yellow: variantFor(state, "S11", "Yellow"),
       s12: variantFor(state, "S12"),
       s13: variantFor(state, "S13"),
       s15Red: variantFor(state, "S15", "Red"),
@@ -162,6 +163,7 @@ async function saveRow(harness, batchId, row, defectiveQty = 0) {
   await harness.command("saveInspection", {
     batchId,
     rowId: row.id,
+    actualTimeSeconds: 1.25,
     defectiveQty,
     remarks: "Checked.",
   });
@@ -237,21 +239,20 @@ function historicalPackage() {
   };
 }
 
-test("one batch locks standards and sample quantities separately for each PO product line", async () => {
+test("one batch locks separate quantities, samples, and rows for same-model color lines", async () => {
   const harness = makeHarness();
   const { variants, versions } = await prepare(harness);
-  const { order } = await createOrder(harness, [variants.s11, variants.s12, variants.s15Yellow]);
+  const { order } = await createOrder(harness, [variants.s11, variants.s11Yellow]);
   const products = [
     { variant: variants.s11, quantity: 123, versionId: versions.s11s14.id },
-    { variant: variants.s12, quantity: 47, versionId: versions.s11s14.id },
-    { variant: variants.s15Yellow, quantity: 20, versionId: versions.s15.id },
+    { variant: variants.s11Yellow, quantity: 47, versionId: versions.s11s14.id },
   ];
   const created = await createMultiBatch(harness, { order, products, number: "B-MIXED-LOCK" });
   const state = await harness.state();
   const batch = state.batches.find((candidate) => candidate.id === created.id);
   const workspace = await harness.service.getBatchWorkspace(created.id);
 
-  assert.equal(batch.quantity, 190);
+  assert.equal(batch.quantity, 170);
   assert.deepEqual(batch.products, products.map(({ variant, quantity, versionId }) => ({
     lineId: order.lines.find((line) => line.variantId === variant.id).id,
     variantId: variant.id,
@@ -262,7 +263,7 @@ test("one batch locks standards and sample quantities separately for each PO pro
   })));
   for (const field of ["lineId", "variantId", "familyId", "versionId", "versionLabel"]) assert.equal(batch[field], null);
 
-  assert.equal(workspace.products.length, 3);
+  assert.equal(workspace.products.length, 2);
   for (const expected of products) {
     const line = order.lines.find((candidate) => candidate.variantId === expected.variant.id);
     const resolved = workspace.products.find((product) => product.lineId === line.id);
@@ -283,35 +284,30 @@ test("one batch locks standards and sample quantities separately for each PO pro
   }
 
   const line11 = order.lines.find((line) => line.variantId === variants.s11.id);
-  const line12 = order.lines.find((line) => line.variantId === variants.s12.id);
+  const line11Yellow = order.lines.find((line) => line.variantId === variants.s11Yellow.id);
   const rows11 = workspace.rows.filter((row) => row.productLineId === line11.id);
-  const rows12 = workspace.rows.filter((row) => row.productLineId === line12.id);
-  assert.equal(rows11.find((row) => row.key === "air-pump").sourceItemId, rows12.find((row) => row.key === "air-pump").sourceItemId);
-  assert.notEqual(rows11.find((row) => row.key === "air-pump").id, rows12.find((row) => row.key === "air-pump").id);
-  assert.notEqual(rows11.find((row) => row.key === "air-pump").productLineId, rows12.find((row) => row.key === "air-pump").productLineId);
-  assert.equal(rows11.find((row) => row.key === "power-test").specification.includes("32.3–34.0W"), true);
-  assert.equal(rows12.find((row) => row.key === "power-test").specification.includes("30.1–31.8W"), true);
+  const rows11Yellow = workspace.rows.filter((row) => row.productLineId === line11Yellow.id);
+  assert.equal(rows11.find((row) => row.key === "air-pump").sourceItemId, rows11Yellow.find((row) => row.key === "air-pump").sourceItemId);
+  assert.notEqual(rows11.find((row) => row.key === "air-pump").id, rows11Yellow.find((row) => row.key === "air-pump").id);
+  assert.notEqual(rows11.find((row) => row.key === "air-pump").productLineId, rows11Yellow.find((row) => row.key === "air-pump").productLineId);
+  assert.equal(rows11.find((row) => row.key === "power-test").specification, rows11Yellow.find((row) => row.key === "power-test").specification);
   assert.deepEqual(rows11.map((row) => row.inspectedQty), [13, 13, 13, 13]);
-  assert.deepEqual(rows12.map((row) => row.inspectedQty), [5, 5, 5, 5]);
-
-  const line15 = order.lines.find((line) => line.variantId === variants.s15Yellow.id);
-  const rows15 = workspace.rows.filter((row) => row.productLineId === line15.id);
-  assert.deepEqual(rows15.map((row) => row.inspectedQty), [2, 2, 2, 20]);
-  assert.ok(rows15.every((row) => row.specification.includes("20 PSI") || row.key !== "leak-test"));
+  assert.deepEqual(rows11Yellow.map((row) => row.inspectedQty), [5, 5, 5, 5]);
   assert.equal(new Set(workspace.rows.map((row) => row.id)).size, workspace.rows.length);
 });
 
 test("multi-product creation rejects invalid, foreign, or inapplicable product lines atomically", async () => {
   const harness = makeHarness();
   const { variants, versions } = await prepare(harness);
-  const { order } = await createOrder(harness, [variants.s11, variants.s12, variants.s15Red]);
+  const { order } = await createOrder(harness, [variants.s11, variants.s11Yellow, variants.s12, variants.s15Red]);
   const foreign = await createOrder(harness, [variants.s13], { number: "PO-FOREIGN" });
   const line11 = order.lines.find((line) => line.variantId === variants.s11.id);
+  const line11Yellow = order.lines.find((line) => line.variantId === variants.s11Yellow.id);
   const line12 = order.lines.find((line) => line.variantId === variants.s12.id);
   const line15 = order.lines.find((line) => line.variantId === variants.s15Red.id);
   const valid = [
     { lineId: line11.id, quantity: 10, versionId: versions.s11s14.id },
-    { lineId: line12.id, quantity: 10, versionId: versions.s11s14.id },
+    { lineId: line11Yellow.id, quantity: 10, versionId: versions.s11s14.id },
   ];
   const attempts = [
     [{ ...valid[0], quantity: 4 }, { ...valid[0], quantity: 5 }],
@@ -351,20 +347,41 @@ test("multi-product creation rejects invalid, foreign, or inapplicable product l
   }));
   assert.equal(harness.writes, writesBeforeInapplicable);
   assert.deepEqual(await harness.state(), beforeInapplicable);
+
+  for (const [suffix, secondLine, secondVersion] of [
+    ["S12", line12, versions.s11s14.id],
+    ["S15", line15, versions.s15.id],
+  ]) {
+    const beforeMixedModel = await harness.state();
+    const writesBeforeMixedModel = harness.writes;
+    await assert.rejects(harness.command("createBatch", {
+      number: `B-MIXED-MODEL-${suffix}-REJECTED`,
+      orderId: order.id,
+      products: [
+        { lineId: line11.id, quantity: 10, versionId: versions.s11s14.id },
+        { lineId: secondLine.id, quantity: 10, versionId: secondVersion },
+      ],
+      factory: "AP",
+      stage: "OQC",
+      date: DATE,
+      recorder: "Inspector",
+    }), /one model only/i);
+    assert.equal(harness.writes, writesBeforeMixedModel);
+    assert.deepEqual(await harness.state(), beforeMixedModel);
+  }
 });
 
 test("release waits for every product row and closed issues, then counts each released product once", async () => {
   const harness = makeHarness();
   const { variants, versions } = await prepare(harness);
-  const { order } = await createOrder(harness, [variants.s11, variants.s12, variants.s15Yellow]);
+  const { order } = await createOrder(harness, [variants.s11, variants.s11Yellow]);
   const line11 = order.lines.find((line) => line.variantId === variants.s11.id);
   const main = await createMultiBatch(harness, {
     order,
     number: "B-RELEASE-MIXED",
     products: [
       { variant: variants.s11, quantity: 31, versionId: versions.s11s14.id },
-      { variant: variants.s12, quantity: 13, versionId: versions.s11s14.id },
-      { variant: variants.s15Yellow, quantity: 7, versionId: versions.s15.id },
+      { variant: variants.s11Yellow, quantity: 13, versionId: versions.s11s14.id },
     ],
   });
   const draft = await createMultiBatch(harness, {
@@ -376,7 +393,7 @@ test("release waits for every product row and closed issues, then counts each re
     order,
     number: "B-RELEASE-LEGACY-OPTOUT",
     countForPO: false,
-    products: [{ variant: variants.s12, quantity: 100, versionId: versions.s11s14.id }],
+    products: [{ variant: variants.s11Yellow, quantity: 100, versionId: versions.s11s14.id }],
   });
   assert.equal((await harness.state()).batches.find((batch) => batch.id === legacyOptOut.id).countForPO, true);
 
@@ -387,7 +404,7 @@ test("release waits for every product row and closed issues, then counts each re
   const unsavedRow = workspace.rows.find((row) => row.productLineId === line11.id);
   await saveRows(harness, main.id, { exceptRowId: unsavedRow.id });
   let beforeRelease = await harness.state();
-  await assert.rejects(harness.command("releaseBatch", { id: main.id }), /save all .* inspection rows/i);
+  await assert.rejects(harness.command("releaseBatch", { id: main.id }), /complete all .* inspection rows.*remain incomplete/i);
   assert.deepEqual(await harness.state(), beforeRelease);
 
   await saveRow(harness, main.id, unsavedRow);
@@ -410,11 +427,11 @@ test("release waits for every product row and closed issues, then counts each re
   await harness.command("releaseBatch", { id: legacyOptOut.id });
 
   progress = await harness.service.getPurchaseOrderProgress(order.id);
-  for (const [variant, expectedQty] of [[variants.s11, 31], [variants.s12, 113], [variants.s15Yellow, 7]]) {
+  for (const [variant, expectedQty] of [[variants.s11, 31], [variants.s11Yellow, 113]]) {
     const line = progress.lines.find((candidate) => candidate.variantId === variant.id);
     assert.equal(line.releasedQty, expectedQty);
     assert.equal(line.remainingQty, 5000 - expectedQty);
-    assert.deepEqual(line.batches.map((item) => item.id), variant.id === variants.s12.id ? [main.id, legacyOptOut.id] : [main.id]);
+    assert.deepEqual(line.batches.map((item) => item.id), variant.id === variants.s11Yellow.id ? [main.id, legacyOptOut.id] : [main.id]);
   }
 
   const releasedRevision = (await harness.state()).revision;
@@ -427,17 +444,16 @@ test("release waits for every product row and closed issues, then counts each re
 test("row photos and issue snapshots stay attached to the selected product in a mixed batch", async () => {
   const harness = makeHarness();
   const { variants, versions } = await prepare(harness);
-  const { order } = await createOrder(harness, [variants.s11, variants.s12, variants.s15Yellow]);
+  const { order } = await createOrder(harness, [variants.s11, variants.s11Yellow]);
   const products = [
     { variant: variants.s11, quantity: 40, versionId: versions.s11s14.id },
-    { variant: variants.s12, quantity: 20, versionId: versions.s11s14.id },
-    { variant: variants.s15Yellow, quantity: 10, versionId: versions.s15.id },
+    { variant: variants.s11Yellow, quantity: 20, versionId: versions.s11s14.id },
   ];
   const batch = await createMultiBatch(harness, { order, products, number: "B-ISSUE-PRODUCTS" });
   await saveRows(harness, batch.id);
   let workspace = await harness.service.getBatchWorkspace(batch.id);
   const line11 = order.lines.find((line) => line.variantId === variants.s11.id);
-  const line12 = order.lines.find((line) => line.variantId === variants.s12.id);
+  const line12 = order.lines.find((line) => line.variantId === variants.s11Yellow.id);
   const row11 = workspace.rows.find((row) => row.productLineId === line11.id && row.key === "air-pump");
   const row12 = workspace.rows.find((row) => row.productLineId === line12.id && row.key === "air-pump");
   await harness.command("addPhotos", {
@@ -448,9 +464,9 @@ test("row photos and issue snapshots stay attached to the selected product in a 
   await harness.command("addPhotos", {
     batchId: batch.id,
     rowId: row12.id,
-    files: [{ name: "s12-evidence.png", mimeType: "image/png", dataUrl: PNG_URL }],
+    files: [{ name: "s11-yellow-evidence.png", mimeType: "image/png", dataUrl: PNG_URL }],
   });
-  const rowIssue = await harness.command("createIssue", { title: "S12 air pump review", batchId: batch.id, rowId: row12.id });
+  const rowIssue = await harness.command("createIssue", { title: "S11 Yellow air pump review", batchId: batch.id, rowId: row12.id });
   const batchIssue = await harness.command("createIssue", { title: "Mixed batch review", batchId: batch.id });
   const state = await harness.state();
   const storedBatch = state.batches.find((candidate) => candidate.id === batch.id);
@@ -459,11 +475,11 @@ test("row photos and issue snapshots stay attached to the selected product in a 
   assert.notEqual(s11PhotoId, s12PhotoId);
 
   const snapshot = state.issues.find((issue) => issue.id === rowIssue.entityId).sourceSnapshot;
-  const s12Line = order.lines.find((line) => line.variantId === variants.s12.id);
+  const s12Line = order.lines.find((line) => line.variantId === variants.s11Yellow.id);
   const expectedS12 = {
     lineId: s12Line.id,
-    variantId: variants.s12.id,
-    variantLabel: variants.s12.label,
+    variantId: variants.s11Yellow.id,
+    variantLabel: variants.s11Yellow.label,
     versionId: versions.s11s14.id,
     versionLabel: versions.s11s14.label,
     quantity: 20,
@@ -476,11 +492,12 @@ test("row photos and issue snapshots stay attached to the selected product in a 
   assert.equal(snapshot.versionLabel, null);
   assert.deepEqual(snapshot.products.find((product) => product.lineId === s12Line.id), expectedS12);
   assert.equal(snapshot.row.productLineId, s12Line.id);
-  assert.equal(snapshot.row.variantId, variants.s12.id);
-  assert.equal(snapshot.row.variantLabel, variants.s12.label);
+  assert.equal(snapshot.row.variantId, variants.s11Yellow.id);
+  assert.equal(snapshot.row.variantLabel, variants.s11Yellow.label);
   assert.equal(snapshot.row.versionId, versions.s11s14.id);
   assert.equal(snapshot.row.versionLabel, versions.s11s14.label);
   assert.equal(snapshot.row.productQuantity, 20);
+  assert.equal(snapshot.row.actualTimeSeconds, 1.25);
   assert.deepEqual(snapshot.row.photoIds, [s12PhotoId]);
   assert.ok(!snapshot.row.photoIds.includes(s11PhotoId));
 
@@ -489,8 +506,8 @@ test("row photos and issue snapshots stay attached to the selected product in a 
   assert.equal(mixedSnapshot.lineId, null);
   assert.equal(mixedSnapshot.variantId, null);
   assert.equal(mixedSnapshot.versionId, null);
-  assert.equal(mixedSnapshot.products.length, 3);
-  assert.deepEqual(mixedSnapshot.products.map((product) => product.quantity), [40, 20, 10]);
+  assert.equal(mixedSnapshot.products.length, 2);
+  assert.deepEqual(mixedSnapshot.products.map((product) => product.quantity), [40, 20]);
 
   workspace = await harness.service.getBatchWorkspace(batch.id);
   assert.deepEqual(workspace.rows.find((row) => row.id === row11.id).photos.map((photo) => photo.id), [s11PhotoId]);
@@ -500,53 +517,48 @@ test("row photos and issue snapshots stay attached to the selected product in a 
 test("inspection history links legacy and multi-product batches by variant and keeps colors separate", async () => {
   const harness = makeHarness();
   const { variants, versions } = await prepare(harness);
-  const { order } = await createOrder(harness, [variants.s11, variants.s12, variants.s15Red, variants.s15Yellow]);
-  const line11 = order.lines.find((line) => line.variantId === variants.s11.id);
-  const line12 = order.lines.find((line) => line.variantId === variants.s12.id);
+  const { order } = await createOrder(harness, [variants.s15Red, variants.s15Yellow]);
   const line15Red = order.lines.find((line) => line.variantId === variants.s15Red.id);
   const line15Yellow = order.lines.find((line) => line.variantId === variants.s15Yellow.id);
-  const oldS11 = await createLegacyBatch(harness, {
-    order, line: line11, variant: variants.s11, version: versions.s11s14,
-    number: "B-LEGACY-S11", quantity: 100, date: "2026-09-20",
-  });
   const oldS15Red = await createLegacyBatch(harness, {
     order, line: line15Red, variant: variants.s15Red, version: versions.s15,
     number: "B-LEGACY-S15-RED", quantity: 100, date: "2026-09-20",
   });
-  const olderS11Row = (await harness.service.getBatchWorkspace(oldS11.id)).rows.find((row) => row.key === "air-pump");
+  const oldS15Yellow = await createLegacyBatch(harness, {
+    order, line: line15Yellow, variant: variants.s15Yellow, version: versions.s15,
+    number: "B-LEGACY-S15-YELLOW", quantity: 100, date: "2026-09-20",
+  });
   const olderS15Row = (await harness.service.getBatchWorkspace(oldS15Red.id)).rows.find((row) => row.key === "air-pump");
-  await saveRow(harness, oldS11.id, olderS11Row, 1);
+  const olderYellowRow = (await harness.service.getBatchWorkspace(oldS15Yellow.id)).rows.find((row) => row.key === "air-pump");
   await saveRow(harness, oldS15Red.id, olderS15Row, 1);
+  await saveRow(harness, oldS15Yellow.id, olderYellowRow, 1);
 
   const mixed = await createMultiBatch(harness, {
     order,
     number: "B-MIXED-HISTORY",
     date: "2026-09-25",
     products: [
-      { variant: variants.s11, quantity: 80, versionId: versions.s11s14.id },
-      { variant: variants.s12, quantity: 70, versionId: versions.s11s14.id },
-      { variant: variants.s15Red, quantity: 60, versionId: versions.s15.id },
-      { variant: variants.s15Yellow, quantity: 50, versionId: versions.s15.id },
+      { variant: variants.s15Red, quantity: 80, versionId: versions.s15.id },
+      { variant: variants.s15Yellow, quantity: 70, versionId: versions.s15.id },
     ],
   });
   const mixedWorkspace = await harness.service.getBatchWorkspace(mixed.id);
-  for (const [line, variant] of [[line11, variants.s11], [line12, variants.s12], [line15Red, variants.s15Red], [line15Yellow, variants.s15Yellow]]) {
+  for (const [line, variant] of [[line15Red, variants.s15Red], [line15Yellow, variants.s15Yellow]]) {
     const row = mixedWorkspace.rows.find((candidate) => candidate.productLineId === line.id && candidate.key === "air-pump");
     await saveRow(harness, mixed.id, row);
     const refreshed = await harness.service.getBatchWorkspace(mixed.id);
     const history = refreshed.rows.find((candidate) => candidate.id === row.id).history;
-    if (variant.id === variants.s11.id) assert.deepEqual(history.map((item) => item.batchId), [oldS11.id]);
-    else if (variant.id === variants.s15Red.id) assert.deepEqual(history.map((item) => item.batchId), [oldS15Red.id]);
-    else assert.deepEqual(history, []);
+    if (variant.id === variants.s15Red.id) assert.deepEqual(history.map((item) => item.batchId), [oldS15Red.id]);
+    else assert.deepEqual(history.map((item) => item.batchId), [oldS15Yellow.id]);
   }
 
-  const newestS11 = await createLegacyBatch(harness, {
-    order, line: line11, variant: variants.s11, version: versions.s11s14,
-    number: "B-LEGACY-S11-LATER", quantity: 25, date: "2026-09-29",
+  const newestS15Red = await createLegacyBatch(harness, {
+    order, line: line15Red, variant: variants.s15Red, version: versions.s15,
+    number: "B-LEGACY-S15-RED-LATER", quantity: 25, date: "2026-09-29",
   });
-  const newestS11Workspace = await harness.service.getBatchWorkspace(newestS11.id);
+  const newestS11Workspace = await harness.service.getBatchWorkspace(newestS15Red.id);
   const newestHistory = newestS11Workspace.rows.find((row) => row.key === "air-pump").history;
-  assert.deepEqual(newestHistory.map((item) => item.batchId), [mixed.id, oldS11.id]);
+  assert.deepEqual(newestHistory.map((item) => item.batchId), [mixed.id, oldS15Red.id]);
   assert.equal(newestHistory[0].inspectedQty, 8);
   assert.equal(newestHistory[1].inspectedQty, 10);
 });
@@ -554,19 +566,19 @@ test("inspection history links legacy and multi-product batches by variant and k
 test("purchase order lines used by a multi-product batch keep their variant identity and cannot be removed", async () => {
   const harness = makeHarness();
   const { variants, versions } = await prepare(harness);
-  const { order } = await createOrder(harness, [variants.s11, variants.s12]);
+  const { order } = await createOrder(harness, [variants.s11, variants.s11Yellow]);
   await createMultiBatch(harness, {
     order,
     number: "B-LOCKS-PO-LINES",
     products: [
       { variant: variants.s11, quantity: 20, versionId: versions.s11s14.id },
-      { variant: variants.s12, quantity: 20, versionId: versions.s11s14.id },
+      { variant: variants.s11Yellow, quantity: 20, versionId: versions.s11s14.id },
     ],
   });
   const before = await harness.state();
   const line11 = order.lines.find((line) => line.variantId === variants.s11.id);
-  const line12 = order.lines.find((line) => line.variantId === variants.s12.id);
-  const yellowS11 = variantFor(before, "S11", "Yellow");
+  const line12 = order.lines.find((line) => line.variantId === variants.s11Yellow.id);
+  const replacement = variantFor(before, "S12", "Red");
 
   await assert.rejects(harness.command("saveOrder", {
     id: order.id,
@@ -575,7 +587,7 @@ test("purchase order lines used by a multi-product batch keep their variant iden
     supplier: order.supplier,
     notes: order.notes,
     lines: [
-      { ...line11, variantId: yellowS11.id },
+      { ...line11, variantId: replacement.id },
       line12,
     ],
   }), /used by a batch|product variant/i);
@@ -595,14 +607,13 @@ test("purchase order lines used by a multi-product batch keep their variant iden
 test("persisted multi-product batches reject broken totals, row ownership, source links, or product-based sampling", async () => {
   const harness = makeHarness();
   const { variants, versions } = await prepare(harness);
-  const { order } = await createOrder(harness, [variants.s11, variants.s12, variants.s15Yellow]);
+  const { order } = await createOrder(harness, [variants.s11, variants.s11Yellow]);
   const created = await createMultiBatch(harness, {
     order,
     number: "B-TAMPER-CHECK",
     products: [
       { variant: variants.s11, quantity: 100, versionId: versions.s11s14.id },
-      { variant: variants.s12, quantity: 50, versionId: versions.s11s14.id },
-      { variant: variants.s15Yellow, quantity: 20, versionId: versions.s15.id },
+      { variant: variants.s11Yellow, quantity: 50, versionId: versions.s11s14.id },
     ],
   });
   const canonical = await harness.state();
@@ -625,15 +636,15 @@ test("persisted multi-product batches reject broken totals, row ownership, sourc
   invalidStates.push(missingProductLine);
 
   const wrongProductLine = structuredClone(canonical);
-  rowFor(wrongProductLine, variants.s11).productLineId = order.lines.find((line) => line.variantId === variants.s12.id).id;
+  rowFor(wrongProductLine, variants.s11).productLineId = order.lines.find((line) => line.variantId === variants.s11Yellow.id).id;
   invalidStates.push(wrongProductLine);
 
   const missingSourceItem = structuredClone(canonical);
-  delete rowFor(missingSourceItem, variants.s15Yellow).sourceItemId;
+  delete rowFor(missingSourceItem, variants.s11Yellow).sourceItemId;
   invalidStates.push(missingSourceItem);
 
   const totalBasedSample = structuredClone(canonical);
-  const totalBasedRow = rowFor(totalBasedSample, variants.s15Yellow);
+  const totalBasedRow = rowFor(totalBasedSample, variants.s11Yellow);
   totalBasedRow.inspectedQty = Math.ceil(batch.quantity * totalBasedRow.samplingPercent / 100);
   invalidStates.push(totalBasedSample);
 
@@ -647,7 +658,7 @@ test("backup round-trip preserves legacy and historical batches while restoring 
   await harness.service.importHistory(historicalPackage(), (await harness.state()).revision);
   const historicalBefore = (await harness.state()).batches.find((batch) => batch.kind === "historical");
   assert.ok(historicalBefore);
-  const { order } = await createOrder(harness, [variants.s11, variants.s12, variants.s15Yellow]);
+  const { order } = await createOrder(harness, [variants.s11, variants.s11Yellow]);
   const line11 = order.lines.find((line) => line.variantId === variants.s11.id);
   const legacy = await createLegacyBatch(harness, {
     order, line: line11, variant: variants.s11, version: versions.s11s14,
@@ -659,14 +670,13 @@ test("backup round-trip preserves legacy and historical batches while restoring 
     number: "B-BACKUP-MULTI",
     products: [
       { variant: variants.s11, quantity: 30, versionId: versions.s11s14.id },
-      { variant: variants.s12, quantity: 25, versionId: versions.s11s14.id },
-      { variant: variants.s15Yellow, quantity: 15, versionId: versions.s15.id },
+      { variant: variants.s11Yellow, quantity: 25, versionId: versions.s11s14.id },
     ],
   });
   const sourceState = await harness.state();
   assert.deepEqual(sourceState.batches.find((batch) => batch.id === legacy.id), legacyBefore);
   assert.deepEqual(sourceState.batches.find((batch) => batch.id === historicalBefore.id), historicalBefore);
-  assert.equal(sourceState.batches.find((batch) => batch.id === multi.id).products.length, 3);
+  assert.equal(sourceState.batches.find((batch) => batch.id === multi.id).products.length, 2);
   assert.equal(sourceState.batches.find((batch) => batch.id === multi.id).lotNumber == null, true);
 
   const backup = await harness.service.exportBackup();

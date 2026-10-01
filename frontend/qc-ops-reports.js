@@ -44,6 +44,16 @@ function batchInspection(stage, factory) {
   return [factory, stage].filter((value) => value !== null && value !== undefined && value !== "").join(" · ") || "—";
 }
 
+function reportTimeSeconds(row, historical) {
+  if (historical) return row.timeSeconds;
+  return row.actualTimeSeconds;
+}
+
+function reportTimeLabel(row, historical) {
+  const value = reportTimeSeconds(row, historical);
+  return value === null || value === undefined || value === "" ? historical ? "—" : "Incomplete" : `${value}s`;
+}
+
 function sourceComputedQuantity(batch, row) {
   if (row.status === "missing-from-source" || batch.quantity === null || batch.quantity === undefined || batch.quantity === "" || row.sourceInspectedQty === null || row.sourceInspectedQty === undefined || row.sourceInspectedQty === "" || row.samplingPercent === null || row.samplingPercent === undefined || row.samplingPercent === "") return null;
   const batchQuantity = Number(batch.quantity);
@@ -143,7 +153,8 @@ function makeReadOnlyTable(workspace, state) {
     ),
   );
   const body = h("tbody", { className: "qc-ops-table-body" }, list(workspace.rows).map((row, index) => {
-    const tr = h("tr", { className: `${row.important === true ? "qc-ops-important-row" : ""}${historical && row.status === "missing-from-source" ? " qc-ops-historical-missing-row" : ""}`.trim() });
+    const important = historical ? row.important : (row.displayImportant ?? row.important);
+    const tr = h("tr", { className: `${important === true ? "qc-ops-important-row" : ""}${historical && row.status === "missing-from-source" ? " qc-ops-historical-missing-row" : ""}`.trim() });
     tr.append(h("td", { className: "qc-ops-no" }, text(row.no, String(index + 1))));
     if (multipleProducts) {
       const product = rowProduct(workspace, row, state);
@@ -175,8 +186,9 @@ function makeReadOnlyTable(workspace, state) {
       })(),
       h("td", { className: "qc-ops-number" }, historical
         ? sourceText(row.defectiveQty)
-        : row.defectiveQty === null || row.defectiveQty === undefined ? "Not saved" : quantity(row.defectiveQty)),
-      h("td", { className: "qc-ops-number qc-ops-rate" }, historical ? sourceRate(row.sourceDefectiveRate) : percent(row.defectiveRate)),
+        : row.defectiveQty === null || row.defectiveQty === undefined ? "Incomplete" : quantity(row.defectiveQty)),
+      h("td", { className: "qc-ops-number qc-ops-rate" }, historical ? sourceRate(row.sourceDefectiveRate) :
+        row.defectiveQty === null || row.defectiveQty === undefined ? "Incomplete" : percent(row.defectiveRate)),
     );
     const history = list(row.history);
     for (let historyIndex = 0; historyIndex < 4; historyIndex += 1) {
@@ -186,7 +198,7 @@ function makeReadOnlyTable(workspace, state) {
       else cell.append(h("span", { className: "qc-ops-empty-history" }, "—"));
       tr.append(cell);
     }
-    tr.append(h("td", { className: "qc-ops-number" }, row.timeSeconds === null || row.timeSeconds === undefined ? "—" : `${row.timeSeconds}s`));
+    tr.append(h("td", { className: "qc-ops-number" }, reportTimeLabel(row, historical)));
     const procedureCell = h("td", { className: "qc-ops-link" });
     const procedureUrl = safeProcedureUrl(row.procedureUrl);
     procedureCell.append(procedureUrl ? h("a", { href: procedureUrl, target: "_blank", rel: "noopener noreferrer" }, "Open procedure") : text(row.procedureUrl, "—"));
@@ -279,13 +291,16 @@ function exportRows(workspace, state) {
     const ownerQuantity = historical ? batch.quantity : row.productQuantity ?? ownerProduct?.quantity;
     const ownerVersion = historical ? workspace.version?.label || batch.versionLabel : row.versionLabel || ownerProduct?.version?.label || ownerProduct?.versionLabel;
     const orderLine = ownerProduct ? list(order?.lines).find((line) => line.id === ownerProduct.lineId) : lookupOrderLine(order, batch);
+    const reportDefectiveQty = row.defectiveQty;
+    const reportDefectiveRate = historical ? row.sourceDefectiveRate : row.defectiveRate === null || row.defectiveRate === undefined ? "" : percent(row.defectiveRate);
+    const reportActualTime = reportTimeSeconds(row, historical) ?? "";
     const values = [
       [displayNumber, true], [batch.date, false], [historical ? "" : batch.status, false], [productsSummary, true], [order?.number, true], [batch.factory, true], [batch.stage, true],
       [historical ? batch.quantity : totalBatchQuantity(workspace, state), false], [historical ? "Excluded · historical record" : batch.countForPO ? "Counts after release" : "Not counted", true],
       [row.no, true], [ownerLabel, true], [ownerQuantity, false], [orderLine?.orderedQty, false], [ownerVersion, true], [row.title, true], [row.titleZh, true],
       [row.specification, true], [row.specificationZh, true], [row.devices, true], [row.samplingPercent, false], [row.recordingRule, true],
-      [historical ? row.sourceInspectedQty : row.inspectedQty, false], [row.defectiveQty, false], [historical ? row.sourceDefectiveRate : row.defectiveRate === null || row.defectiveRate === undefined ? "" : percent(row.defectiveRate), false],
-      ...priorValues.map((value) => [value, true]), [row.timeSeconds ?? "", false], [row.procedureUrl, true], [row.remarks, true], [issues, true], [photos, true],
+      [historical ? row.sourceInspectedQty : row.inspectedQty, false], [reportDefectiveQty, false], [reportDefectiveRate, false],
+      ...priorValues.map((value) => [value, true]), [reportActualTime, false], [row.procedureUrl, true], [row.remarks, true], [issues, true], [photos, true],
     ];
     rows.push(csvRow(values.map(([value, textField]) => ({ value, textField }))));
   }
@@ -322,7 +337,7 @@ async function renderReportDetail(root, ctx) {
   const productNames = historical ? [batchProductLabel(batch, variant)] : reportProducts(workspace, state).map((product) => productLabel(product, state));
   const productsTitle = productNames.join(", ");
   const reportTitle = `${text(workspace.displayNumber ?? batch.number)} · ${text(productsTitle)}`;
-  const unsavedRows = historical ? 0 : list(workspace.rows).filter((row) => row.savedAt === null || row.defectiveQty === null).length;
+  const incompleteRows = historical ? 0 : list(workspace.rows).filter((row) => !row.savedAt || row.defectiveQty === null || row.defectiveQty === undefined || row.actualTimeSeconds === null || row.actualTimeSeconds === undefined || row.actualTimeSeconds === "").length;
   const scope = h("article", { className: "print-scope qc-ops-report" },
     h("header", { className: "qc-ops-report-document-heading" },
       h("p", { className: "eyebrow" }, "MasterQC Web · Inspection report"),
@@ -331,13 +346,13 @@ async function renderReportDetail(root, ctx) {
     ),
     reportMetadata(workspace, state),
     batch.notes ? h("section", { className: "qc-ops-report-notes" }, h("strong", {}, "Batch notes / 本批次备注"), h("p", {}, batch.notes)) : null,
-    unsavedRows ? h("p", { className: "qc-ops-report-unsaved-note" }, `${unsavedRows} inspection row${unsavedRows === 1 ? "" : "s"} are unsaved and omitted from this report.`) : null,
+    incompleteRows ? h("p", { className: "qc-ops-report-unsaved-note" }, `${incompleteRows} incomplete row${incompleteRows === 1 ? "" : "s"}.`) : null,
     h("section", { className: "qc-ops-report-table-section" },
       h("div", { className: "qc-ops-section-heading" }, h("h2", {}, "Batch inspection table")),
       makeReadOnlyTable(workspace, state),
     ),
   );
-  const header = pageHeading("Batch report", historical ? "Read-only report of this batch and its source-recorded values." : "Read-only report of saved batch records and their row-specific evidence.", [
+  const header = pageHeading("Batch report", historical ? "Read-only report of this batch and its source-recorded values." : "Read-only report of batch records and their row-specific evidence.", [
     button("Back to batch", () => ctx.navigate("batches", batch.id, true), "button button-secondary"),
     button("Download CSV", async () => {
       try {

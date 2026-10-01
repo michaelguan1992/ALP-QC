@@ -111,6 +111,7 @@ function issueDraft(issue) {
     owner: String(issue.owner || ""),
     disposition: String(issue.disposition || ""),
     confirmations: [0, 1, 2].map((index) => String(issue.confirmations?.[index] || "")),
+    discussionAuthorName: "",
     discussionText: ""
   };
 }
@@ -127,6 +128,14 @@ function draftDiffers(issue, draft) {
   const saved = savedIssueDraft(issue);
   return draft.owner !== saved.owner || draft.disposition !== saved.disposition ||
     draft.confirmations.some((value, index) => value !== saved.confirmations[index]);
+}
+
+function hasDiscussionDraft(draft) {
+  return Boolean(draft.discussionAuthorName || draft.discussionText);
+}
+
+function hasIssueDraft(issue, draft) {
+  return draftDiffers(issue, draft) || hasDiscussionDraft(draft);
 }
 
 function sourcePhotos(issue, state) {
@@ -189,9 +198,13 @@ function sourceCard(issue, state) {
 
 function renderDiscussion(issue) {
   if (!list(issue.discussion).length) return el("p", { className: "qc-ops-empty-discussion" }, "No discussion entries yet.");
-  return el("ol", { className: "qc-ops-discussion-list" }, ...list(issue.discussion).map((entry) => el("li", {},
-    el("p", {}, entry.text), el("time", {}, timestampLabel(entry.createdAt))
-  )));
+  return el("ol", { className: "qc-ops-discussion-list" }, ...list(issue.discussion).map((entry) => {
+    const authorName = String(entry.authorName || "").trim();
+    return el("li", {},
+      el("p", {}, authorName ? [el("strong", { className: "qc-ops-discussion-author" }, authorName), " ", entry.text] : entry.text),
+      el("time", {}, timestampLabel(entry.createdAt))
+    );
+  }));
 }
 
 function openIssueDialog(issue, state, ctx) {
@@ -202,21 +215,36 @@ function openIssueDialog(issue, state, ctx) {
   const confirmationInputs = [0, 1, 2].map((index) => el("input", {
     type: "text", maxLength: "100", value: draft.confirmations[index] || "", disabled: readOnly, name: `confirmation${index + 1}`
   }));
+  const discussionAuthorName = el("input", {
+    type: "text", maxLength: "200", value: draft.discussionAuthorName || "", disabled: readOnly,
+    name: "discussionAuthorName", "aria-required": "true"
+  });
   const discussionText = el("textarea", { rows: "2", maxLength: "1200", disabled: readOnly, name: "discussionText", placeholder: "Add a separate discussion entry" }, draft.discussionText || "");
   const discussionList = el("div", { className: "qc-ops-discussion-host" }, renderDiscussion(issue));
   const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
   const form = el("form", { className: "qc-ops-form qc-ops-issue-form", "data-preserve-drafts": "true", "data-issue-id": issue.id });
-  if (draftDiffers(issue, draft) || draft.discussionText) form.dataset.dirty = "true";
+  if (hasIssueDraft(issue, draft)) form.dataset.dirty = "true";
+  const captureDraft = () => ({
+    owner: owner.value,
+    disposition: disposition.value,
+    confirmations: confirmationInputs.map((input) => input.value),
+    discussionAuthorName: discussionAuthorName.value,
+    discussionText: discussionText.value
+  });
+  const storeDraft = (current) => {
+    if (hasIssueDraft(issue, current)) issueDrafts.set(issue.id, current);
+    else issueDrafts.delete(issue.id);
+  };
+  const markDraftForPreservation = () => {
+    const current = captureDraft();
+    storeDraft(current);
+    if (hasIssueDraft(issue, current)) form.dataset.dirty = "true";
+    else delete form.dataset.dirty;
+    return current;
+  };
   const saveButton = el("button", { type: "submit", className: "button button-primary", disabled: readOnly }, "Save disposition");
   const closeButton = button("Close issue", async () => {
-    const current = {
-      owner: owner.value,
-      disposition: disposition.value,
-      confirmations: confirmationInputs.map((input) => input.value),
-      discussionText: discussionText.value
-    };
-    if (draftDiffers(issue, current) || current.discussionText) issueDrafts.set(issue.id, current);
-    else issueDrafts.delete(issue.id);
+    const current = markDraftForPreservation();
     if (current.discussionText.trim()) {
       notify("Add the discussion entry or clear it before closing this issue.", true);
       return;
@@ -237,61 +265,72 @@ function openIssueDialog(issue, state, ctx) {
   }, "button button-danger");
   closeButton.disabled = readOnly;
   const discussionButton = button("Add discussion entry", async () => {
-    if (!discussionText.value.trim()) {
+    const current = markDraftForPreservation();
+    const authorName = current.discussionAuthorName.trim();
+    if (!authorName) {
+      notify("You must enter your name before adding a discussion entry.", true);
+      discussionAuthorName.focus();
+      return;
+    }
+    const entryText = current.discussionText.trim();
+    if (!entryText) {
       notify("Enter a discussion entry before adding it.", true);
       discussionText.focus();
       return;
     }
-    const response = await runCommand(ctx, "addDiscussion", { id: issue.id, text: discussionText.value.trim() });
+    const response = await runCommand(ctx, "addDiscussion", { id: issue.id, text: entryText, authorName });
     if (response.ok) {
+      const latestDraft = issueDrafts.get(issue.id) || current;
       const remainingDraft = {
-        owner: owner.value,
-        disposition: disposition.value,
-        confirmations: confirmationInputs.map((input) => input.value),
-        discussionText: ""
+        ...latestDraft,
+        discussionAuthorName: latestDraft.discussionAuthorName === current.discussionAuthorName ? "" : latestDraft.discussionAuthorName,
+        discussionText: latestDraft.discussionText === current.discussionText ? "" : latestDraft.discussionText
       };
-      if (draftDiffers(issue, remainingDraft)) issueDrafts.set(issue.id, remainingDraft);
+      if (hasIssueDraft(issue, remainingDraft)) issueDrafts.set(issue.id, remainingDraft);
       else issueDrafts.delete(issue.id);
       closeDialog(true);
     }
   }, "button button-secondary");
   discussionButton.disabled = readOnly;
   const updateDraft = () => {
-    const next = { owner: owner.value, disposition: disposition.value, confirmations: confirmationInputs.map((input) => input.value), discussionText: discussionText.value };
-    const dirty = draftDiffers(issue, next) || Boolean(next.discussionText);
-    if (dirty) {
-      issueDrafts.set(issue.id, next);
-      form.dataset.dirty = "true";
-    } else {
-      issueDrafts.delete(issue.id);
-      delete form.dataset.dirty;
-    }
+    const next = captureDraft();
+    storeDraft(next);
+    if (hasIssueDraft(issue, next)) form.dataset.dirty = "true";
+    else delete form.dataset.dirty;
     queueMicrotask(() => {
       const savedDraft = issueDrafts.get(issue.id);
-      if (!savedDraft || (!draftDiffers(issue, savedDraft) && !savedDraft.discussionText)) delete form.dataset.dirty;
+      if (!savedDraft || !hasIssueDraft(issue, savedDraft)) delete form.dataset.dirty;
     });
   };
-  [owner, disposition, discussionText, ...confirmationInputs].forEach((input) => input.addEventListener("input", updateDraft));
+  [owner, disposition, discussionAuthorName, discussionText, ...confirmationInputs].forEach((input) => input.addEventListener("input", updateDraft));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     formError.textContent = "";
-    const next = { owner: owner.value, disposition: disposition.value, confirmations: confirmationInputs.map((input) => input.value), discussionText: discussionText.value };
-    const previous = issueDrafts.get(issue.id);
-    issueDrafts.delete(issue.id);
+    const next = markDraftForPreservation();
     const normalized = {
       owner: next.owner.trim(),
       disposition: next.disposition.trim(),
       confirmations: next.confirmations.map((name) => name.trim()),
+      discussionAuthorName: next.discussionAuthorName,
       discussionText: next.discussionText
     };
-    if (normalized.discussionText) issueDrafts.set(issue.id, normalized);
     const response = await runCommand(ctx, "saveIssue", { id: issue.id, owner: normalized.owner, disposition: normalized.disposition, confirmations: normalized.confirmations });
     if (!response.ok) {
-      const failedDraft = previous || normalized;
-      if (draftDiffers(issue, failedDraft) || failedDraft.discussionText) issueDrafts.set(issue.id, failedDraft);
+      const failedDraft = issueDrafts.get(issue.id) || normalized;
+      if (hasIssueDraft(issue, failedDraft)) issueDrafts.set(issue.id, failedDraft);
     }
     if (response.ok) {
-      if (!normalized.discussionText) issueDrafts.delete(issue.id);
+      const latestDraft = issueDrafts.get(issue.id) || normalized;
+      const savedDraft = {
+        ...latestDraft,
+        owner: latestDraft.owner === next.owner ? normalized.owner : latestDraft.owner,
+        disposition: latestDraft.disposition === next.disposition ? normalized.disposition : latestDraft.disposition,
+        confirmations: latestDraft.confirmations.map((name, index) => name === next.confirmations[index] ? normalized.confirmations[index] : name)
+      };
+      const hasUnsavedDispositionDraft = savedDraft.owner !== normalized.owner || savedDraft.disposition !== normalized.disposition ||
+        savedDraft.confirmations.some((name, index) => name !== normalized.confirmations[index]);
+      if (hasDiscussionDraft(savedDraft) || hasUnsavedDispositionDraft) issueDrafts.set(issue.id, savedDraft);
+      else issueDrafts.delete(issue.id);
       closeDialog(true);
     }
   });
@@ -305,11 +344,15 @@ function openIssueDialog(issue, state, ctx) {
     el("section", { className: "qc-ops-discussion" },
       el("h3", {}, "Discussion"),
       discussionList,
+      field("Your name", discussionAuthorName),
       field("New discussion entry", discussionText),
       discussionButton
     ),
     formError,
-    el("div", { className: "qc-ops-dialog-actions" }, button("Done", () => closeDialog(), "button button-secondary"), saveButton, closeButton)
+    el("div", { className: "qc-ops-dialog-actions" }, button("Done", () => {
+      markDraftForPreservation();
+      closeDialog(true);
+    }, "button button-secondary"), saveButton, closeButton)
   );
   const dialog = showDialog(`${text(issue.number, "Issue")} · ${text(issue.title)}`, form);
   dialog.dataset.operationDraftId = issue.id;

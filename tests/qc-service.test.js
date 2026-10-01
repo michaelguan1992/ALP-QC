@@ -104,6 +104,7 @@ async function saveAllRows(harness, batchId) {
     await harness.command("saveInspection", {
       batchId,
       rowId: row.id,
+      actualTimeSeconds: 1.25,
       defectiveQty: 0,
       remarks: "Checked.",
     });
@@ -192,7 +193,7 @@ test("batch creation locks the selected family/model rows and calculated samplin
   await assert.rejects(harness.command("saveInspection", {
     batchId: batch.id, rowId: workspace.rows[0].id, inspectedQty: 99, defectiveQty: 0, remarks: "",
   }), /calculated .* cannot be entered/i);
-  await harness.command("saveInspection", { batchId: batch.id, rowId: workspace.rows[0].id, defectiveQty: 1, remarks: "One defect." });
+  await harness.command("saveInspection", { batchId: batch.id, rowId: workspace.rows[0].id, actualTimeSeconds: 1.25, defectiveQty: 1, remarks: "One defect." });
   workspace = await harness.service.getBatchWorkspace(batch.id);
   assert.equal(workspace.rows[0].defectiveRate, 2.33);
   assert.equal(workspace.rows[0].inspectedQty, 43);
@@ -256,9 +257,9 @@ test("saved row photos remain in an issue snapshot, open issues block release, a
   await harness.command("saveIssue", { id: issue.entityId, owner: "Lead", disposition: "Replace the seal", confirmations: ["One", "", "Three"] });
   await assert.rejects(harness.command("closeIssue", { id: issue.entityId }), /all three confirmation names/i);
   await harness.command("saveIssue", { id: issue.entityId, owner: "Lead", disposition: "Replace the seal", confirmations: ["One", "Two", "Three"] });
-  await harness.command("addDiscussion", { id: issue.entityId, text: "Replacement verified." });
+  await harness.command("addDiscussion", { id: issue.entityId, text: "Replacement verified.", authorName: "Inspector" });
   await harness.command("closeIssue", { id: issue.entityId });
-  await assert.rejects(harness.command("addDiscussion", { id: issue.entityId, text: "Late note." }), /read-only/i);
+  await assert.rejects(harness.command("addDiscussion", { id: issue.entityId, text: "Late note.", authorName: "Inspector" }), /read-only/i);
   const progressBefore = await harness.service.getPurchaseOrderProgress(created.order.id);
   assert.equal(progressBefore.lines[0].releasedQty, 0);
   await harness.command("releaseBatch", { id: created.id });
@@ -298,7 +299,7 @@ test("release validates every row, deduplicates physical lots, and counts OQC ba
   const variant = state.variants.find((item) => item.model === "S15" && item.color === "Red");
   const first = await createBatch(harness, { variant, number: "B-LOT-1", quantity: 25, lotNumber: "PHYS-1" });
   assert.equal((await harness.state()).batches.find((batch) => batch.id === first.id).countForPO, true);
-  await assert.rejects(harness.command("releaseBatch", { id: first.id }), /Save all .* inspection rows/i);
+  await assert.rejects(harness.command("releaseBatch", { id: first.id }), /Complete all .* inspection rows.*remain incomplete/i);
   await saveAllRows(harness, first.id);
   await harness.command("releaseBatch", { id: first.id });
 
@@ -427,13 +428,14 @@ test("row photos stay isolated by row and batch, and history uses only saved ear
   const older = await createBatch(harness, { variant: red, number: "B-HISTORY-OLD", quantity: 100, lotNumber: "LOT-OLD", date: "2026-09-20" });
   let workspace = await harness.service.getBatchWorkspace(older.id);
   const oldRow = workspace.rows[0];
-  await harness.command("saveInspection", { batchId: older.id, rowId: oldRow.id, defectiveQty: 1, remarks: "Old saved result." });
+  await harness.command("saveInspection", { batchId: older.id, rowId: oldRow.id, actualTimeSeconds: 1.25, defectiveQty: 1, remarks: "Old saved result." });
   const unsaved = await createBatch(harness, { variant: red, number: "B-HISTORY-UNSAVED", quantity: 100, lotNumber: "LOT-UNSAVED", date: "2026-09-22" });
   const yellow = (await harness.state()).variants.find((item) => item.model === "S15" && item.color === "Yellow");
   const otherVariant = await createBatch(harness, { variant: yellow, number: "B-HISTORY-YELLOW", quantity: 100, lotNumber: "LOT-YELLOW-HISTORY", date: "2026-09-23" });
   await harness.command("saveInspection", {
     batchId: otherVariant.id,
     rowId: (await harness.service.getBatchWorkspace(otherVariant.id)).rows[0].id,
+    actualTimeSeconds: 1.25,
     defectiveQty: 1,
     remarks: "Different variant.",
   });
@@ -561,7 +563,7 @@ test("an explicit 0% standard remains a zero-sample row with a null rate", async
   const batch = await createBatch(harness, { variant, version: (await harness.state()).versions.find((item) => item.id === version.id), number: "B-ZERO", quantity: 100 });
   const row = (await harness.service.getBatchWorkspace(batch.id)).rows[0];
   assert.equal(row.inspectedQty, 0);
-  await harness.command("saveInspection", { batchId: batch.id, rowId: row.id, defectiveQty: 0, remarks: "Not sampled." });
+  await harness.command("saveInspection", { batchId: batch.id, rowId: row.id, actualTimeSeconds: 0, defectiveQty: 0, remarks: "Not sampled." });
   assert.equal((await harness.service.getBatchWorkspace(batch.id)).rows[0].defectiveRate, null);
   assert.ok(s15Source.entityId);
 });

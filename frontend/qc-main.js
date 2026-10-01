@@ -25,6 +25,10 @@ let selectedId = null;
 let staleMessage = "";
 let renderNumber = 0;
 let channel = null;
+let activeAutosaveController = null;
+let commandQueue = Promise.resolve();
+let needsAuthoritativeRefresh = false;
+let commandInFlight = 0;
 
 function readRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
@@ -58,7 +62,25 @@ function hasUnsavedForm() {
 }
 
 function dirtyForms() {
-  return [...app.querySelectorAll('.app-main form[data-dirty="true"]')];
+  return [...app.querySelectorAll('.app-main form[data-dirty="true"]:not([data-autosave-form="true"])')];
+}
+
+function disposeAutosaveController() {
+  activeAutosaveController?.dispose?.();
+  activeAutosaveController = null;
+}
+
+async function flushAutosaves() {
+  if (!activeAutosaveController) return true;
+  const saved = await activeAutosaveController.flushAll();
+  if (!saved) notify("Resolve pending inspection edits before continuing.", true);
+  return saved;
+}
+
+function enqueueCommand(work) {
+  const pending = commandQueue.then(work, work);
+  commandQueue = pending.then(() => undefined, () => undefined);
+  return pending;
 }
 
 function routeHash(route, id) {
@@ -102,6 +124,11 @@ function updateStaleWarning() {
   if (message) message.textContent = staleMessage;
 }
 
+function updateRevisionLabel() {
+  const label = document.querySelector(".revision-label");
+  if (label && state) label.textContent = `Revision ${state.revision}`;
+}
+
 function setStale(message) {
   staleMessage = message;
   updateStaleWarning();
@@ -110,11 +137,27 @@ function setStale(message) {
 async function readLatestState() {
   const next = await service.getState();
   state = next;
+  needsAuthoritativeRefresh = false;
   staleMessage = "";
   renderApp();
 }
 
-function requestRefresh() {
+async function requestRefresh() {
+  if (!(await flushAutosaves())) {
+    showDialog("Unsaved inspection edits", el("div", { className: "discard-prompt" },
+      el("p", {}, "Some inspection edits could not be confirmed. Reloading will discard this tab’s drafts."),
+      el("div", { className: "button-row" },
+        button("Stay on this page", () => closeDialog(true), "button-secondary"),
+        button("Discard edits and reload", () => {
+          closeDialog(true);
+          disposeAutosaveController();
+          window.dispatchEvent(new CustomEvent("masterqc:discard-operation-drafts"));
+          void refreshLatest();
+        }, "button-danger"),
+      ),
+    ));
+    return;
+  }
   if (hasUnsavedForm()) {
     promptToDiscard("reload latest data", () => { void refreshLatest(); });
     return;
@@ -132,8 +175,9 @@ async function refreshLatest() {
   }
 }
 
-function navigate(route, id = null, force = false) {
+async function navigate(route, id = null, force = false) {
   if (!routes.has(route)) return false;
+  if (!(await flushAutosaves())) return false;
   if (!force && hasUnsavedForm()) {
     promptToDiscard("continue", () => navigate(route, id, true));
     return false;
@@ -173,29 +217,92 @@ function getContext() {
     refresh: requestRefresh,
     announceChange: (revision) => channel?.postMessage({ revision }),
     selectedId,
-    run: async (type, data) => {
-      if (!state) return { ok: false, error: new Error("The local workspace is not ready.") };
+    registerAutosaveController: (controller) => {
+      activeAutosaveController = controller;
+      return () => {
+        if (activeAutosaveController === controller) {
+          controller.dispose?.();
+          activeAutosaveController = null;
+        }
+      };
+    },
+    flushAutosaves,
+    refreshState: async ({ render = false } = {}) => enqueueCommand(async () => {
+      commandInFlight += 1;
       try {
-        const result = await service.command(type, data, state.revision);
-        try {
-          const latest = await service.getState();
-          state = latest;
-          staleMessage = "";
-          channel?.postMessage({ revision: latest.revision });
-          renderApp();
-        } catch (readError) {
-          setStale("The change was saved, but the updated data could not be reloaded. Reload before making another change.");
-          notify(readError instanceof Error ? readError.message : "The change was saved, but the page could not reload.", true);
+        const latest = await service.getState();
+        commandInFlight -= 1;
+        state = latest;
+        needsAuthoritativeRefresh = false;
+        staleMessage = "";
+        channel?.postMessage({ revision: latest.revision });
+        if (render) renderApp();
+        else {
+          updateStaleWarning();
+          updateRevisionLabel();
         }
-        return { ok: true, result };
+        return { ok: true, state: latest };
       } catch (error) {
-        const message = error instanceof Error ? error.message : "The change could not be saved.";
-        if (/revision|stale|reload|changed in another/i.test(message)) {
-          setStale("Another tab changed this workspace. Reload the latest data before saving again.");
-        }
-        notify(message, true);
+        commandInFlight -= 1;
+        setStale("The latest data could not be loaded. Reload before making another change.");
         return { ok: false, error };
       }
+    }),
+    run: async (type, data, options = {}) => {
+      if (options.autosave !== true && !(await flushAutosaves())) {
+        return { ok: false, blocked: true, error: new Error("Inspection edits could not be saved.") };
+      }
+      return enqueueCommand(async () => {
+        if (!state) return { ok: false, error: new Error("The local workspace is not ready.") };
+        if (needsAuthoritativeRefresh) {
+          try {
+            state = await service.getState();
+            needsAuthoritativeRefresh = false;
+          } catch (error) {
+            setStale("The saved change is awaiting a fresh read. Reload before making another change.");
+            if (!options.silent) notify(error instanceof Error ? error.message : "The latest data could not be loaded.", true);
+            return { ok: false, error };
+          }
+        }
+        const baseRevision = state.revision;
+        let result;
+        commandInFlight += 1;
+        try {
+          result = await service.command(type, data, baseRevision);
+        } catch (error) {
+          commandInFlight -= 1;
+          const message = error instanceof Error ? error.message : "The change could not be saved.";
+          if (/revision|stale|reload|changed in another/i.test(message)) {
+            setStale("Another tab changed this workspace. Reload the latest data before saving again.");
+          }
+          if (!options.silent) notify(message, true);
+          return { ok: false, error, stale: /revision|stale|reload|changed in another/i.test(message) };
+        }
+        const commandRevision = Number(result?.revision ?? result?.result?.revision);
+        try {
+          const latest = await service.getState();
+          commandInFlight -= 1;
+          state = latest;
+          needsAuthoritativeRefresh = false;
+          staleMessage = "";
+          channel?.postMessage({ revision: latest.revision });
+          if (options.render !== false) renderApp();
+          else {
+            updateStaleWarning();
+            updateRevisionLabel();
+          }
+          return { ok: true, result, state: latest, revision: latest.revision, refreshed: true };
+        } catch (readError) {
+          commandInFlight -= 1;
+          if (Number.isSafeInteger(commandRevision) && commandRevision >= baseRevision) {
+            state = { ...state, revision: commandRevision };
+          }
+          needsAuthoritativeRefresh = true;
+          setStale("The change was saved, but the updated data could not be reloaded. Reload before making another change.");
+          if (!options.silent) notify(readError instanceof Error ? readError.message : "The change was saved, but the page could not reload.", true);
+          return { ok: false, committed: true, refreshed: false, result, revision: commandRevision, error: readError };
+        }
+      });
     },
     importHistory: async (historyPackage) => {
       if (!state) return { ok: false, error: new Error("The local workspace is not ready.") };
@@ -220,6 +327,7 @@ function getContext() {
 
 function renderApp() {
   if (!state) return;
+  disposeAutosaveController();
   const thisRender = ++renderNumber;
   const shell = el("div", { className: "app-frame" });
   const homeUrl = demoMode ? "/?workspace=demo" : "/";
@@ -297,26 +405,40 @@ function renderApp() {
 
 document.addEventListener("click", (event) => {
   const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
-  if (!anchor || !app.contains(anchor) || !hasUnsavedForm()) return;
+  if (!anchor || !app.contains(anchor) || anchor.target === "_blank" ||
+      (!activeAutosaveController?.hasPending?.() && !hasUnsavedForm())) return;
   const target = new URL(anchor.href, location.href);
-  if (target.origin !== location.origin) return;
   event.preventDefault();
-  promptToDiscard("open link", () => { location.href = target.href; });
+  void (async () => {
+    if (!(await flushAutosaves())) return;
+    const openTarget = () => {
+      if (anchor.target === "_blank") window.open(target.href, "_blank", "noopener,noreferrer");
+      else location.href = target.href;
+    };
+    if (hasUnsavedForm()) promptToDiscard("open link", openTarget);
+    else openTarget();
+  })();
 });
 
 window.addEventListener("popstate", () => {
   const next = readRoute();
-  if (hasUnsavedForm()) {
-    history.pushState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
-    promptToDiscard("continue", () => navigate(next.route, next.id, true));
-    return;
-  }
-  currentRoute = next.route;
-  selectedId = next.id;
-  if (next.legacyHistory || next.legacyReports) {
-    history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
-  }
-  renderApp();
+  void (async () => {
+    if (!(await flushAutosaves())) {
+      history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
+      return;
+    }
+    if (hasUnsavedForm()) {
+      history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
+      promptToDiscard("continue", () => { void navigate(next.route, next.id, true); });
+      return;
+    }
+    currentRoute = next.route;
+    selectedId = next.id;
+    if (next.legacyHistory || next.legacyReports) {
+      history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
+    }
+    renderApp();
+  })();
 });
 
 async function start() {
@@ -335,7 +457,7 @@ async function start() {
       }
     });
     const checkForSharedChanges = async () => {
-      if (!state) return;
+      if (!state || commandInFlight > 0) return;
       try {
         const latestRevision = await service.getRevision();
         if (latestRevision > state.revision) {

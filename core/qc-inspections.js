@@ -12,9 +12,10 @@ import {
   requireString,
 } from "./qc-domain.js";
 import { normalizeStandardItems, selectApplicableItems } from "./qc-standards.js";
-import { getBatchVersionItems, getBatchVersionReadiness, getBatchVersions } from "./qc-batch-versions.js";
+import { getBatchVersionItems, getBatchVersionReadiness, getBatchVersions, getSharedBatchVersionChoices } from "./qc-batch-versions.js";
 import { getBatchProducts, getBatchRowProduct } from "./qc-batch-products.js";
 import { resolveBatchDisplayNumbers } from "./qc-batch-display.js";
+import { resolveInspectionImportance } from "./qc-inspection-importance.js";
 
 export function requireBatch(state, batchId) {
   const id = requireString(batchId, "Batch ID", { maxLength: 160 });
@@ -31,8 +32,9 @@ export function requireEditableBatch(batch) {
 export function batchReleaseBlockers(state, batch) {
   if (batch.kind === "historical") return ["Historical inspection records cannot be released."];
   const blockers = [];
-  const unsaved = batch.rows.filter((row) => row.savedAt === null || row.defectiveQty === null);
-  if (unsaved.length) blockers.push(`Save all ${batch.rows.length} inspection rows before release; ${unsaved.length} remain unsaved.`);
+  const incomplete = batch.rows.filter((row) => row.savedAt === null || row.defectiveQty === null ||
+    (Object.hasOwn(row, "actualTimeSeconds") && row.actualTimeSeconds === null));
+  if (incomplete.length) blockers.push(`Complete all ${batch.rows.length} inspection rows before release; ${incomplete.length} remain incomplete.`);
   if (!batch.recorder.trim()) blockers.push("Enter the recorder before release.");
   const openIssues = state.issues.filter((issue) => issue.batchId === batch.id && issue.status === "open");
   if (openIssues.length) blockers.push(`Close all linked issues before release; ${openIssues.length} remain open.`);
@@ -78,9 +80,65 @@ function uniqueInspectionRowId(idFactory, usedIds) {
   fail("The ID generator could not create unique inspection row IDs.");
 }
 
+function batchNumberKey(value) {
+  return typeof value === "string" ? value.trim().normalize("NFKC").toLocaleLowerCase() : "";
+}
+
+function usedBatchDisplayNumbers(state) {
+  const used = new Set();
+  for (const batch of state.batches) {
+    const key = batchNumberKey(batch.number);
+    if (key) used.add(key);
+  }
+  const historicalIds = new Set(state.batches.filter((batch) => batch.kind === "historical").map((batch) => batch.id));
+  for (const [batchId, displayNumber] of resolveBatchDisplayNumbers(state)) {
+    if (!historicalIds.has(batchId)) continue;
+    const key = batchNumberKey(displayNumber);
+    if (key) used.add(key);
+  }
+  return used;
+}
+
+function resolveNewBatchNumber(state, requestedNumber, products, date, factory, stage) {
+  const explicitNumber = requestedNumber == null
+    ? ""
+    : requireString(requestedNumber, "Batch number", { maxLength: 160, allowBlank: true });
+  const usedNumbers = usedBatchDisplayNumbers(state);
+  if (explicitNumber) {
+    if (usedNumbers.has(batchNumberKey(explicitNumber))) fail("Batch number must be unique.");
+    return explicitNumber;
+  }
+
+  const models = [...new Set(products.map((product) => product.variant.model.trim()))]
+    .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+  const base = `${models.join("+")}-${date.replaceAll("-", "")}-${factory}-${stage}`;
+  if (!usedNumbers.has(batchNumberKey(base))) return requireString(base, "Batch number", { maxLength: 160 });
+
+  for (let suffix = 1; suffix < Number.MAX_SAFE_INTEGER; suffix += 1) {
+    const candidate = `${base}-${String(suffix).padStart(2, "0")}`;
+    if (!usedNumbers.has(batchNumberKey(candidate))) return requireString(candidate, "Batch number", { maxLength: 160 });
+  }
+  fail("The system could not create a unique batch number.");
+}
+
+function requireActualTimeSeconds(value) {
+  if (value == null || (typeof value === "string" && value.trim() === "")) {
+    fail("Enter actual inspection time in seconds before saving this row.");
+  }
+  if (typeof value !== "number" && typeof value !== "string") {
+    fail("Actual inspection time must be a number of seconds.");
+  }
+  const actualTimeSeconds = typeof value === "number" ? value : Number(value);
+  if (typeof value === "string" && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/u.test(value.trim())) {
+    fail("Actual inspection time must be a number of seconds.");
+  }
+  if (!Number.isFinite(actualTimeSeconds) || actualTimeSeconds < 0) {
+    fail("Actual inspection time must be finite and zero or more seconds.");
+  }
+  return actualTimeSeconds;
+}
+
 export function createBatch(state, data, context) {
-  const number = requireString(data.number, "Batch number", { maxLength: 160 });
-  if (state.batches.some((batch) => batch.number.toLocaleLowerCase() === number.toLocaleLowerCase())) fail("Batch number must be unique.");
   const order = state.orders.find((candidate) => candidate.id === data.orderId);
   if (!order) fail("Choose an available purchase order.");
   const multiProduct = Object.hasOwn(data, "products");
@@ -96,6 +154,13 @@ export function createBatch(state, data, context) {
   if (!stage) fail("Inspection stage must be IQC or OQC.");
   if (factory === "AP" && stage === "IQC") fail("AP batches are OQC only; AP IQC batches cannot be created.");
   const countForPO = stage === "OQC";
+  const hasSharedVersionLabel = Object.hasOwn(data, "versionLabel");
+  const sharedVersionLabel = hasSharedVersionLabel
+    ? requireString(data.versionLabel, "Design version", { maxLength: 160 })
+    : null;
+  if (hasSharedVersionLabel && productInputs.length > 1 && data.versionId != null && String(data.versionId).trim()) {
+    fail("A shared multi-product design version cannot use a single batch version ID.");
+  }
 
   const usedLineIds = new Set();
   const products = [];
@@ -116,22 +181,46 @@ export function createBatch(state, data, context) {
     const productQuantity = requirePositiveInteger(input.quantity, `${label} quantity`);
     quantity += productQuantity;
     if (!Number.isSafeInteger(quantity)) fail("The total batch quantity must be a safe whole number.");
-    const { version, applicableItems } = selectProductVersion(state, family, variant, factory, stage, input.versionId);
-    const lockedItems = normalizeStandardItems(applicableItems, family, context.idFactory, applicableItems);
     products.push({
+      input,
       lineId: line.id,
       variantId: variant.id,
       familyId: family.id,
       quantity: productQuantity,
-      versionId: version.id,
-      versionLabel: version.label,
       variant,
       family,
-      version,
-      lockedItems,
     });
   }
   ensureUnique(products.map((product) => product.lineId), "Purchase order lines in a batch");
+  const selectedModels = new Set(products.map((product) => product.variant.model));
+  if (selectedModels.size > 1) fail("A batch can include product variants of one model only.");
+
+  const sharedChoice = hasSharedVersionLabel
+    ? getSharedBatchVersionChoices(state, products.map((product) => product.variantId), factory, stage)
+      .find((choice) => choice.label === sharedVersionLabel)
+    : null;
+  if (hasSharedVersionLabel && !sharedChoice) {
+    fail("Choose a shared design version that is ready for every selected product.");
+  }
+  for (const product of products) {
+    const sharedVersionId = sharedChoice?.versions.find((entry) => entry.familyId === product.familyId)?.versionId;
+    if (hasSharedVersionLabel) {
+      const requestedId = product.input.versionId;
+      if (requestedId != null && String(requestedId).trim() && String(requestedId).trim() !== sharedVersionId) {
+        fail("A product version ID conflicts with the shared design version.");
+      }
+      if (productInputs.length === 1 && data.versionId != null && String(data.versionId).trim() && String(data.versionId).trim() !== sharedVersionId) {
+        fail("The batch version ID conflicts with the shared design version.");
+      }
+    }
+    const requestedVersionId = hasSharedVersionLabel ? sharedVersionId : product.input.versionId;
+    const { version, applicableItems } = selectProductVersion(state, product.family, product.variant, factory, stage, requestedVersionId);
+    product.versionId = version.id;
+    product.versionLabel = version.label;
+    product.version = version;
+    product.lockedItems = normalizeStandardItems(applicableItems, product.family, context.idFactory, applicableItems);
+    delete product.input;
+  }
 
   let legacyLotNumber = null;
   if (!multiProduct && data.lotNumber != null && !(typeof data.lotNumber === "string" && data.lotNumber.trim() === "")) {
@@ -146,6 +235,10 @@ export function createBatch(state, data, context) {
     versionLabel,
   }));
   const firstProduct = productRecords.length === 1 ? productRecords[0] : null;
+  const date = requireDate(data.date, "Batch date");
+  const recorder = requireString(data.recorder ?? "", "Recorder", { maxLength: 200, allowBlank: true });
+  const notes = requireString(data.notes ?? "", "Batch notes", { maxLength: 5000, allowBlank: true });
+  const number = resolveNewBatchNumber(state, data.number, products, date, factory, stage);
 
   const id = makeId(context.idFactory);
   const usedRowIds = new Set();
@@ -157,6 +250,7 @@ export function createBatch(state, data, context) {
       productLineId: product.lineId,
     } : {}),
     inspectedQty: Math.ceil(product.quantity * item.samplingPercent / 100),
+    actualTimeSeconds: null,
     defectiveQty: null,
     remarks: "",
     savedAt: null,
@@ -175,10 +269,10 @@ export function createBatch(state, data, context) {
     stage,
     countForPO,
     versionId: firstProduct?.versionId ?? null,
-    versionLabel: firstProduct?.versionLabel ?? null,
-    date: requireDate(data.date, "Batch date"),
-    recorder: requireString(data.recorder ?? "", "Recorder", { maxLength: 200, allowBlank: true }),
-    notes: requireString(data.notes ?? "", "Batch notes", { maxLength: 5000, allowBlank: true }),
+    versionLabel: firstProduct?.versionLabel ?? sharedVersionLabel ?? null,
+    date,
+    recorder,
+    notes,
     status: "draft",
     rows,
     attachmentIds: [],
@@ -188,7 +282,9 @@ export function createBatch(state, data, context) {
   if (multiProduct) batch.products = productRecords;
   else if (legacyLotNumber !== null) batch.lotNumber = legacyLotNumber;
   state.batches.push(batch);
-  const versionSummary = firstProduct
+  const versionSummary = sharedVersionLabel
+    ? ` using shared design version ${sharedVersionLabel}`
+    : firstProduct
     ? ` using locked version ${firstProduct.versionLabel}`
     : ` across ${productRecords.length} product lines and their locked versions`;
   return { entityId: id, action: "createBatch", summary: `Created draft batch ${number}${versionSummary}.` };
@@ -203,6 +299,29 @@ export function saveBatchDetails(state, data) {
   return { entityId: batch.id, action: "saveBatchDetails", summary: `Updated draft batch ${batch.number}.` };
 }
 
+export function deleteBatch(state, data) {
+  const batch = requireBatch(state, data.id);
+  if (batch.kind === "historical") fail("Historical inspection records cannot be deleted.");
+  if (batch.status !== "draft") fail("Released batches cannot be deleted.");
+
+  const linkedIssue = state.issues.find((issue) => issue.batchId === batch.id || issue.sourceSnapshot?.batchId === batch.id);
+  if (linkedIssue) fail("Delete is unavailable while this batch has linked issue records.");
+
+  const photoIds = new Set(batch.rows.flatMap((row) => Array.isArray(row.photoIds) ? row.photoIds : []));
+  const referencedSnapshot = state.issues.some((issue) => issue.sourceSnapshot?.batchId === batch.id ||
+    (issue.sourceSnapshot?.row?.photoIds ?? []).some((assetId) => photoIds.has(assetId)));
+  if (referencedSnapshot) fail("Delete is unavailable while saved issue evidence refers to this batch.");
+
+  const number = batch.number;
+  state.batches = state.batches.filter((candidate) => candidate.id !== batch.id);
+  state.assets = state.assets.filter((asset) => !(asset.kind === "photo" && asset.batchId === batch.id));
+  return {
+    entityId: batch.id,
+    action: "deleteBatch",
+    summary: `Deleted draft batch ${number}.`,
+  };
+}
+
 export function saveInspection(state, data, context) {
   const batch = requireBatch(state, data.batchId);
   requireEditableBatch(batch);
@@ -210,6 +329,7 @@ export function saveInspection(state, data, context) {
   const rowId = requireString(data.rowId, "Inspection row ID", { maxLength: 120 });
   const row = batch.rows.find((candidate) => candidate.id === rowId);
   if (!row) fail("That inspection row is not part of this batch.");
+  const actualTimeSeconds = requireActualTimeSeconds(data.actualTimeSeconds);
   if (data.defectiveQty == null || String(data.defectiveQty).trim() === "") fail("Enter a defective quantity before saving this row.");
   if (typeof data.defectiveQty !== "number" && typeof data.defectiveQty !== "string") fail("Defective quantity must be a number.");
   const defectiveQty = typeof data.defectiveQty === "number" ? data.defectiveQty : Number(data.defectiveQty);
@@ -218,9 +338,46 @@ export function saveInspection(state, data, context) {
   if (defectiveQty > row.inspectedQty) fail("Defective quantity cannot exceed inspection quantity.");
   const remarks = requireString(data.remarks ?? "", "Inspection remarks", { maxLength: 5000, allowBlank: true });
   row.defectiveQty = defectiveQty;
+  row.actualTimeSeconds = actualTimeSeconds;
   row.remarks = remarks;
   row.savedAt = context.now();
   return { entityId: batch.id, action: "saveInspection", summary: `Saved inspection row ${row.title} for batch ${batch.number}.` };
+}
+
+export function autosaveInspection(state, data, context) {
+  const batch = requireBatch(state, data.batchId);
+  requireEditableBatch(batch);
+  if (Object.hasOwn(data, "inspectedQty")) fail("Inspection quantity is calculated from the batch and standard and cannot be entered.");
+  const rowId = requireString(data.rowId, "Inspection row ID", { maxLength: 120 });
+  const row = batch.rows.find((candidate) => candidate.id === rowId);
+  if (!row) fail("That inspection row is not part of this batch.");
+  for (const field of ["defectiveQty", "actualTimeSeconds", "remarks"]) {
+    if (!Object.hasOwn(data, field)) fail(`Inspection autosave requires ${field}.`);
+  }
+
+  const defectiveQty = data.defectiveQty;
+  if (defectiveQty !== null) {
+    if (typeof defectiveQty !== "number") fail("Defective quantity must be a whole number of zero or more, or blank.");
+    requireNonNegativeInteger(defectiveQty, "Defective quantity");
+    if (defectiveQty > row.inspectedQty) fail("Defective quantity cannot exceed inspection quantity.");
+  }
+
+  const actualTimeSeconds = data.actualTimeSeconds;
+  if (actualTimeSeconds !== null && (typeof actualTimeSeconds !== "number" || !Number.isFinite(actualTimeSeconds) || actualTimeSeconds < 0)) {
+    fail("Actual inspection time must be finite and zero or more seconds, or blank.");
+  }
+  const remarks = requireString(data.remarks, "Inspection remarks", { maxLength: 5000, allowBlank: true });
+  const complete = defectiveQty !== null && actualTimeSeconds !== null;
+  if (row.defectiveQty === defectiveQty && row.actualTimeSeconds === actualTimeSeconds && row.remarks === remarks &&
+      (row.savedAt !== null) === complete) {
+    return { entityId: batch.id, changed: false, action: "autosaveInspection", summary: `Inspection row ${row.title} for batch ${batch.number} was already up to date.` };
+  }
+
+  row.defectiveQty = defectiveQty;
+  row.actualTimeSeconds = actualTimeSeconds;
+  row.remarks = remarks;
+  row.savedAt = complete ? context.now() : null;
+  return { entityId: batch.id, action: "autosaveInspection", summary: `Autosaved inspection row ${row.title} for batch ${batch.number}.` };
 }
 
 export function releaseBatch(state, data, context) {
@@ -297,6 +454,7 @@ export function getBatchWorkspace(state, batchId) {
       .slice(0, 4);
     return {
       ...structuredClone(row),
+      ...resolveInspectionImportance(state, batch, row),
       productLineId: product?.lineId ?? row.productLineId ?? null,
       variantId: product?.variantId ?? null,
       productLabel: rowVariant?.label ?? null,

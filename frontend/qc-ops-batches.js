@@ -17,33 +17,16 @@ import {
 import { closeDialog, downloadFile, readFileAsDataURL, showDialog } from "./qc-ui.js";
 import { historicalBatchImportControl } from "./qc-history.js";
 import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
-import { getBatchVersionItems, getBatchVersions, getBatchVersionReadiness } from "../core/qc-batch-versions.js";
+import { getBatchVersionItems, getBatchVersions, getBatchVersionReadiness, getSharedBatchVersionChoices } from "../core/qc-batch-versions.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
+import { createInspectionAutosaveController } from "./qc-inspection-autosave.js";
+import { batchReleaseBlockers } from "../core/qc-inspections.js";
 
 const rowDrafts = new Map();
 const batchDetailDrafts = new Map();
 
-function hasDraftsForBatch(batchId) {
-  const prefix = `${batchId}::`;
-  return Array.from(rowDrafts.keys()).some((key) => key.startsWith(prefix)) || batchDetailDrafts.has(String(batchId));
-}
-
-function navigateWithDraftWarning(ctx, route, id, batchId) {
-  if (batchId && hasDraftsForBatch(batchId) && route === "batch-report") {
-    showDialog("Unsaved inspection edits", el("div", { className: "discard-prompt" },
-      el("p", {}, "The report includes saved values only. Unsaved drafts remain in this tab."),
-      el("div", { className: "button-row" },
-        button("Stay on this batch", () => closeDialog(true), "button-secondary"),
-        button("View saved report", () => {
-          closeDialog(true);
-          ctx.navigate(route, id, true);
-        }, "button-primary"),
-      ),
-    ));
-    return;
-  }
-  if (batchId && hasDraftsForBatch(batchId) && !window.confirm("This batch has unsaved row or detail edits. They will remain as drafts in this tab if you continue. Save all edits before release.")) return;
-  ctx.navigate(route, id, true);
+function navigateWithDraftWarning(ctx, route, id) {
+  void ctx.navigate(route, id);
 }
 
 window.addEventListener("beforeunload", (event) => {
@@ -59,6 +42,14 @@ function rowKey(batchId, rowId) {
 
 function detailDraftKey(batchId) {
   return String(batchId);
+}
+
+function clearDraftsForBatch(batchId) {
+  const prefix = `${batchId}::`;
+  for (const key of rowDrafts.keys()) {
+    if (key.startsWith(prefix)) rowDrafts.delete(key);
+  }
+  batchDetailDrafts.delete(detailDraftKey(batchId));
 }
 
 function variantsById(state) {
@@ -158,22 +149,39 @@ function stateForRow(row, batchId) {
   const key = rowKey(batchId, row.id);
   return rowDrafts.get(key) || {
     defectiveQty: row.defectiveQty === null || row.defectiveQty === undefined ? "" : String(row.defectiveQty),
-    remarks: String(row.remarks || "")
-  };
-}
-
-function savedRowValue(row) {
-  return {
-    defectiveQty: row.defectiveQty === null || row.defectiveQty === undefined ? "" : String(row.defectiveQty),
+    actualTimeSeconds: row.actualTimeSeconds === null || row.actualTimeSeconds === undefined ? "" : String(row.actualTimeSeconds),
     remarks: String(row.remarks || "")
   };
 }
 
 function rowHasDraft(row, batchId) {
-  const draft = rowDrafts.get(rowKey(batchId, row.id));
-  if (!draft) return false;
-  const saved = savedRowValue(row);
-  return draft.defectiveQty !== saved.defectiveQty || draft.remarks !== saved.remarks;
+  return rowDrafts.has(rowKey(batchId, row.id));
+}
+
+function nullableNumberFromInput(input) {
+  if (input.validity.badInput) return { value: null, invalid: true };
+  if (input.value === "") return { value: null, invalid: false };
+  const value = Number(input.value);
+  return { value, invalid: !Number.isFinite(value) };
+}
+
+function normalizedRemarks(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function sameInspectionValues(row, values) {
+  return row && (row.defectiveQty ?? null) === values.defectiveQty && (row.actualTimeSeconds ?? null) === values.actualTimeSeconds &&
+    normalizedRemarks(row.remarks) === normalizedRemarks(values.remarks);
+}
+
+function savedDetailsFrom(batch) {
+  return { date: batch.date || "", recorder: batch.recorder || "", notes: batch.notes || "" };
+}
+
+function validIsoDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === value;
 }
 
 function getRowPhotos(row, workspace, state) {
@@ -196,7 +204,7 @@ function rateLabel(value) {
 }
 
 function currentRate(row, draft) {
-  if (draft.defectiveQty === "") return row.defectiveRate === null || row.defectiveRate === undefined ? "—" : rateLabel(row.defectiveRate);
+  if (draft.defectiveQty === "") return "—";
   const inspected = Number(row.inspectedQty);
   const defective = Number(draft.defectiveQty);
   if (!Number.isInteger(inspected) || !Number.isInteger(defective) || inspected < 0 || defective < 0 || defective > inspected) return "Check quantity";
@@ -224,29 +232,41 @@ function makePhotoDialog(photo, row, readOnly, onRemove) {
   ));
 }
 
-function renderInspectionRow(row, index, workspace, state, ctx, onDraftChange = null) {
+function operationalTaskTitle(row, workspace, state) {
+  const title = text(row.title, "");
+  const product = rowProduct(row, workspace.batch, state, workspace);
+  const family = list(state.families).find((entry) => entry.id === (product.familyId || product.variant?.familyId));
+  const models = list(family?.models);
+  if (!models.length || !workspace.batch.factory || !workspace.batch.stage) return title;
+  const suffix = `[${models.join("/")}·${workspace.batch.factory}·${workspace.batch.stage}]`;
+  return title.endsWith(suffix) ? title.slice(0, -suffix.length).trimEnd() : title;
+}
+
+function operationalDetailFact(label, value) {
+  return el("div", {}, el("dt", {}, label), el("dd", {}, value));
+}
+
+function renderInspectionRow(row, index, workspace, state, ctx, autosaveController, onDraftChange = null) {
   const readOnly = workspace.batch.status === "released";
-  const multipleProducts = batchProducts(workspace.batch, state, workspace).length > 1;
   const draft = stateForRow(row, workspace.batch.id);
-  const dirty = rowHasDraft(row, workspace.batch.id);
-  const tr = el("tr", { className: row.important ? "qc-ops-important-row" : "" });
-  const no = el("td", { className: "qc-ops-no" }, text(row.no, String(index + 1)));
-  tr.append(no);
-  if (multipleProducts) {
-    const product = rowProduct(row, workspace.batch, state, workspace);
-    tr.append(el("td", { className: "qc-ops-product-context" },
-      el("strong", {}, text(row.productLabel || productLabel(product, state))),
-      el("small", {}, `${quantity(row.productQuantity ?? product.quantity)} units`),
-    ));
-  }
+  const fullTitle = text(row.title);
+  const important = row.displayImportant ?? row.important;
+  const tr = el("tr", { className: important === true ? "qc-ops-important-row" : "" });
+  tr.append(el("td", { className: "qc-ops-no" }, text(row.no, String(index + 1))));
   const task = el("th", { scope: "row", className: "qc-ops-task" });
-  setBilingual(task, row.title, row.titleZh);
-  const specification = el("td", { className: "qc-ops-spec" });
-  setBilingual(specification, row.specification, row.specificationZh);
-  const method = el("td", { className: "qc-ops-method" });
-  setBilingual(method, row.devices, row.devicesZh || "");
-  const frequency = el("td", { className: "qc-ops-frequency" }, `${text(row.samplingPercent, "0")}%`);
-  const recording = el("td", { className: "qc-ops-recording" }, text(row.recordingRule, "—"));
+  task.setAttribute("aria-label", fullTitle);
+  setBilingual(task, operationalTaskTitle(row, workspace, state), row.titleZh);
+  if (important === true) task.append(el("span", { className: "qc-ops-important-badge" }, "Important"));
+  const details = el("details", { className: "qc-ops-row-details", open: true }, el("summary", {}, "Details"));
+  const specificationValue = el("span", {}, text(row.specification, "—"), row.specificationZh ? el("small", { lang: "zh" }, row.specificationZh) : null);
+  const methodValue = el("span", {}, text(row.devices, "—"), row.devicesZh ? el("small", { lang: "zh" }, row.devicesZh) : null);
+  details.append(el("dl", { className: "qc-ops-operational-details" },
+    operationalDetailFact("Specification", specificationValue),
+    operationalDetailFact("Equipment / method", methodValue),
+    operationalDetailFact("Sampling", sourcePercent(row.samplingPercent)),
+    operationalDetailFact("Recording", text(row.recordingRule, "—")),
+  ));
+  task.append(details);
   const inspectedInput = el("input", {
     className: "qc-ops-inspected-input",
     type: "number",
@@ -256,7 +276,6 @@ function renderInspectionRow(row, index, workspace, state, ctx, onDraftChange = 
     readOnly: true,
     "aria-label": `Calculated inspection quantity for ${text(row.title)}`
   });
-  const inspected = el("td", { className: "qc-ops-number" }, inspectedInput, el("small", {}, "Auto"));
   const defectiveInput = el("input", {
     className: "qc-ops-defective-input",
     type: "number",
@@ -267,46 +286,46 @@ function renderInspectionRow(row, index, workspace, state, ctx, onDraftChange = 
     disabled: readOnly,
     "aria-label": `Defective quantity for ${text(row.title)}`
   });
+  const actualTimeInput = el("input", {
+    className: "qc-ops-actual-time-input",
+    type: "number",
+    min: "0",
+    step: "any",
+    inputMode: "decimal",
+    value: draft.actualTimeSeconds,
+    disabled: readOnly,
+    "aria-label": `Actual time in seconds for ${text(row.title)}`
+  });
   const rowFormId = `qc-row-form-${workspace.batch.id}-${row.id}`.replace(/[^A-Za-z0-9_-]/g, "-");
   defectiveInput.setAttribute("form", rowFormId);
-  const defective = el("td", { className: "qc-ops-number" }, defectiveInput);
-  const rateCell = el("td", { className: "qc-ops-number qc-ops-rate" }, currentRate(row, draft));
-  const historyCells = [];
+  actualTimeInput.setAttribute("form", rowFormId);
+  const liveRate = el("strong", { className: "qc-ops-live-rate" }, currentRate(row, draft));
   const history = list(row.history);
-  for (let historyIndex = 0; historyIndex < 4; historyIndex += 1) {
-    const entry = history[historyIndex];
-    const cell = el("td", { className: "qc-ops-history" });
-    if (entry) {
-      cell.append(el("strong", {}, rateLabel(entry.rate ?? entry.defectiveRate)),
-        el("small", {}, text(entry.batchNumber || entry.number || entry.batchId)),
-        el("small", {}, dateLabel(entry.date)));
-    } else {
-      cell.append(el("span", { className: "qc-ops-empty-history" }, "—"));
-    }
-    historyCells.push(cell);
-  }
-  const time = el("td", { className: "qc-ops-number" }, row.timeSeconds === null || row.timeSeconds === undefined ? "—" : `${row.timeSeconds}s`);
-  const link = el("td", { className: "qc-ops-link" });
-  const procedureUrl = safeProcedureUrl(row.procedureUrl);
-  link.append(procedureUrl
-    ? el("a", { href: procedureUrl, target: "_blank", rel: "noopener noreferrer" }, "Open procedure")
-    : el("span", {}, row.procedureUrl ? "Invalid link" : "—"));
+  const historyValue = history.length
+    ? el("ul", { className: "qc-ops-result-history-list" }, ...history.slice(0, 4).map((entry, historyIndex) => el("li", {},
+      el("strong", {}, `Prior ${historyIndex + 1}: ${rateLabel(entry.rate ?? entry.defectiveRate)}`),
+      el("small", {}, text(entry.batchNumber || entry.number || entry.batchId)),
+      el("small", {}, dateLabel(entry.date)),
+    )))
+    : el("span", { className: "qc-ops-empty-history" }, "—");
+  const results = el("td", { className: "qc-ops-results" },
+    el("div", { className: "qc-ops-results-grid" },
+      el("label", { className: "qc-ops-result-field" }, el("span", {}, "Inspection qty"), inspectedInput),
+      el("label", { className: "qc-ops-result-field" }, el("span", {}, "Defective qty"), defectiveInput),
+      el("div", { className: "qc-ops-result-field qc-ops-rate-field" }, el("span", {}, "Rate"), liveRate),
+      el("label", { className: "qc-ops-result-field" }, el("span", {}, "Time (seconds)"), actualTimeInput),
+      el("div", { className: "qc-ops-result-history" }, el("span", {}, "History"), historyValue),
+    )
+  );
   const linkedIssues = getRowIssues(row, workspace);
   const canCreateFromRow = Boolean(row.savedAt);
+  const hasPersistedRowData = Boolean(row.savedAt) || row.defectiveQty !== null && row.defectiveQty !== undefined ||
+    row.actualTimeSeconds !== null && row.actualTimeSeconds !== undefined || Boolean(String(row.remarks || "").trim());
+  const rowComplete = row.defectiveQty !== null && row.defectiveQty !== undefined && row.actualTimeSeconds !== null && row.actualTimeSeconds !== undefined;
   const issueButton = makeAction(linkedIssues.length ? `Open issue · ${text(linkedIssues[0].number, "record")}` : "Create issue", async () => {
     const linked = linkedIssues[0];
     if (linked) {
       navigateWithDraftWarning(ctx, "issues", linked.id, workspace.batch.id);
-      return;
-    }
-    if (!row.savedAt) {
-      notify("Save this inspection row before creating a linked issue.", true);
-      return;
-    }
-    const details = batchDetailDrafts.get(detailDraftKey(workspace.batch.id));
-    const hasDetailDraft = details && (details.date !== (workspace.batch.date || "") || details.recorder !== (workspace.batch.recorder || "") || details.notes !== (workspace.batch.notes || ""));
-    if (rowHasDraft(row, workspace.batch.id) || hasDetailDraft) {
-      notify("Save this row and its batch details before creating an issue so the source snapshot includes the current records.", true);
       return;
     }
     const response = await runCommand(ctx, "createIssue", {
@@ -327,65 +346,101 @@ function renderInspectionRow(row, index, workspace, state, ctx, onDraftChange = 
 
   const remarksInput = el("textarea", {
     className: "qc-ops-row-remarks",
-    rows: "3",
+    rows: "2",
     maxLength: "1000",
     disabled: readOnly,
     "aria-label": `Remarks for ${text(row.title)}`
   }, draft.remarks);
   remarksInput.setAttribute("form", rowFormId);
-  const rowForm = el("form", { id: rowFormId, className: "qc-ops-row-form", "data-preserve-drafts": "true" });
-  const saveButton = el("button", { type: "submit", className: "button button-primary qc-ops-small-button", disabled: readOnly }, "Save row");
-  rowForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const defectiveQty = defectiveInput.value;
-    const remarks = remarksInput.value;
-    if (defectiveQty === "") {
-      notify("Enter a defective quantity before saving this row.", true);
-      defectiveInput.focus();
-      return;
-    }
-    if (!Number.isInteger(Number(defectiveQty)) || Number(defectiveQty) < 0 || Number(defectiveQty) > Number(row.inspectedQty)) {
-      notify(`Defective quantity must be a whole number from 0 to ${quantity(row.inspectedQty)}.`, true);
-      defectiveInput.focus();
-      return;
-    }
-    const key = rowKey(workspace.batch.id, row.id);
-    const previous = rowDrafts.get(key);
-    rowDrafts.delete(key);
-    const response = await runCommand(ctx, "saveInspection", { batchId: workspace.batch.id, rowId: row.id, defectiveQty: Number(defectiveQty), remarks });
-    if (!response.ok) {
-      const saved = savedRowValue(row);
-      const failedDraft = previous || { defectiveQty, remarks };
-      if (failedDraft.defectiveQty !== saved.defectiveQty || failedDraft.remarks !== saved.remarks) rowDrafts.set(key, failedDraft);
-    }
+  const rowForm = el("form", { id: rowFormId, className: "qc-ops-row-form", "data-autosave-form": "true" });
+  let rowState = el("span", { className: hasPersistedRowData ? "qc-ops-saved" : "qc-ops-incomplete" },
+    hasPersistedRowData ? (rowComplete ? "Saved" : "Saved · Incomplete") : "Incomplete");
+  rowForm.addEventListener("submit", (event) => event.preventDefault());
+  rowForm.append(remarksInput);
+  issueButton.disabled = (readOnly && !linkedIssues.length) || (!linkedIssues.length && !canCreateFromRow);
+  const issueStatus = linkedIssues.length
+    ? el("span", { className: `qc-ops-row-issue qc-ops-row-issue-${linkedIssues[0].status}` }, `${text(linkedIssues[0].status)} · release blocked while open`)
+    : null;
+  rowForm.append(el("div", { className: "qc-ops-row-actions" }, issueButton, rowState, issueStatus));
+
+  const key = rowKey(workspace.batch.id, row.id);
+  const readRowValue = () => {
+    const defective = nullableNumberFromInput(defectiveInput);
+    const actualTime = nullableNumberFromInput(actualTimeInput);
+    return {
+      defectiveQty: defective.value,
+      actualTimeSeconds: actualTime.value,
+      remarks: remarksInput.value,
+      invalidDefectiveQty: defective.invalid,
+      invalidActualTimeSeconds: actualTime.invalid,
+    };
+  };
+  const valueForPersistence = (value) => ({
+    defectiveQty: value.defectiveQty,
+    actualTimeSeconds: value.actualTimeSeconds,
+    remarks: value.remarks,
   });
-  rowForm.append(remarksInput, saveButton);
-  const markRowDraft = () => {
-    const key = rowKey(workspace.batch.id, row.id);
-    const nextDraft = { defectiveQty: defectiveInput.value, remarks: remarksInput.value };
-    const saved = savedRowValue(row);
-    if (nextDraft.defectiveQty === saved.defectiveQty && nextDraft.remarks === saved.remarks) {
-      rowDrafts.delete(key);
-      delete rowForm.dataset.dirty;
+  const saveStatus = (status, meta) => {
+    rowState.textContent = status;
+    rowState.className = status === "Saved" || status === "Saved · Incomplete"
+      ? "qc-ops-saved"
+      : status === "Saving…" ? "qc-ops-save-pending"
+        : status === "Save failed" ? "qc-ops-save-failed" : "qc-ops-incomplete";
+    if (meta.pending) {
+      rowDrafts.set(key, { defectiveQty: defectiveInput.value, actualTimeSeconds: actualTimeInput.value, remarks: remarksInput.value });
     } else {
-      rowForm.dataset.dirty = "true";
-      rowDrafts.set(key, nextDraft);
+      rowDrafts.delete(key);
     }
-    queueMicrotask(() => {
-      if (!rowHasDraft(row, workspace.batch.id)) delete rowForm.dataset.dirty;
-    });
     onDraftChange?.();
   };
-  defectiveInput.addEventListener("input", markRowDraft);
-  remarksInput.addEventListener("input", markRowDraft);
-  if (dirty) rowForm.dataset.dirty = "true";
-  else delete rowForm.dataset.dirty;
-  issueButton.disabled = (readOnly && !linkedIssues.length) || (!linkedIssues.length && !canCreateFromRow);
-  if (!linkedIssues.length && !canCreateFromRow) issueButton.title = "Save this inspection row before creating a linked issue.";
-  const issueStatus = linkedIssues.length
-    ? el("p", { className: `qc-ops-row-issue qc-ops-row-issue-${linkedIssues[0].status}` }, `${text(linkedIssues[0].status)} · release blocked while open`)
-    : el("p", { className: "qc-ops-row-issue" }, canCreateFromRow ? "No linked issue" : "Save this row before creating a linked issue");
-  const remarks = el("td", { className: "qc-ops-remarks" }, rowForm, el("div", { className: "qc-ops-row-actions" }, issueButton, dirty ? el("span", { className: "qc-ops-unsaved" }, "Unsaved edits") : null), issueStatus);
+  const autosave = readOnly || !autosaveController ? null : autosaveController.register(key, {
+    initial: readRowValue(),
+    initiallySaved: hasPersistedRowData,
+    isValid: (value) => !value.invalidDefectiveQty && !value.invalidActualTimeSeconds &&
+      (value.defectiveQty === null || (Number.isInteger(value.defectiveQty) && value.defectiveQty >= 0 && value.defectiveQty <= Number(row.inspectedQty))) &&
+      (value.actualTimeSeconds === null || (Number.isFinite(value.actualTimeSeconds) && value.actualTimeSeconds >= 0)),
+    isComplete: (value) => value.defectiveQty !== null && value.actualTimeSeconds !== null,
+    save: (value) => runCommand(ctx, "autosaveInspection", {
+      batchId: workspace.batch.id,
+      rowId: row.id,
+      ...valueForPersistence(value),
+    }, { autosave: true, render: false, silent: true }),
+    refreshCommitted: () => ctx.refreshState({ render: false }),
+    verifyCommitted: (latestState, value) => {
+      const batch = list(latestState?.batches).find((candidate) => candidate.id === workspace.batch.id);
+      const saved = list(batch?.rows).find((candidate) => candidate.id === row.id);
+      return sameInspectionValues(saved, valueForPersistence(value));
+    },
+    onSaved: (value, response, meta) => {
+      const savedBatch = list(response.state?.batches).find((candidate) => candidate.id === workspace.batch.id);
+      const savedRow = list(savedBatch?.rows).find((candidate) => candidate.id === row.id);
+      if (savedRow && sameInspectionValues(savedRow, valueForPersistence(value))) {
+        row.savedAt = savedRow.savedAt;
+        if (meta.isCurrent) {
+          row.defectiveQty = savedRow.defectiveQty;
+          row.actualTimeSeconds = savedRow.actualTimeSeconds;
+          row.remarks = savedRow.remarks;
+        }
+        workspace.releaseBlockers = batchReleaseBlockers(response.state, savedBatch);
+      }
+      issueButton.disabled = (readOnly && !linkedIssues.length) || (!linkedIssues.length && !row.savedAt);
+      onDraftChange?.();
+    },
+    onStatus: saveStatus,
+  });
+  const markRowDraft = (immediate = false) => {
+    const nextDraft = { defectiveQty: defectiveInput.value, actualTimeSeconds: actualTimeInput.value, remarks: remarksInput.value };
+    rowDrafts.set(key, nextDraft);
+    liveRate.textContent = currentRate(row, nextDraft);
+    autosave?.update(readRowValue(), { immediate });
+    onDraftChange?.();
+  };
+  for (const input of [defectiveInput, actualTimeInput, remarksInput]) {
+    input.addEventListener("input", () => markRowDraft(false));
+    input.addEventListener("change", () => markRowDraft(true));
+    input.addEventListener("blur", () => markRowDraft(true));
+  }
+  const remarks = el("td", { className: "qc-ops-remarks" }, rowForm);
   const photoCell = el("td", { className: "qc-ops-photos" });
   const photos = getRowPhotos(row, workspace, state);
   const photoList = el("div", { className: "qc-ops-photo-list" });
@@ -418,7 +473,7 @@ function renderInspectionRow(row, index, workspace, state, ctx, onDraftChange = 
     }
   });
   photoCell.append(photoList, el("div", { className: "qc-ops-photo-actions" }, addPhotos), fileInput);
-  tr.append(no, task, specification, method, frequency, recording, inspected, defective, rateCell, ...historyCells, time, link, remarks, photoCell);
+  tr.append(task, results, remarks, photoCell);
   return tr;
 }
 
@@ -499,7 +554,7 @@ function renderRows(workspace, state, ctx, onDraftChange) {
   const body = el("tbody", { className: "qc-ops-table-body" });
   list(workspace.rows).forEach((row, index) => body.append(isHistoricalBatch(workspace.batch)
     ? renderHistoricalInspectionRow(row, index, workspace, state)
-    : renderInspectionRow(row, index, workspace, state, ctx, onDraftChange)));
+    : renderInspectionRow(row, index, workspace, state, ctx, null, onDraftChange)));
   return body;
 }
 
@@ -538,16 +593,55 @@ function makeInspectionTable(workspace, state, ctx, onDraftChange) {
   return el("div", { className: "qc-ops-table-scroll", tabindex: "0", "aria-label": "Batch inspection table; scroll horizontally to see all columns" }, table);
 }
 
+function renderOperationalRows(workspace, state, ctx, autosaveController, onDraftChange) {
+  const body = el("tbody", { className: "qc-ops-operational-body" });
+  const products = batchProducts(workspace.batch, state, workspace);
+  const multipleProducts = products.length > 1;
+  let previousProductKey = null;
+  let groupIndex = -1;
+  list(workspace.rows).forEach((row, index) => {
+    const product = rowProduct(row, workspace.batch, state, workspace);
+    const productKey = product?.lineId || row.productLineId || product?.variantId || row.productLabel || "product";
+    if (multipleProducts && productKey !== previousProductKey) {
+      groupIndex += 1;
+      const label = text(row.productLabel || productLabel(product, state), "Product");
+      const productQuantity = row.productQuantity ?? product?.quantity;
+      body.append(el("tr", { className: `qc-ops-product-group-row${groupIndex % 2 ? " qc-ops-product-group-row-alt" : ""}` },
+        el("th", { colSpan: "5", scope: "rowgroup" },
+          el("strong", {}, label),
+          el("span", {}, `${quantity(productQuantity)} units`),
+        )
+      ));
+    }
+    previousProductKey = productKey;
+    body.append(renderInspectionRow(row, index, workspace, state, ctx, autosaveController, onDraftChange));
+  });
+  return body;
+}
+
+function makeOperationalInspectionTable(workspace, state, ctx, autosaveController, onDraftChange) {
+  const table = el("table", { className: "qc-ops-inspection-table qc-ops-operational-table" });
+  const colgroup = el("colgroup", {},
+    el("col", { style: { width: "4.5%" } }),
+    el("col", { style: { width: "41.5%" } }),
+    el("col", { style: { width: "20.5%" } }),
+    el("col", { style: { width: "23.5%" } }),
+    el("col", { style: { width: "10%" } }),
+  );
+  const thead = el("thead", {}, el("tr", {},
+    el("th", { scope: "col" }, "No.", el("span", { lang: "zh" }, "序号")),
+    el("th", { scope: "col" }, "QC task / Details", el("span", { lang: "zh" }, "检验项目 / 规格")),
+    el("th", { scope: "col" }, "Results", el("span", { lang: "zh" }, "检验结果")),
+    el("th", { scope: "col" }, "Remarks / actions", el("span", { lang: "zh" }, "备注 / 操作")),
+    el("th", { scope: "col" }, "Photos", el("span", { lang: "zh" }, "照片")),
+  ));
+  table.append(colgroup, thead, renderOperationalRows(workspace, state, ctx, autosaveController, onDraftChange));
+  return el("div", { className: "qc-ops-table-scroll qc-ops-operational-scroll", tabindex: "0", "aria-label": "Batch inspection table; scroll horizontally to see all columns" }, table);
+}
+
 function renderReleaseBlockers(workspace, ctx) {
   const blockerHost = el("div", { className: "qc-ops-release-blockers" });
   const release = button("Release full batch", async () => {
-    const changedRows = list(workspace.rows).filter((row) => rowHasDraft(row, workspace.batch.id)).length;
-    const details = batchDetailDrafts.get(detailDraftKey(workspace.batch.id));
-    const changedDetails = details && (details.date !== (workspace.batch.date || "") || details.recorder !== (workspace.batch.recorder || "") || details.notes !== (workspace.batch.notes || ""));
-    if (changedRows || changedDetails) {
-      notify("Save all edited row results and batch details before releasing the batch.", true);
-      return;
-    }
     const result = await runCommand(ctx, "releaseBatch", { id: workspace.batch.id });
     if (result.ok) notify("The full batch was released.");
   }, "button button-danger");
@@ -557,8 +651,8 @@ function renderReleaseBlockers(workspace, ctx) {
     const changedRows = list(workspace.rows).filter((row) => rowHasDraft(row, workspace.batch.id)).length;
     const details = batchDetailDrafts.get(detailDraftKey(workspace.batch.id));
     const changedDetails = details && (details.date !== (workspace.batch.date || "") || details.recorder !== (workspace.batch.recorder || "") || details.notes !== (workspace.batch.notes || ""));
-    if (changedRows) blockers.push(`${changedRows} row result(s) have unsaved edits. Save each changed row before release.`);
-    if (changedDetails) blockers.push("Batch date, recorder, or notes have unsaved edits. Save batch details before release.");
+    if (changedRows) blockers.push(`${changedRows} inspection edit${changedRows === 1 ? " needs" : "s need"} to be saved or corrected.`);
+    if (changedDetails) blockers.push("Batch detail edits need to be saved or corrected.");
     const blockerList = blockers.length
       ? el("ul", { className: "qc-ops-blocker-list" }, ...blockers.map((message) => el("li", {}, message)))
       : null;
@@ -655,7 +749,7 @@ function attachmentActions(asset, batch, ctx) {
   return el("div", { className: "qc-ops-attachment-actions" }, actions);
 }
 
-function renderBatchAttachments(workspace, state, ctx) {
+function renderBatchAttachments(workspace, state, ctx, { compact = false } = {}) {
   const batch = workspace.batch;
   const readOnly = batch.status === "released";
   const fileInput = el("input", {
@@ -698,13 +792,18 @@ function renderBatchAttachments(workspace, state, ctx) {
       attachmentActions(asset, batch, ctx),
     ))
     : [el("li", { className: "qc-ops-attachment-empty" }, "No attachments")];
-  return el("section", { className: "card qc-ops-attachments-card" },
+  const section = el("section", { className: "card qc-ops-attachments-card" },
     el("div", { className: "qc-ops-section-heading" },
       el("h2", {}, "Attachments"),
       add,
     ),
     el("ul", { className: "qc-ops-attachment-list" }, items),
     fileInput,
+  );
+  if (!compact) return section;
+  return el("details", { className: "qc-ops-attachments-disclosure" },
+    el("summary", {}, `Attachments · ${attachmentList.length}`),
+    section,
   );
 }
 
@@ -812,90 +911,141 @@ function renderBatchDetail(root, ctx) {
     if (isHistoricalBatch(batch)) return renderHistoricalBatchDetail(root, ctx, workspace);
     const isReleased = batch.status === "released";
     const detailKey = detailDraftKey(batch.id);
-    const savedDetails = { date: batch.date || "", recorder: batch.recorder || "", notes: batch.notes || "" };
+    const savedDetails = savedDetailsFrom(batch);
     const draftDetails = batchDetailDrafts.get(detailKey) || savedDetails;
-    const detailChanged = draftDetails.date !== savedDetails.date || draftDetails.recorder !== savedDetails.recorder || draftDetails.notes !== savedDetails.notes;
     const order = workspace.order || orderById(state).get(batch.orderId);
     const products = batchProducts(batch, state, workspace);
-    const detailForm = el("form", { className: "qc-ops-batch-meta qc-ops-detail-form", "data-preserve-drafts": "true" });
-    if (detailChanged) detailForm.dataset.dirty = "true";
-    const dateInput = el("input", { type: "date", value: draftDetails.date, disabled: isReleased, name: "date" });
-    const recorderInput = el("input", { type: "text", maxLength: "80", value: draftDetails.recorder, disabled: isReleased, name: "recorder", autocomplete: "name" });
-    const notesInput = el("textarea", { rows: "2", maxLength: "1000", disabled: isReleased, name: "notes" }, draftDetails.notes);
-    const saveDetails = el("button", { type: "submit", className: "button button-secondary", disabled: isReleased || !detailChanged }, "Save batch details");
-    const updateDetailDraft = () => {
-      const next = { date: dateInput.value, recorder: recorderInput.value, notes: notesInput.value };
-      if (next.date === savedDetails.date && next.recorder === savedDetails.recorder && next.notes === savedDetails.notes) {
-        batchDetailDrafts.delete(detailKey);
-        delete detailForm.dataset.dirty;
-      } else {
-        batchDetailDrafts.set(detailKey, next);
-        detailForm.dataset.dirty = "true";
-      }
-      saveDetails.disabled = isReleased || (next.date === savedDetails.date && next.recorder === savedDetails.recorder && next.notes === savedDetails.notes);
-      queueMicrotask(() => {
-        if (!batchDetailDrafts.has(detailKey)) delete detailForm.dataset.dirty;
-      });
+    const autosaveController = createInspectionAutosaveController();
+    ctx.registerAutosaveController?.(autosaveController);
+    const detailForm = el("form", { className: "qc-ops-batch-meta qc-ops-detail-form", "data-autosave-form": "true" });
+    const dateInput = el("input", { type: "date", value: draftDetails.date, disabled: isReleased, name: "date", "aria-label": "Batch date 批次日期" });
+    const recorderInput = el("input", { type: "text", maxLength: "80", value: draftDetails.recorder, disabled: isReleased, name: "recorder", autocomplete: "name", "aria-label": "Recorded by 记录人员" });
+    const notesInput = el("textarea", { rows: "2", maxLength: "1000", disabled: isReleased, name: "notes", "aria-label": "Special notes 本批次特殊情况" }, draftDetails.notes);
+    const dateSummary = el("span", {}, `Date: ${dateLabel(savedDetails.date)}`);
+    const recorderSummary = el("span", {}, `Recorded by: ${text(savedDetails.recorder)}`);
+    const notesSummary = el("span", { className: "qc-ops-detail-note-summary", title: savedDetails.notes }, `Notes: ${text(savedDetails.notes, "—")}`);
+    const detailComplete = (value) => validIsoDate(value.date) && Boolean(value.recorder.trim());
+    let detailStatus = el("span", {
+      className: detailComplete(savedDetails) ? "qc-ops-saved" : "qc-ops-incomplete",
+    }, detailComplete(savedDetails) ? "Saved" : "Saved · Incomplete");
+    const detailSummary = el("summary", { className: "qc-ops-batch-details-summary" },
+      el("strong", {}, "Batch details"), dateSummary, recorderSummary, notesSummary, detailStatus);
+    const readDetailValue = () => ({
+      date: dateInput.value,
+      recorder: recorderInput.value,
+      notes: notesInput.value,
+      invalidDate: dateInput.validity.badInput,
+    });
+    let releasePanel = null;
+    const detailAutosave = autosaveController.register("batch-details", {
+      initial: readDetailValue(),
+      initiallySaved: true,
+      isValid: (value) => !value.invalidDate && validIsoDate(value.date) && value.recorder.length <= 80 && value.notes.length <= 1000,
+      isComplete: detailComplete,
+      save: (value) => runCommand(ctx, "saveBatchDetails", {
+        id: batch.id,
+        date: value.date,
+        recorder: value.recorder,
+        notes: value.notes,
+      }, { autosave: true, render: false, silent: true }),
+      refreshCommitted: () => ctx.refreshState({ render: false }),
+      verifyCommitted: (latestState, value) => {
+        const saved = list(latestState?.batches).find((candidate) => candidate.id === batch.id);
+        return saved && saved.date === value.date && String(saved.recorder || "") === value.recorder.trim() && String(saved.notes || "") === value.notes.trim();
+      },
+      onSaved: (value, response) => {
+        const saved = list(response.state?.batches).find((candidate) => candidate.id === batch.id);
+        if (!saved) return;
+        Object.assign(savedDetails, savedDetailsFrom(saved));
+        batch.date = savedDetails.date;
+        batch.recorder = savedDetails.recorder;
+        batch.notes = savedDetails.notes;
+        workspace.releaseBlockers = batchReleaseBlockers(response.state, saved);
+        dateSummary.textContent = `Date: ${dateLabel(savedDetails.date)}`;
+        recorderSummary.textContent = `Recorded by: ${text(savedDetails.recorder)}`;
+        notesSummary.textContent = `Notes: ${text(savedDetails.notes, "—")}`;
+        notesSummary.title = savedDetails.notes;
+        releasePanel?.refresh();
+      },
+      onStatus: (status, meta) => {
+        detailStatus.textContent = status;
+        detailStatus.className = status === "Saved" || status === "Saved · Incomplete"
+          ? "qc-ops-saved"
+          : status === "Saving…" ? "qc-ops-save-pending"
+            : status === "Save failed" ? "qc-ops-save-failed" : "qc-ops-incomplete";
+        if (meta.pending) batchDetailDrafts.set(detailKey, {
+          date: dateInput.value,
+          recorder: recorderInput.value,
+          notes: notesInput.value,
+        });
+        else batchDetailDrafts.delete(detailKey);
+        releasePanel?.refresh();
+      },
+    });
+    const updateDetailDraft = (immediate = false) => {
+      batchDetailDrafts.set(detailKey, { date: dateInput.value, recorder: recorderInput.value, notes: notesInput.value });
+      detailAutosave.update(readDetailValue(), { immediate });
       releasePanel?.refresh();
     };
-    for (const input of [dateInput, recorderInput, notesInput]) input.addEventListener("input", updateDetailDraft);
-    detailForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      updateDetailDraft();
-      const next = batchDetailDrafts.get(detailKey) || savedDetails;
-      const previous = batchDetailDrafts.get(detailKey);
-      batchDetailDrafts.delete(detailKey);
-      const response = await runCommand(ctx, "saveBatchDetails", { id: batch.id, ...next });
-      if (!response.ok) {
-        const failedDraft = previous || next;
-        if (failedDraft.date !== savedDetails.date || failedDraft.recorder !== savedDetails.recorder || failedDraft.notes !== savedDetails.notes) batchDetailDrafts.set(detailKey, failedDraft);
-      }
-    });
+    for (const input of [dateInput, recorderInput, notesInput]) {
+      input.addEventListener("input", () => updateDetailDraft(false));
+      input.addEventListener("change", () => updateDetailDraft(true));
+      input.addEventListener("blur", () => updateDetailDraft(true));
+    }
+    detailForm.addEventListener("submit", (event) => event.preventDefault());
     detailForm.append(
       field("Batch date 批次日期", dateInput),
       field("Recorded by 记录人员", recorderInput),
-      field("Special notes 本批次特殊情况", notesInput),
-      saveDetails
+      field("Special notes 本批次特殊情况", notesInput)
     );
-    const releasePanel = renderReleaseBlockers(workspace, ctx);
-    const title = batchLabel(batch, state);
+    releasePanel = renderReleaseBlockers(workspace, ctx);
+    const sharedVersionAtBatchLevel = typeof batch.versionLabel === "string" && batch.versionLabel.trim() !== "" &&
+      products.every((product) => product.versionLabel === batch.versionLabel);
+    const deleteBatchButton = button("Delete", async () => {
+      if (!window.confirm(`Delete batch ${text(batch.number, "Batch")}? This action cannot be undone.`)) return;
+      const response = await runCommand(ctx, "deleteBatch", { id: batch.id });
+      if (!response.ok) return;
+      clearDraftsForBatch(batch.id);
+      ctx.navigate("batches");
+    }, "button button-danger");
+    deleteBatchButton.disabled = batch.status !== "draft";
     const headerActions = [
       button("All batches", () => navigateWithDraftWarning(ctx, "batches", undefined, batch.id), "button button-secondary"),
       button("View report", () => navigateWithDraftWarning(ctx, "batch-report", batch.id, batch.id), "button button-secondary"),
+      deleteBatchButton,
       statusPill(batch.status)
     ];
-    const metadata = el("section", { className: "card qc-ops-batch-meta-card" },
-      el("div", { className: "qc-ops-section-heading" },
-        el("div", {}, el("h2", {}, title), el("p", {}, `${text(batch.factory)} · ${text(batch.stage)} · ${text(order?.number, batch.orderId)}`)),
-        el("span", { className: isReleased ? "qc-ops-lock-label" : "qc-ops-edit-label" }, isReleased ? "Locked after release" : detailChanged ? "Unsaved batch details" : "Batch details")
+    const versionFacts = products.map((product) => ({
+      product: productLabel(product, state),
+      version: text(product.version?.label || product.versionLabel),
+    }));
+    const versionLabels = Array.from(new Set(versionFacts.map((entry) => entry.version)));
+    const versionSummary = sharedVersionAtBatchLevel
+      ? text(batch.versionLabel)
+      : versionLabels.length === 1
+        ? versionLabels[0]
+        : versionFacts.map((entry) => `${entry.product} ${entry.version}`).join(" · ");
+    const productSummary = products.map((product) => `${productLabel(product, state)} ${quantity(product.quantity)} units`).join(" · ");
+    const metadata = el("section", { className: "card qc-ops-batch-meta-card qc-ops-operational-summary-card" },
+      el("div", { className: "qc-ops-batch-facts qc-ops-summary-facts" },
+        el("span", {}, el("strong", {}, "PO"), text(order?.number, batch.orderId)),
+        el("span", {}, el("strong", {}, "Version"), text(versionSummary)),
+        el("span", {}, el("strong", {}, "Factory"), text(batch.factory)),
+        el("span", {}, el("strong", {}, "Stage"), text(batch.stage)),
+        el("span", {}, el("strong", {}, "Products"), text(productSummary)),
+        el("span", {}, el("strong", {}, "Total"), `${quantity(totalProductQuantity(batch, state, workspace))} units`),
       ),
-      detailForm,
-      el("div", { className: "qc-ops-batch-facts" },
-        el("span", {}, el("strong", {}, "Total batch quantity"), quantity(totalProductQuantity(batch, state, workspace))),
-        el("span", {}, el("strong", {}, "Purchase order"), text(order?.number, batch.orderId)),
-        el("span", {}, el("strong", {}, "PO progress"), batch.countForPO ? "Counts on release" : "Not counted"),
-      ),
-      el("section", { className: "qc-ops-product-locks" },
-        el("h3", {}, "Products and locked design versions"),
-        el("div", { className: "qc-ops-product-lock-list" }, products.map((product) => el("div", {},
-          el("strong", {}, productLabel(product, state)),
-          el("span", {}, `${quantity(product.quantity)} units`),
-          el("span", {}, `Version ${text(product.version?.label || product.versionLabel)}`),
-        ))),
-      )
+      el("details", { className: "qc-ops-batch-details" }, detailSummary, detailForm),
     );
     const intro = el("section", { className: "card qc-ops-inspection-card" },
-      el("div", { className: "qc-ops-section-heading" },
-        el("h2", {}, "Batch inspection workspace"),
-        el("span", { className: "qc-ops-note-pill" }, "Green rows mark important checks")
-      ),
-      makeInspectionTable(workspace, state, ctx, () => releasePanel.refresh())
+      el("div", { className: "qc-ops-section-heading" }, el("h2", {}, "Batch inspection")),
+      makeOperationalInspectionTable(workspace, state, ctx, autosaveController, () => releasePanel.refresh())
     );
     root.replaceChildren(
-      pageHeading("Batches", "Create and inspect batches with product-specific quantities and locked design versions.", headerActions),
+      pageHeading(text(batch.number, "Batch"), "", headerActions),
       metadata,
-      renderBatchAttachments({ ...workspace, attachments: Array.isArray(workspace.attachments) ? workspace.attachments : batchAttachments(batch, state) }, state, ctx),
       intro,
+      renderBatchAttachments({ ...workspace, attachments: Array.isArray(workspace.attachments) ? workspace.attachments : batchAttachments(batch, state) }, state, ctx, { compact: true }),
       releasePanel.element
     );
   }).catch((error) => {
@@ -956,16 +1106,15 @@ function openNewBatchDialog(state, ctx) {
   const orderSelect = el("select", { required: true, name: "orderId" },
     ...orders.map((order) => el("option", { value: order.id }, text(order.number, "Purchase order")))
   );
+  const versionSelect = el("select", { required: true, name: "versionLabel" });
   const productsHost = el("div", { className: "qc-ops-product-entries" });
   const addProduct = button("Add product", () => addProductEntry(), "button button-secondary");
   const productEntries = [];
   const factorySelect = el("select", { required: true, name: "factory" });
   const stageSelect = el("select", { required: true, name: "stage" });
-  const numberInput = el("input", { type: "text", required: true, maxLength: "80", name: "number", placeholder: "Enter a unique batch number" });
   const dateInput = el("input", { type: "date", required: true, name: "date", value: today });
   const recorderInput = el("input", { type: "text", required: true, maxLength: "80", name: "recorder", autocomplete: "name" });
   const notesInput = el("textarea", { rows: "2", maxLength: "1000", name: "notes" });
-  const applicabilityHelp = el("small", { className: "qc-ops-hint" });
   const standardsAction = button("Open standards", () => { closeDialog(); ctx.navigate("standards"); }, "button-secondary");
   const showStandardsAction = (visible) => {
     standardsAction.hidden = !visible;
@@ -977,67 +1126,92 @@ function openNewBatchDialog(state, ctx) {
   const cancel = button("Cancel", () => closeDialog(), "button button-secondary");
   const currentOrderLines = () => lines.filter((entry) => entry.order.id === orderSelect.value);
   const findLine = (lineId) => currentOrderLines().find((entry) => entry.line.id === lineId);
-  const selectedVersion = (entry) => list(state.versions).find((version) => version.id === entry.versionSelect.value);
+  const selectedModel = () => {
+    const firstEntry = productEntries[0];
+    const firstLine = firstEntry ? findLine(firstEntry.lineSelect.value) : null;
+    return firstLine ? String(firstLine.variant.model ?? "").trim() : null;
+  };
   const readyPairs = (entry) => {
     const line = findLine(entry.lineSelect.value);
-    const version = selectedVersion(entry);
-    if (!line || !version) return [];
-    return applicablePairs(version, line.variant.model).filter((pair) => getBatchVersionReadiness(version, pair.factory, pair.stage, line.variant.model).ready);
+    if (!line) return [];
+    const pairs = getBatchVersions(state, line.variant.familyId).flatMap((version) =>
+      applicablePairs(version, line.variant.model).filter((pair) => getBatchVersionReadiness(version, pair.factory, pair.stage, line.variant.model).ready));
+    return Array.from(new Map(pairs.map((pair) => [`${pair.factory}::${pair.stage}`, pair])).values());
   };
   const refreshProductOptions = () => {
-    const used = new Set(productEntries.map((entry) => entry.lineSelect.value).filter(Boolean));
-    for (const entry of productEntries) {
-      const selected = entry.lineSelect.value;
-      const available = currentOrderLines().filter((line) => line.line.id === selected || !used.has(line.line.id));
-      setOptions(entry.lineSelect, available.map((line) => ({ value: line.line.id, label: lineOptionLabel(line, currentOrderLines()) })), selected || available[0]?.line.id || "");
+    const model = selectedModel();
+    if (model !== null) {
+      for (const entry of productEntries.slice(1)) {
+        const selectedLine = findLine(entry.lineSelect.value);
+        if (selectedLine && String(selectedLine.variant.model ?? "").trim() !== model) entry.lineSelect.value = "";
+      }
     }
-    addProduct.disabled = currentOrderLines().every((line) => productEntries.some((entry) => entry.lineSelect.value === line.line.id));
+    for (const [index, entry] of productEntries.entries()) {
+      const selected = entry.lineSelect.value;
+      const usedByOthers = new Set(productEntries.filter((candidate) => candidate !== entry).map((candidate) => candidate.lineSelect.value).filter(Boolean));
+      const available = currentOrderLines().filter((line) => {
+        const matchesModel = index === 0 || model === null || String(line.variant.model ?? "").trim() === model;
+        return matchesModel && (line.line.id === selected || !usedByOthers.has(line.line.id));
+      });
+      const selectedStillAvailable = available.some((line) => line.line.id === selected);
+      setOptions(entry.lineSelect, [
+        { value: "", label: "Select product" },
+        ...available.map((line) => ({ value: line.line.id, label: lineOptionLabel(line, currentOrderLines()) }))
+      ], selectedStillAvailable ? selected : "");
+    }
+    const eligibleLines = currentOrderLines().filter((line) => model === null || String(line.variant.model ?? "").trim() === model);
+    addProduct.disabled = !eligibleLines.some((line) => !productEntries.some((entry) => entry.lineSelect.value === line.line.id));
     for (const entry of productEntries) entry.remove.disabled = productEntries.length <= 1;
   };
-  const refreshEntryVersion = (entry, preferredVersionId = "") => {
-    const line = findLine(entry.lineSelect.value);
-    const versions = getBatchVersions(state, line?.variant?.familyId);
-    const previous = preferredVersionId || entry.versionSelect.value;
-    setOptions(entry.versionSelect, versions.map((version) => ({ value: version.id, label: version.label })), versions.some((version) => version.id === previous) ? previous : versions[0]?.id || "");
-  };
+  let commonReadyPairs = [];
+  let sharedVersionChoices = [];
+  const selectedVariantIds = () => productEntries.map((entry) => findLine(entry.lineSelect.value)?.variant?.id).filter(Boolean);
+  const sharedChoicesFor = (factory, stage) => getSharedBatchVersionChoices(state, selectedVariantIds(), factory, stage);
   const refreshApplicability = () => {
-    const commonPairs = productEntries.map(readyPairs).reduce((shared, pairs, index) => {
-      const keys = new Set(pairs.map((pair) => `${pair.factory}::${pair.stage}`));
-      return index === 0 ? pairs : shared.filter((pair) => keys.has(`${pair.factory}::${pair.stage}`));
-    }, []);
-    const factories = Array.from(new Set(commonPairs.map((pair) => pair.factory))).sort();
+    const firstPairs = productEntries.length ? readyPairs(productEntries[0]) : [];
+    commonReadyPairs = firstPairs.filter((pair) => productEntries.every((entry) =>
+      readyPairs(entry).some((candidate) => candidate.factory === pair.factory && candidate.stage === pair.stage)) &&
+      sharedChoicesFor(pair.factory, pair.stage).length > 0);
+    const factories = Array.from(new Set(commonReadyPairs.map((pair) => pair.factory))).sort();
     const priorFactory = factorySelect.value;
     setOptions(factorySelect, factories.map((factory) => ({ value: factory, label: factory })), factories.includes(priorFactory) ? priorFactory : factories[0] || "");
-    const stages = commonPairs.filter((pair) => pair.factory === factorySelect.value).map((pair) => pair.stage);
+    const stages = commonReadyPairs.filter((pair) => pair.factory === factorySelect.value).map((pair) => pair.stage);
     const priorStage = stageSelect.value;
     setOptions(stageSelect, stages.map((stage) => ({ value: stage, label: stage })), stages.includes(priorStage) ? priorStage : stages[0] || "");
-    const everyProductHasVersion = productEntries.every((entry) => Boolean(entry.lineSelect.value && entry.versionSelect.value));
-    const hasCommonBasis = commonPairs.some((pair) => pair.factory === factorySelect.value && pair.stage === stageSelect.value);
-    applicabilityHelp.textContent = hasCommonBasis ? "" : "No shared factory and stage has ready standards for every selected product.";
-    applicabilityHelp.hidden = hasCommonBasis;
-    showStandardsAction(!hasCommonBasis || !everyProductHasVersion);
-    updateSubmitState(hasCommonBasis && everyProductHasVersion);
+    const hasCommonBasis = commonReadyPairs.some((pair) => pair.factory === factorySelect.value && pair.stage === stageSelect.value);
+    sharedVersionChoices = hasCommonBasis ? sharedChoicesFor(factorySelect.value, stageSelect.value) : [];
+    const previousLabel = versionSelect.value;
+    setOptions(versionSelect, sharedVersionChoices.map((choice) => ({ value: choice.label, label: choice.label })),
+      sharedVersionChoices.some((choice) => choice.label === previousLabel) ? previousLabel : sharedVersionChoices[0]?.label || "");
+    versionSelect.disabled = sharedVersionChoices.length === 0;
+    showStandardsAction(!hasCommonBasis || sharedVersionChoices.length === 0);
+    updateSubmitState();
   };
-  const updateSubmitState = (hasCommonBasis = false) => {
+  const updateSubmitState = () => {
     const lineIds = productEntries.map((entry) => entry.lineSelect.value);
     const duplicateLines = lineIds.some((id, index) => id && lineIds.indexOf(id) !== index);
-    const duplicateNumber = Boolean(numberInput.value.trim()) && list(state.batches).some((batch) => String(batch.number || "").trim().toLocaleLowerCase() === numberInput.value.trim().toLocaleLowerCase());
+    const selectedModels = productEntries.map((entry) => findLine(entry.lineSelect.value)).filter(Boolean)
+      .map((line) => String(line.variant.model ?? "").trim());
+    const mixedModels = new Set(selectedModels).size > 1;
     const quantities = productEntries.map((entry) => Number(entry.quantityInput.value));
     const quantitiesReady = quantities.every((value) => Number.isSafeInteger(value) && value > 0) && Number.isSafeInteger(quantities.reduce((sum, value) => sum + value, 0));
-    const productsReady = productEntries.length > 0 && !duplicateLines && productEntries.every((entry) => entry.lineSelect.value && entry.versionSelect.value);
-    const ordinaryFieldsReady = Boolean(orderSelect.value && numberInput.value.trim() && dateInput.value && recorderInput.value.trim());
-    submit.disabled = !(hasCommonBasis && productsReady && quantitiesReady && ordinaryFieldsReady && !duplicateNumber);
-    formError.textContent = duplicateLines ? "Select each purchase order line only once." : duplicateNumber ? "This batch number is already in use." : "";
+    const productsReady = productEntries.length > 0 && !duplicateLines && productEntries.every((entry) => entry.lineSelect.value);
+    const selectedVersionIsReady = sharedVersionChoices.some((choice) => choice.label === versionSelect.value);
+    const ordinaryFieldsReady = Boolean(orderSelect.value && dateInput.value && recorderInput.value.trim());
+    const hasCommonBasis = commonReadyPairs.some((pair) => pair.factory === factorySelect.value && pair.stage === stageSelect.value);
+    submit.disabled = !(hasCommonBasis && selectedVersionIsReady && productsReady && !mixedModels && quantitiesReady && ordinaryFieldsReady);
+    formError.textContent = mixedModels ? "Choose products from the same model."
+      : duplicateLines ? "Select each purchase order line only once."
+      : productEntries.length && productsReady && !selectedVersionIsReady ? "No shared design version is available for these products."
+        : "";
   };
   const refreshAll = () => {
     refreshProductOptions();
-    for (const entry of productEntries) refreshEntryVersion(entry);
     refreshApplicability();
   };
   function addProductEntry(lineId = "") {
     const lineSelect = el("select", { required: true, name: "lineId" });
     const quantityInput = el("input", { type: "number", required: true, min: "1", step: "1", name: "productQuantity", inputMode: "numeric" });
-    const versionSelect = el("select", { required: true, name: "versionId" });
     const remove = button("Remove", () => {
       if (productEntries.length <= 1) return;
       const index = productEntries.indexOf(entry);
@@ -1045,12 +1219,11 @@ function openNewBatchDialog(state, ctx) {
       card.remove();
       refreshAll();
     }, "button button-secondary qc-ops-small-button");
-    const entry = { lineSelect, quantityInput, versionSelect, remove };
+    const entry = { lineSelect, quantityInput, remove };
     const card = el("div", { className: "qc-ops-product-entry" },
       el("div", { className: "qc-ops-product-entry-fields" },
         field("Product from this PO", lineSelect),
         field("Product quantity", quantityInput),
-        field("Design version", versionSelect),
       ),
       remove,
     );
@@ -1058,10 +1231,8 @@ function openNewBatchDialog(state, ctx) {
     productsHost.append(card);
     refreshProductOptions();
     if (lineId && Array.from(lineSelect.options).some((option) => option.value === lineId)) lineSelect.value = lineId;
-    refreshEntryVersion(entry);
-    lineSelect.addEventListener("change", () => { entry.versionSelect.value = ""; refreshEntryVersion(entry); refreshProductOptions(); refreshApplicability(); });
-    versionSelect.addEventListener("change", refreshApplicability);
-    quantityInput.addEventListener("input", () => updateSubmitState(Boolean(factorySelect.value && stageSelect.value)));
+    lineSelect.addEventListener("change", () => { refreshProductOptions(); refreshApplicability(); });
+    quantityInput.addEventListener("input", updateSubmitState);
     refreshApplicability();
   }
   const resetProductsForOrder = () => {
@@ -1074,15 +1245,14 @@ function openNewBatchDialog(state, ctx) {
   orderSelect.addEventListener("change", resetProductsForOrder);
   factorySelect.addEventListener("change", refreshApplicability);
   stageSelect.addEventListener("change", refreshApplicability);
-  for (const input of [numberInput, dateInput, recorderInput]) input.addEventListener("input", () => updateSubmitState(Boolean(factorySelect.value && stageSelect.value)));
-  numberInput.addEventListener("change", () => updateSubmitState(Boolean(factorySelect.value && stageSelect.value)));
+  versionSelect.addEventListener("change", updateSubmitState);
+  for (const input of [dateInput, recorderInput]) input.addEventListener("input", updateSubmitState);
   const form = el("form", { className: "qc-ops-form qc-ops-new-batch-form" },
-    field("Purchase order 采购订单", orderSelect),
+    el("div", { className: "qc-ops-form-grid" }, field("Purchase order 采购订单", orderSelect), field("Design version 设计版本", versionSelect)),
     el("div", { className: "qc-ops-product-entry-heading" }, el("strong", {}, "Products and quantities"), addProduct),
     productsHost,
-    applicabilityHelp, standardsAction,
+    standardsAction,
     el("div", { className: "qc-ops-form-grid" }, field("Factory 工厂", factorySelect), field("Inspection stage 检验阶段", stageSelect)),
-    field("Batch number 批次编号", numberInput),
     el("div", { className: "qc-ops-form-grid" }, field("Batch date 批次日期", dateInput), field("Recorded by 记录人员", recorderInput)),
     field("Special notes 本批次特殊情况", notesInput),
     formError,
@@ -1096,32 +1266,35 @@ function openNewBatchDialog(state, ctx) {
     const selectedProducts = productEntries.map((entry) => ({
       lineId: entry.lineSelect.value,
       quantity: Number(entry.quantityInput.value),
-      versionId: entry.versionSelect.value,
     }));
-    if (!orderSelect.value || !factorySelect.value || !stageSelect.value || !selectedProducts.length || selectedProducts.some((product) => !product.lineId || !product.versionId || !Number.isSafeInteger(product.quantity) || product.quantity <= 0) || !Number.isSafeInteger(selectedProducts.reduce((sum, product) => sum + product.quantity, 0))) {
-      formError.textContent = "Choose a PO, a product quantity and version for each product, and a shared factory/stage.";
+    if (!orderSelect.value || !factorySelect.value || !stageSelect.value || !selectedProducts.length || !versionSelect.value || selectedProducts.some((product) => !product.lineId || !Number.isSafeInteger(product.quantity) || product.quantity <= 0) || !Number.isSafeInteger(selectedProducts.reduce((sum, product) => sum + product.quantity, 0))) {
+      formError.textContent = selectedProducts.length && !versionSelect.value
+        ? "No shared design version is available for these products."
+        : "Choose a PO, product quantities, a design version, and a shared factory/stage.";
       return;
     }
     if (new Set(selectedProducts.map((product) => product.lineId)).size !== selectedProducts.length) {
       formError.textContent = "Select each purchase order line only once.";
       return;
     }
-    if (list(state.batches).some((batch) => String(batch.number || "").trim().toLocaleLowerCase() === numberInput.value.trim().toLocaleLowerCase())) {
-      formError.textContent = "This batch number is already in use.";
+    const productModels = selectedProducts.map((product) => {
+      const line = findLine(product.lineId);
+      return String(line?.variant.model ?? "").trim();
+    });
+    if (new Set(productModels).size > 1) {
+      formError.textContent = "Choose products from the same model.";
       return;
     }
-    const commonKeys = productEntries.map(readyPairs).reduce((shared, pairs, index) => {
-      const keys = new Set(pairs.map((pair) => `${pair.factory}::${pair.stage}`));
-      return index === 0 ? pairs.map((pair) => `${pair.factory}::${pair.stage}`) : shared.filter((key) => keys.has(key));
-    }, []);
-    if (!commonKeys.includes(`${factorySelect.value}::${stageSelect.value}`)) {
-      formError.textContent = "Choose a factory and stage with ready standards for every selected product.";
+    const selectedSharedChoice = sharedChoicesFor(factorySelect.value, stageSelect.value)
+      .find((choice) => choice.label === versionSelect.value);
+    if (!selectedSharedChoice) {
+      formError.textContent = "No shared design version is available for these products.";
       return;
     }
     const result = await runCommand(ctx, "createBatch", {
-      number: numberInput.value.trim(),
       orderId: orderSelect.value,
       products: selectedProducts,
+      versionLabel: versionSelect.value,
       factory: factorySelect.value,
       stage: stageSelect.value,
       date: dateInput.value,
@@ -1168,10 +1341,13 @@ function renderBatchList(root, ctx) {
   const stage = filterSelect("Stage", stages.map((value) => ({ value })));
   toolbar.append(field("Search", search), field("Family", family), field("Factory", factory), field("Stage", stage));
   const table = el("table", { className: "qc-ops-list-table qc-ops-batch-list-table" },
-    el("thead", {}, el("tr", {}, ...["Batch", "Attachments", "Product / model", "Purchase order", "Factory / stage", "Total quantity", "Date", ""].map((label) => el("th", { scope: "col" }, label)))),
+    el("thead", {}, el("tr", {}, ...["Batch", "Purchase order", "Total quantity", "Date", "Attachments"].map((label) => el("th", { scope: "col" }, label)))),
     el("tbody")
   );
   const tbody = table.querySelector("tbody");
+  const isInteractiveTarget = (target) => target instanceof Element && Boolean(target.closest(
+    "button, a, input, select, textarea, summary, label, form, [contenteditable='true'], [role='button'], [role='link']"
+  ));
   for (const batch of batches) {
     const displayNumber = displayNumbers.get(batch.id) ?? batch.number;
     const variant = variants.get(batch.variantId);
@@ -1180,11 +1356,6 @@ function renderBatchList(root, ctx) {
     const batchFamilies = isHistoricalBatch(batch)
       ? [batch.familyId || variant?.familyId].filter(Boolean)
       : products.map((product) => product.familyId || variants.get(product.variantId)?.familyId).filter(Boolean);
-    const batchProductSummary = isHistoricalBatch(batch)
-      ? batchProductLabel(batch, state)
-      : products.length
-        ? products.map((product) => `${productLabel(product, state)} · ${quantity(product.quantity)} units`).join("\n")
-        : text(variant?.label, batch.variantId);
     const attachments = batchAttachments(batch, state);
     const searchText = [displayNumber, ...batchFamilies, ...batchFamilies.map((familyId) => familyById.get(familyId)?.name), batch.productLabel, batch.model, batch.color, variant?.label,
       ...products.flatMap((product) => [productLabel(product, state), product.quantity, product.versionLabel]),
@@ -1210,20 +1381,31 @@ function renderBatchList(root, ctx) {
       attachmentCell.append("—");
     }
     const tr = el("tr", {
+      className: "qc-ops-batch-row",
+      tabIndex: 0,
+      ariaLabel: `Open batch ${displayNumber}`,
       "data-family": batchFamilies.join(" "),
       "data-factory": batch.factory || "",
       "data-stage": batch.stage || "",
       "data-search": searchText,
     },
       el("td", {}, text(displayNumber)),
-      attachmentCell,
-      el("td", { className: "qc-ops-list-products" }, ...String(batchProductSummary).split("\n").map((item) => el("span", {}, item))),
       el("td", {}, text(order?.number)),
-      el("td", {}, [batch.factory, batch.stage].filter((value) => value !== null && value !== undefined && value !== "").join(" · ") || "—"),
       el("td", { className: "qc-ops-number" }, isHistoricalBatch(batch) ? sourceValue(batch.quantity) : quantity(totalProductQuantity(batch, state))),
       el("td", {}, dateLabel(batch.date)),
-      el("td", {}, button("Open", () => ctx.navigate("batches", batch.id), "button button-secondary qc-ops-small-button")),
+      attachmentCell,
     );
+    tr.addEventListener("click", (event) => {
+      if (isInteractiveTarget(event.target)) return;
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed && (tr.contains(selection.anchorNode) || tr.contains(selection.focusNode))) return;
+      ctx.navigate("batches", batch.id);
+    });
+    tr.addEventListener("keydown", (event) => {
+      if ((event.key !== "Enter" && event.key !== " ") || isInteractiveTarget(event.target)) return;
+      event.preventDefault();
+      ctx.navigate("batches", batch.id);
+    });
     tbody.append(tr);
   }
   const updateFilters = () => {

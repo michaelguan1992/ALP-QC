@@ -1,4 +1,5 @@
 import { isIsoTimestamp, normalizeFactory, normalizeStage } from "./qc-domain.js";
+import { normalizeStandardItems, selectApplicableItems } from "./qc-standards.js";
 
 const SOURCE_FIELDS = Object.freeze({
   historyCode: "历史项目编号 History Item Code",
@@ -61,6 +62,61 @@ export function getBatchVersions(state, familyId) {
       typeof version.label === "string" && version.label.trim() !== "" && version.label.trim().toLocaleUpperCase() !== "VENTUS")
     .slice()
     .sort(compareVersions);
+}
+
+/** Return labels that resolve to a ready immutable version for every selected product family. */
+export function getSharedBatchVersionChoices(state, variantIds, factory, stage) {
+  if (!Array.isArray(variantIds) || variantIds.length === 0 || !Array.isArray(state?.variants)) return [];
+  const variants = [...new Set(variantIds)].map((id) => state.variants.find((variant) => variant?.id === id));
+  if (variants.some((variant) => !variant || typeof variant.familyId !== "string" || typeof variant.model !== "string")) return [];
+
+  const familyIds = [...new Set(variants.map((variant) => variant.familyId))].sort();
+  const variantsByFamily = new Map(familyIds.map((familyId) => [familyId,
+    [...new Map(variants.filter((variant) => variant.familyId === familyId).map((variant) => [variant.model, variant])).values()]]));
+  const versionsByFamily = new Map(familyIds.map((familyId) => [familyId,
+    getBatchVersions(state, familyId).filter((version) => variantsByFamily.get(familyId).every((variant) =>
+      hasLockableBatchItems(state, version, variant, factory, stage)))]));
+  if ([...versionsByFamily.values()].some((versions) => versions.length === 0)) return [];
+
+  const firstFamilyVersions = versionsByFamily.get(familyIds[0]);
+  const seenLabels = new Set();
+  const candidates = firstFamilyVersions.flatMap((firstVersion) => {
+    if (seenLabels.has(firstVersion.label)) return [];
+    const matched = familyIds.map((familyId) => ({
+      familyId,
+      version: versionsByFamily.get(familyId).find((version) => version.label === firstVersion.label),
+    }));
+    if (matched.some(({ version }) => !version)) return [];
+    seenLabels.add(firstVersion.label);
+    const timestamps = matched.map(({ version }) => effectiveTimestamp(version));
+    return [{
+      label: firstVersion.label,
+      versions: matched.map(({ familyId, version }) => ({ familyId, versionId: version.id })),
+      matched: matched.map(({ version }) => version),
+      oldestTimestamp: timestamps.every((timestamp) => timestamp !== null) ? Math.min(...timestamps) : null,
+      oldestSequence: Math.min(...matched.map(({ version }) => sequenceValue(version))),
+    }];
+  });
+
+  return candidates
+    .sort((left, right) => {
+      if (left.oldestTimestamp === null && right.oldestTimestamp !== null) return 1;
+      if (left.oldestTimestamp !== null && right.oldestTimestamp === null) return -1;
+      if (left.oldestTimestamp !== null && right.oldestTimestamp !== null && left.oldestTimestamp !== right.oldestTimestamp) {
+        return right.oldestTimestamp - left.oldestTimestamp;
+      }
+      if (left.oldestSequence !== right.oldestSequence) {
+        if (!Number.isFinite(left.oldestSequence)) return 1;
+        if (!Number.isFinite(right.oldestSequence)) return -1;
+        return right.oldestSequence - left.oldestSequence;
+      }
+      for (let index = 0; index < left.matched.length; index += 1) {
+        const familyOrder = compareVersions(left.matched[index], right.matched[index]);
+        if (familyOrder) return familyOrder;
+      }
+      return 0;
+    })
+    .map(({ label, versions }) => ({ label, versions }));
 }
 
 function uniqueNormalizedOption(value, normalize) {
@@ -241,4 +297,17 @@ export function getBatchVersionReadiness(version, factoryInput, stageInput, mode
     ? `Version ${versionLabel} cannot be used for ${factory || "the selected factory"} ${stage || "the selected stage"}${modelName ? ` ${modelName}` : ""}: ${diagnostics[0].message}`
     : `Version ${versionLabel} has no applicable inspection items for ${factory || "the selected factory"} ${stage || "the selected stage"}${modelName ? ` ${modelName}` : ""}. Complete its inspection standards before creating this batch.`;
   return { ready, items: applicableItems, diagnostics, message };
+}
+
+function hasLockableBatchItems(state, version, variant, factory, stage) {
+  const family = state.families?.find((candidate) => candidate.id === variant.familyId);
+  if (!family || !getBatchVersionReadiness(version, factory, stage, variant.model).ready) return false;
+  const projectedVersion = { ...version, items: getBatchVersionItems(version) };
+  const applicableItems = selectApplicableItems(projectedVersion, factory, stage, variant.model);
+  try {
+    normalizeStandardItems(applicableItems, family, () => "shared-version-choice-check", applicableItems);
+    return true;
+  } catch {
+    return false;
+  }
 }

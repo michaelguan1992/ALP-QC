@@ -274,13 +274,18 @@ function validateBatchRow(row, batch, family, variant, assets, productQuantity =
   const expectedQty = Math.ceil(productQuantity * row.samplingPercent / 100);
   assert(row.inspectedQty === expectedQty, `Locked inspection quantity for ${row.title} is inconsistent with the batch basis.`);
   assert(row.defectiveQty === null || (Number.isSafeInteger(row.defectiveQty) && row.defectiveQty >= 0 && row.defectiveQty <= row.inspectedQty), `Defective quantity for ${row.title} is invalid.`);
+  if (Object.hasOwn(row, "actualTimeSeconds")) {
+    assert(row.actualTimeSeconds === null || (typeof row.actualTimeSeconds === "number" && Number.isFinite(row.actualTimeSeconds) && row.actualTimeSeconds >= 0),
+      `Actual inspection time for ${row.title} must be null or a finite non-negative number.`);
+  }
   assertText(row.remarks, "Inspection remarks", { maxLength: 5000, allowBlank: true });
   assert(Array.isArray(row.photoIds), "Inspection row photo IDs must be a list.");
   ensureUnique(row.photoIds, "Photo IDs on an inspection row");
-  if (row.savedAt === null) assert(row.defectiveQty === null, `Unsaved inspection row ${row.title} cannot have a defective quantity.`);
-  else {
+  const complete = row.defectiveQty !== null &&
+    (!Object.hasOwn(row, "actualTimeSeconds") || row.actualTimeSeconds !== null);
+  assert((row.savedAt !== null) === complete, `Inspection row ${row.title} must have a saved time exactly when its required results are complete.`);
+  if (row.savedAt !== null) {
     requireTimestamp(row.savedAt, "Inspection row saved time");
-    assert(Number.isSafeInteger(row.defectiveQty), `Saved inspection row ${row.title} must have a defective quantity.`);
   }
   for (const assetId of row.photoIds) {
     const asset = assets.get(assetId);
@@ -442,11 +447,21 @@ function validateProductBatch(state, batch, families, variants, orders, versions
     products.push({ product, line, variant, family, version });
   }
   assert(totalQuantity === batch.quantity, `Batch ${batch.number} total quantity does not equal its product allocations.`);
-  const topLevelFields = ["lineId", "variantId", "familyId", "versionId", "versionLabel"];
+  const topLevelFields = ["lineId", "variantId", "familyId", "versionId"];
   const onlyProduct = products.length === 1 ? products[0].product : null;
   for (const field of topLevelFields) {
     assert(batch[field] === (onlyProduct?.[field] ?? null),
       `Batch ${batch.number} top-level ${field} must reflect one product or be null for a mixed batch.`);
+  }
+  if (onlyProduct) {
+    assert(batch.versionLabel === onlyProduct.versionLabel,
+      `Batch ${batch.number} top-level version label must reflect its single product.`);
+  } else if (batch.versionLabel === null) {
+    // Legacy multi-product batches may retain independently selected versions.
+  } else {
+    assertText(batch.versionLabel, "Shared batch version label", { maxLength: 160 });
+    assert(products.every(({ product }) => product.versionLabel === batch.versionLabel),
+      `Batch ${batch.number} shared version label must match every product version label.`);
   }
   const lineIds = new Set(batch.products.map((product) => product.lineId));
   assert(batch.rows.every((row) => typeof row.productLineId === "string" && lineIds.has(row.productLineId)),
@@ -538,6 +553,10 @@ function validateIssues(state, batches, variants, assets) {
     assertUniqueIds(issue.discussion, `Discussion entry on ${issue.number}`);
     for (const entry of issue.discussion) {
       assertText(entry.text, "Discussion entry", { maxLength: 5000 });
+      if (Object.hasOwn(entry, "authorName")) {
+        assertText(entry.authorName, "Discussion author name", { maxLength: 200 });
+        assert(entry.authorName.length <= 200, "Discussion author name must be 200 characters or fewer.");
+      }
       requireTimestamp(entry.createdAt, "Discussion created time");
     }
     if (issue.batchId === null) {
@@ -609,6 +628,10 @@ function validateIssues(state, batches, variants, assets) {
         requirePositiveInteger(sourceRow.no, "Issue source inspection item number");
         requireNonNegativeInteger(sourceRow.inspectedQty, "Issue source inspection quantity");
         assert(sourceRow.defectiveQty !== null && Number.isSafeInteger(sourceRow.defectiveQty) && sourceRow.defectiveQty >= 0 && sourceRow.defectiveQty <= sourceRow.inspectedQty, `Issue ${issue.number} source snapshot has an invalid defective quantity.`);
+        if (Object.hasOwn(sourceRow, "actualTimeSeconds")) {
+          assert(typeof sourceRow.actualTimeSeconds === "number" && Number.isFinite(sourceRow.actualTimeSeconds) && sourceRow.actualTimeSeconds >= 0,
+            `Issue ${issue.number} source snapshot has an invalid actual inspection time.`);
+        }
         requireTimestamp(sourceRow.savedAt, "Issue source row saved time");
         assertText(sourceRow.remarks, "Issue source row remarks", { maxLength: 5000, allowBlank: true });
         const expectedRate = sourceRow.inspectedQty === 0 ? null : Number(((sourceRow.defectiveQty / sourceRow.inspectedQty) * 100).toFixed(2));
