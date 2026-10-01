@@ -206,7 +206,6 @@ test("recorded Lark versions stay immutable and can supply locked batch standard
     factory: "AP",
     stage: "OQC",
     lotNumber: "LARK-IMPORT-LOT",
-    countForPO: true,
     date: "2026-09-29",
     recorder: "Inspector",
     notes: "",

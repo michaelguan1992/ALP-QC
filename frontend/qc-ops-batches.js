@@ -18,6 +18,7 @@ import { closeDialog, downloadFile, readFileAsDataURL, showDialog } from "./qc-u
 import { historicalBatchImportControl } from "./qc-history.js";
 import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { getBatchVersionItems, getBatchVersions, getBatchVersionReadiness } from "../core/qc-batch-versions.js";
+import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
 
 const rowDrafts = new Map();
 const batchDetailDrafts = new Map();
@@ -30,7 +31,7 @@ function hasDraftsForBatch(batchId) {
 function navigateWithDraftWarning(ctx, route, id, batchId) {
   if (batchId && hasDraftsForBatch(batchId) && route === "batch-report") {
     showDialog("Unsaved inspection edits", el("div", { className: "discard-prompt" },
-      el("p", {}, "This batch has unsaved row or detail edits. The report uses saved values only. Your edits will remain as drafts in this tab and will be available when you return."),
+      el("p", {}, "The report includes saved values only. Unsaved drafts remain in this tab."),
       el("div", { className: "button-row" },
         button("Stay on this batch", () => closeDialog(true), "button-secondary"),
         button("View saved report", () => {
@@ -68,10 +69,42 @@ function orderById(state) {
   return new Map(list(state.orders).map((order) => [order.id, order]));
 }
 
+function productLabel(product, state) {
+  const variant = product?.variant || variantsById(state).get(product?.variantId);
+  return text(variant?.label || product?.productLabel, product?.variantId || "Product");
+}
+
+function batchProducts(batch, state, workspace = null) {
+  if (Array.isArray(workspace?.products) && workspace.products.length) return workspace.products;
+  return getBatchProducts(batch).map((product) => ({
+    ...product,
+    variant: variantsById(state).get(product.variantId) || null,
+    version: list(state.versions).find((version) => version.id === product.versionId) || null,
+  }));
+}
+
+function batchProductNames(batch, state, workspace = null) {
+  if (isHistoricalBatch(batch)) return [batchProductLabel(batch, state)];
+  return batchProducts(batch, state, workspace).map((product) => productLabel(product, state)).filter(Boolean);
+}
+
+function totalProductQuantity(batch, state, workspace = null) {
+  if (isHistoricalBatch(batch)) return batch.quantity;
+  const products = batchProducts(batch, state, workspace);
+  if (!products.length) return batch.quantity;
+  return products.reduce((total, product) => total + Number(product.quantity || 0), 0);
+}
+
+function rowProduct(row, batch, state, workspace = null) {
+  const product = getBatchRowProduct(batch, row);
+  const resolved = batchProducts(batch, state, workspace).find((candidate) => candidate.lineId === product?.lineId || candidate.lineId === row.productLineId);
+  return { ...product, ...resolved, ...product };
+}
+
 function batchLabel(batch, state) {
-  const variant = variantsById(state).get(batch.variantId);
   const order = orderById(state).get(batch.orderId);
-  return `${text(batch.number, "Batch")} · ${text(variant?.label, batch.variantId)} · ${text(order?.number, batch.orderId)}`;
+  const products = batchProductNames(batch, state).join(", ");
+  return `${text(batch.number, "Batch")} · ${text(products, batch.variantId)} · ${text(order?.number, batch.orderId)}`;
 }
 
 function isHistoricalBatch(batch) {
@@ -193,10 +226,19 @@ function makePhotoDialog(photo, row, readOnly, onRemove) {
 
 function renderInspectionRow(row, index, workspace, state, ctx, onDraftChange = null) {
   const readOnly = workspace.batch.status === "released";
+  const multipleProducts = batchProducts(workspace.batch, state, workspace).length > 1;
   const draft = stateForRow(row, workspace.batch.id);
   const dirty = rowHasDraft(row, workspace.batch.id);
   const tr = el("tr", { className: row.important ? "qc-ops-important-row" : "" });
   const no = el("td", { className: "qc-ops-no" }, text(row.no, String(index + 1)));
+  tr.append(no);
+  if (multipleProducts) {
+    const product = rowProduct(row, workspace.batch, state, workspace);
+    tr.append(el("td", { className: "qc-ops-product-context" },
+      el("strong", {}, text(row.productLabel || productLabel(product, state))),
+      el("small", {}, `${quantity(row.productQuantity ?? product.quantity)} units`),
+    ));
+  }
   const task = el("th", { scope: "row", className: "qc-ops-task" });
   setBilingual(task, row.title, row.titleZh);
   const specification = el("td", { className: "qc-ops-spec" });
@@ -462,14 +504,17 @@ function renderRows(workspace, state, ctx, onDraftChange) {
 }
 
 function makeInspectionTable(workspace, state, ctx, onDraftChange) {
-  const table = el("table", { className: "qc-ops-inspection-table" });
+  const multipleProducts = !isHistoricalBatch(workspace.batch) && batchProducts(workspace.batch, state, workspace).length > 1;
+  const table = el("table", { className: `qc-ops-inspection-table${multipleProducts ? " qc-ops-mixed-product-table" : ""}` });
   const colgroup = el("colgroup");
-  for (const width of ["34px", "100px", "185px", "80px", "60px", "76px", "55px", "55px", "52px", "52px", "52px", "52px", "52px", "44px", "64px", "165px", "128px"]) {
+  const widths = ["34px", ...(multipleProducts ? ["118px"] : []), "100px", "185px", "80px", "60px", "76px", "55px", "55px", "52px", "52px", "52px", "52px", "52px", "44px", "64px", "165px", "128px"];
+  for (const width of widths) {
     colgroup.append(el("col", { style: { width } }));
   }
   const thead = el("thead", {},
     el("tr", { className: "qc-ops-group-head" },
       el("th", { rowSpan: "2", scope: "col" }, "No.", el("br"), el("span", { lang: "zh" }, "序号")),
+      multipleProducts ? el("th", { rowSpan: "2", scope: "col" }, "Product / qty", el("br"), el("span", { lang: "zh" }, "产品 / 数量")) : null,
       el("th", { rowSpan: "2", scope: "col" }, "QC task", el("br"), el("span", { lang: "zh" }, "检验项目")),
       el("th", { rowSpan: "2", scope: "col" }, "Specifications / inspection points", el("br"), el("span", { lang: "zh" }, "规格尺寸 / 检验要点")),
       el("th", { rowSpan: "2", scope: "col" }, "Devices / methods", el("br"), el("span", { lang: "zh" }, "检测仪器 / 方法")),
@@ -507,8 +552,8 @@ function renderReleaseBlockers(workspace, ctx) {
     if (result.ok) notify("The full batch was released.");
   }, "button button-danger");
   const refresh = () => {
-    const blockers = list(workspace.releaseBlockers).map((message) => String(message));
-    if (workspace.batch.status === "released") blockers.unshift("This batch has already been released and is read-only.");
+    const alreadyReleased = workspace.batch.status === "released";
+    const blockers = alreadyReleased ? [] : list(workspace.releaseBlockers).map((message) => String(message));
     const changedRows = list(workspace.rows).filter((row) => rowHasDraft(row, workspace.batch.id)).length;
     const details = batchDetailDrafts.get(detailDraftKey(workspace.batch.id));
     const changedDetails = details && (details.date !== (workspace.batch.date || "") || details.recorder !== (workspace.batch.recorder || "") || details.notes !== (workspace.batch.notes || ""));
@@ -516,16 +561,15 @@ function renderReleaseBlockers(workspace, ctx) {
     if (changedDetails) blockers.push("Batch date, recorder, or notes have unsaved edits. Save batch details before release.");
     const blockerList = blockers.length
       ? el("ul", { className: "qc-ops-blocker-list" }, ...blockers.map((message) => el("li", {}, message)))
-      : el("p", { className: "qc-ops-ready" }, "All release requirements are satisfied. Release remains a separate, explicit action.");
-    blockerHost.replaceChildren(blockers.length
-      ? el("div", { className: "qc-ops-blockers" }, el("strong", {}, "Resolve these items before release"), blockerList)
-      : blockerList);
-    release.disabled = workspace.batch.status === "released" || blockers.length > 0;
+      : null;
+    if (alreadyReleased) blockerHost.replaceChildren(statusPill("released"));
+    else blockerHost.replaceChildren(...(blockerList ? [blockerList] : []));
+    release.disabled = alreadyReleased || blockers.length > 0;
   };
   refresh();
   return { element: el("section", { className: "card qc-ops-release-card" },
     el("div", { className: "qc-ops-section-heading" },
-      el("div", {}, el("h2", {}, "Full-batch release"), el("p", {}, `Releasing records all ${quantity(workspace.batch.quantity)} units on this batch. Only an eligible final-shipment OQC batch contributes to the selected PO line.`)),
+      el("h2", {}, "Full-batch release"),
       release
     ),
     blockerHost
@@ -660,7 +704,6 @@ function renderBatchAttachments(workspace, state, ctx) {
       add,
     ),
     el("ul", { className: "qc-ops-attachment-list" }, items),
-    readOnly ? el("p", { className: "qc-ops-hint" }, "Released batch attachments are read-only.") : null,
     fileInput,
   );
 }
@@ -671,18 +714,58 @@ function historicalSourceEvidence(batch, state) {
   return { inspection, source };
 }
 
+function normalizeHistoricalDate(value) {
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(/^(\d{4})([-/])(\d{1,2})\2(\d{1,2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[3]);
+  const day = Number(match[4]);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1]) return null;
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function hasHistoricalValue(value) {
+  return value !== null && value !== undefined && String(value).trim() !== "";
+}
+
+function normalizeHistoricalNote(value) {
+  return String(value ?? "").replace(/\r\n?/g, "\n").trim();
+}
+
 function renderHistoricalBatchDetail(root, ctx, workspace) {
   const batch = workspace.batch;
   const state = ctx.state || {};
   const { inspection, source } = historicalSourceEvidence(batch, state);
   const family = list(state.families).find((item) => item.id === batch.familyId);
+  const attachmentsWorkspace = { ...workspace, attachments: Array.isArray(workspace.attachments) ? workspace.attachments : batchAttachments(batch, state) };
+  const attachmentNames = new Set(list(attachmentsWorkspace.attachments).map((asset) => asset?.name).filter(hasHistoricalValue));
+  const productLabel = batchProductLabel({ ...batch, productLabel: batch.model || batch.productLabel }, state);
+  const model = String(batch.model || "").trim();
+  const modelAddsInformation = model && !productLabel.toLocaleLowerCase().includes(model.toLocaleLowerCase());
+  const batchDate = normalizeHistoricalDate(batch.date);
+  const printedDate = normalizeHistoricalDate(inspection?.printedDate);
+  const printedDateMatchesBatch = batchDate !== null && printedDate !== null && batchDate === printedDate;
+  const sourceFacts = [
+    ["Family", family?.name || batch.familyId],
+    ...(modelAddsInformation ? [["Model", batch.model]] : []),
+    ["Color", batch.color],
+    ...(!attachmentNames.has(source?.fileName) ? [["Source PDF", source?.fileName]] : []),
+    ...(!printedDateMatchesBatch && hasHistoricalValue(inspection?.printedDate) ? [["Printed date", dateLabel(inspection.printedDate)]] : []),
+  ].filter(([, value]) => hasHistoricalValue(value));
+  const batchNotes = batch.notes === null || batch.notes === undefined ? "" : String(batch.notes);
+  const inspectionNotes = inspection?.notes === null || inspection?.notes === undefined ? "" : String(inspection.notes);
+  const normalizedBatchNotes = normalizeHistoricalNote(batchNotes);
+  const normalizedInspectionNotes = normalizeHistoricalNote(inspectionNotes);
   const anomalies = [...list(source?.anomalies), ...list(inspection?.anomalies)];
   const metadata = el("section", { className: "card qc-ops-batch-meta-card qc-ops-historical-meta-card" },
     el("div", { className: "qc-ops-section-heading" },
       el("h2", {}, historicalBatchLabel(workspace.displayNumber)),
     ),
     el("dl", { className: "qc-ops-historical-facts" },
-      el("div", {}, el("dt", {}, "Product"), el("dd", {}, batchProductLabel({ ...batch, productLabel: batch.model || batch.productLabel }, state))),
+      el("div", {}, el("dt", {}, "Product"), el("dd", {}, productLabel)),
       el("div", {}, el("dt", {}, "Factory / stage"), el("dd", {}, [batch.factory, batch.stage].filter((value) => value !== null && value !== undefined && value !== "").join(" · ") || "—")),
       el("div", {}, el("dt", {}, "Quantity"), el("dd", {}, sourceValue(batch.quantity))),
       el("div", {}, el("dt", {}, "Date"), el("dd", {}, dateLabel(batch.date))),
@@ -692,29 +775,23 @@ function renderHistoricalBatchDetail(root, ctx, workspace) {
     el("details", { className: "qc-ops-historical-provenance" },
       el("summary", {}, "More details"),
       el("dl", { className: "qc-ops-historical-source-facts" },
-        el("dt", {}, "Family"), el("dd", {}, text(family?.name || batch.familyId)),
-        el("dt", {}, "Model"), el("dd", {}, sourceValue(batch.model)),
-        el("dt", {}, "Color"), el("dd", {}, sourceValue(batch.color)),
-        el("dt", {}, "Source PDF"), el("dd", {}, sourceValue(source?.fileName)),
-        el("dt", {}, "Source page"), el("dd", {}, inspection?.page ? `${inspection.page} of ${sourceValue(source?.pageCount)}` : "—"),
-        el("dt", {}, "Printed date"), el("dd", {}, dateLabel(inspection?.printedDate)),
-        el("dt", {}, "Recorded by"), el("dd", {}, text(inspection?.recorder)),
+        ...sourceFacts.flatMap(([label, value]) => [el("dt", {}, label), el("dd", {}, sourceValue(value))]),
       ),
-      batch.notes ? el("p", { className: "qc-ops-historical-notes" }, el("strong", {}, "Batch notes: "), batch.notes) : null,
-      inspection?.notes ? el("p", { className: "qc-ops-historical-notes" }, inspection.notes) : null,
+      normalizedBatchNotes ? el("p", { className: "qc-ops-historical-notes" }, el("strong", {}, "Batch notes:"), el("br", {}), batchNotes) : null,
+      normalizedInspectionNotes && normalizedInspectionNotes !== normalizedBatchNotes
+        ? el("p", { className: "qc-ops-historical-notes" }, el("strong", {}, "Inspection notes: "), inspectionNotes)
+        : null,
       anomalies.length ? el("ul", { className: "qc-ops-historical-anomalies" }, anomalies.map((anomaly) => el("li", {}, typeof anomaly === "string" ? anomaly : JSON.stringify(anomaly)))) : null,
       inspection?.raw ? el("details", { className: "qc-ops-historical-raw" }, el("summary", {}, "Preserved source fields"), el("pre", {}, JSON.stringify(inspection.raw, null, 2))) : null,
     ),
   );
   const intro = el("section", { className: "card qc-ops-inspection-card" },
     el("div", { className: "qc-ops-section-heading" },
-      el("div", {}, el("h2", {}, "Batch inspection table"), el("p", {}, "Recorded values are shown as transcribed. This read-only record does not create release or purchase-order quantities.")),
+      el("h2", {}, "Batch inspection table"),
       el("span", { className: "qc-ops-note-pill" }, "Read-only"),
     ),
-    el("p", { className: "qc-ops-table-note" }, "Blank source cells remain blank. Source inspection quantities and printed defective rates are preserved; any Web formula comparison is labeled separately."),
     makeInspectionTable(workspace, state, ctx, null),
   );
-  const attachmentsWorkspace = { ...workspace, attachments: Array.isArray(workspace.attachments) ? workspace.attachments : batchAttachments(batch, state) };
   root.replaceChildren(
     pageHeading("Batches", "", [
       button("All batches", () => ctx.navigate("batches"), "button button-secondary"),
@@ -739,6 +816,7 @@ function renderBatchDetail(root, ctx) {
     const draftDetails = batchDetailDrafts.get(detailKey) || savedDetails;
     const detailChanged = draftDetails.date !== savedDetails.date || draftDetails.recorder !== savedDetails.recorder || draftDetails.notes !== savedDetails.notes;
     const order = workspace.order || orderById(state).get(batch.orderId);
+    const products = batchProducts(batch, state, workspace);
     const detailForm = el("form", { className: "qc-ops-batch-meta qc-ops-detail-form", "data-preserve-drafts": "true" });
     if (detailChanged) detailForm.dataset.dirty = "true";
     const dateInput = el("input", { type: "date", value: draftDetails.date, disabled: isReleased, name: "date" });
@@ -788,30 +866,33 @@ function renderBatchDetail(root, ctx) {
     ];
     const metadata = el("section", { className: "card qc-ops-batch-meta-card" },
       el("div", { className: "qc-ops-section-heading" },
-        el("div", {}, el("h2", {}, title), el("p", {}, `${text(batch.factory)} · ${text(batch.stage)} · ${text(batch.versionLabel)} · ${text(order?.number, batch.orderId)}`)),
+        el("div", {}, el("h2", {}, title), el("p", {}, `${text(batch.factory)} · ${text(batch.stage)} · ${text(order?.number, batch.orderId)}`)),
         el("span", { className: isReleased ? "qc-ops-lock-label" : "qc-ops-edit-label" }, isReleased ? "Locked after release" : detailChanged ? "Unsaved batch details" : "Batch details")
       ),
       detailForm,
       el("div", { className: "qc-ops-batch-facts" },
-        el("span", {}, el("strong", {}, "Batch quantity"), quantity(batch.quantity)),
-        el("span", {}, el("strong", {}, "Physical lot number"), text(batch.lotNumber)),
-        el("span", {}, el("strong", {}, "Purchase order line"), text(order?.number, batch.orderId)),
+        el("span", {}, el("strong", {}, "Total batch quantity"), quantity(totalProductQuantity(batch, state, workspace))),
+        el("span", {}, el("strong", {}, "Purchase order"), text(order?.number, batch.orderId)),
         el("span", {}, el("strong", {}, "PO progress"), batch.countForPO ? "Counts on release" : "Not counted"),
-        el("span", {}, el("strong", {}, "Inspection basis"), `${text(workspace.variant?.label)} · ${text(workspace.version?.label || batch.versionLabel)}`)
+      ),
+      el("section", { className: "qc-ops-product-locks" },
+        el("h3", {}, "Products and locked design versions"),
+        el("div", { className: "qc-ops-product-lock-list" }, products.map((product) => el("div", {},
+          el("strong", {}, productLabel(product, state)),
+          el("span", {}, `${quantity(product.quantity)} units`),
+          el("span", {}, `Version ${text(product.version?.label || product.versionLabel)}`),
+        ))),
       )
     );
     const intro = el("section", { className: "card qc-ops-inspection-card" },
       el("div", { className: "qc-ops-section-heading" },
-        el("div", {}, el("h2", {}, "Batch inspection workspace"), el("p", {}, "Enter defective quantities and remarks in the familiar bilingual table. Inspection quantities are calculated from the locked batch basis and are read-only.")),
+        el("h2", {}, "Batch inspection workspace"),
         el("span", { className: "qc-ops-note-pill" }, "Green rows mark important checks")
       ),
-      el("p", { className: "qc-ops-table-note" }, isReleased
-        ? "Released batch · inspection standards, saved results, and photos are read-only."
-        : "Each row result must be saved before release. Photos and linked issues stay attached to their inspection row."),
       makeInspectionTable(workspace, state, ctx, () => releasePanel.refresh())
     );
     root.replaceChildren(
-      pageHeading("Batches", "Create, inspect, and release one purchase-order line and product variant per batch.", headerActions),
+      pageHeading("Batches", "Create and inspect batches with product-specific quantities and locked design versions.", headerActions),
       metadata,
       renderBatchAttachments({ ...workspace, attachments: Array.isArray(workspace.attachments) ? workspace.attachments : batchAttachments(batch, state) }, state, ctx),
       intro,
@@ -832,8 +913,10 @@ function orderedLines(state) {
     .filter((entry) => entry.variant);
 }
 
-function lineOptionLabel(entry) {
-  return `${text(entry.order.number)} · ${text(entry.variant.label)} · ${quantity(entry.line.orderedQty)} ordered`;
+function lineOptionLabel(entry, orderLines = []) {
+  const sameVariant = orderLines.filter((candidate) => candidate.variant.id === entry.variant.id);
+  const lineSuffix = sameVariant.length > 1 ? ` · Line ${sameVariant.indexOf(entry) + 1}` : "";
+  return `${text(entry.variant.label)} · ${quantity(entry.line.orderedQty)} ordered${lineSuffix}`;
 }
 
 function applicablePairs(version, model) {
@@ -856,11 +939,9 @@ function hasReadyVersionForModel(state, familyId, model) {
 
 function openNewBatchDialog(state, ctx) {
   const lines = orderedLines(state);
-  const orders = list(state.orders);
+  const orders = list(state.orders).filter((order) => lines.some((entry) => entry.order.id === order.id));
   if (!lines.length) {
-    const message = orders.length
-      ? "Add a purchase order line with a product variant and ordered quantity before creating a batch."
-      : "Create a purchase order with at least one product line before creating a batch.";
+    const message = "Create a purchase order with at least one product line before creating a batch.";
     showDialog("New inspection batch", el("div", { className: "qc-ops-new-batch-form" },
       el("p", {}, message),
       el("div", { className: "qc-ops-dialog-actions" },
@@ -872,22 +953,19 @@ function openNewBatchDialog(state, ctx) {
   }
   const localToday = new Date();
   const today = `${localToday.getFullYear()}-${String(localToday.getMonth() + 1).padStart(2, "0")}-${String(localToday.getDate()).padStart(2, "0")}`;
-  const orderLine = el("select", { required: true, name: "orderLine" },
-    ...lines.map((entry) => el("option", { value: `${entry.order.id}::${entry.line.id}` }, lineOptionLabel(entry)))
+  const orderSelect = el("select", { required: true, name: "orderId" },
+    ...orders.map((order) => el("option", { value: order.id }, text(order.number, "Purchase order")))
   );
-  const versionSelect = el("select", { required: true, name: "versionId" });
+  const productsHost = el("div", { className: "qc-ops-product-entries" });
+  const addProduct = button("Add product", () => addProductEntry(), "button button-secondary");
+  const productEntries = [];
   const factorySelect = el("select", { required: true, name: "factory" });
   const stageSelect = el("select", { required: true, name: "stage" });
   const numberInput = el("input", { type: "text", required: true, maxLength: "80", name: "number", placeholder: "Enter a unique batch number" });
-  const quantityInput = el("input", { type: "number", required: true, min: "1", step: "1", name: "quantity", inputMode: "numeric" });
-  const lotInput = el("input", { type: "text", required: true, maxLength: "120", name: "lotNumber", placeholder: "Physical lot / shipment lot" });
   const dateInput = el("input", { type: "date", required: true, name: "date", value: today });
   const recorderInput = el("input", { type: "text", required: true, maxLength: "80", name: "recorder", autocomplete: "name" });
   const notesInput = el("textarea", { rows: "2", maxLength: "1000", name: "notes" });
-  const countForPO = el("input", { type: "checkbox", name: "countForPO" });
-  let countForPOTouched = false;
-  const countHelp = el("small", { className: "qc-ops-hint" }, "Eligible OQC batches count the full quantity only after release. Enter the physical lot number to prevent duplicate fulfillment counting.");
-  const versionHelp = el("small", { className: "qc-ops-hint" });
+  const applicabilityHelp = el("small", { className: "qc-ops-hint" });
   const standardsAction = button("Open standards", () => { closeDialog(); ctx.navigate("standards"); }, "button-secondary");
   const showStandardsAction = (visible) => {
     standardsAction.hidden = !visible;
@@ -895,112 +973,157 @@ function openNewBatchDialog(state, ctx) {
   };
   showStandardsAction(false);
   const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
-  const submit = el("button", { type: "submit", className: "button button-primary" }, "Create batch");
+  const submit = el("button", { type: "submit", className: "button button-primary", disabled: true }, "Create batch");
   const cancel = button("Cancel", () => closeDialog(), "button button-secondary");
-  const selectedOrderLine = () => {
-    const [orderId, lineId] = orderLine.value.split("::");
-    return lines.find((entry) => entry.order.id === orderId && entry.line.id === lineId);
+  const currentOrderLines = () => lines.filter((entry) => entry.order.id === orderSelect.value);
+  const findLine = (lineId) => currentOrderLines().find((entry) => entry.line.id === lineId);
+  const selectedVersion = (entry) => list(state.versions).find((version) => version.id === entry.versionSelect.value);
+  const readyPairs = (entry) => {
+    const line = findLine(entry.lineSelect.value);
+    const version = selectedVersion(entry);
+    if (!line || !version) return [];
+    return applicablePairs(version, line.variant.model).filter((pair) => getBatchVersionReadiness(version, pair.factory, pair.stage, line.variant.model).ready);
   };
-  const versionOptionsForSelection = () => {
-    const entry = selectedOrderLine();
-    const versions = getBatchVersions(state, entry?.variant?.familyId);
-    setOptions(versionSelect, versions.map((version) => ({ value: version.id, label: version.label })), versions[0]?.id || "");
-    refreshApplicability();
+  const refreshProductOptions = () => {
+    const used = new Set(productEntries.map((entry) => entry.lineSelect.value).filter(Boolean));
+    for (const entry of productEntries) {
+      const selected = entry.lineSelect.value;
+      const available = currentOrderLines().filter((line) => line.line.id === selected || !used.has(line.line.id));
+      setOptions(entry.lineSelect, available.map((line) => ({ value: line.line.id, label: lineOptionLabel(line, currentOrderLines()) })), selected || available[0]?.line.id || "");
+    }
+    addProduct.disabled = currentOrderLines().every((line) => productEntries.some((entry) => entry.lineSelect.value === line.line.id));
+    for (const entry of productEntries) entry.remove.disabled = productEntries.length <= 1;
+  };
+  const refreshEntryVersion = (entry, preferredVersionId = "") => {
+    const line = findLine(entry.lineSelect.value);
+    const versions = getBatchVersions(state, line?.variant?.familyId);
+    const previous = preferredVersionId || entry.versionSelect.value;
+    setOptions(entry.versionSelect, versions.map((version) => ({ value: version.id, label: version.label })), versions.some((version) => version.id === previous) ? previous : versions[0]?.id || "");
   };
   const refreshApplicability = () => {
-    const version = list(state.versions).find((item) => item.id === versionSelect.value);
-    const [orderId, lineId] = orderLine.value.split("::");
-    const selectedLine = lines.find((item) => item.order.id === orderId && item.line.id === lineId);
-    const pairs = applicablePairs(version, selectedLine?.variant?.model);
-    const factories = Array.from(new Set(pairs.map((pair) => pair.factory))).sort();
+    const commonPairs = productEntries.map(readyPairs).reduce((shared, pairs, index) => {
+      const keys = new Set(pairs.map((pair) => `${pair.factory}::${pair.stage}`));
+      return index === 0 ? pairs : shared.filter((pair) => keys.has(`${pair.factory}::${pair.stage}`));
+    }, []);
+    const factories = Array.from(new Set(commonPairs.map((pair) => pair.factory))).sort();
     const priorFactory = factorySelect.value;
     setOptions(factorySelect, factories.map((factory) => ({ value: factory, label: factory })), factories.includes(priorFactory) ? priorFactory : factories[0] || "");
-    const stages = pairs.filter((pair) => pair.factory === factorySelect.value).map((pair) => pair.stage);
+    const stages = commonPairs.filter((pair) => pair.factory === factorySelect.value).map((pair) => pair.stage);
     const priorStage = stageSelect.value;
     setOptions(stageSelect, stages.map((stage) => ({ value: stage, label: stage })), stages.includes(priorStage) ? priorStage : stages[0] || "");
-    updateCountEligibility();
-    const versions = getBatchVersions(state, selectedLine?.variant?.familyId);
-    const hasApplicableVersion = versions.some((candidate) => applicablePairs(candidate, selectedLine?.variant?.model).length > 0);
-    if (!versionSelect.value) {
-      versionHelp.textContent = "No design version is available for this product family. Review the family’s versions in Standards.";
-      showStandardsAction(true);
-    } else if (!factorySelect.value) {
-      versionHelp.textContent = hasApplicableVersion
-        ? "The selected version does not provide an inspection basis for this product. Choose another version or review Standards."
-        : "No available version provides an inspection basis for this product. Review the version records in Standards.";
-      showStandardsAction(true);
-    } else {
-      const readiness = getBatchVersionReadiness(version, factorySelect.value, stageSelect.value, selectedLine?.variant?.model);
-      submit.disabled = !readiness.ready;
-      if (!readiness.ready) {
-        versionHelp.textContent = "The selected version is not ready for this product, factory, and stage. Review the version in Standards or choose another version.";
-        showStandardsAction(true);
-      } else {
-        versionHelp.textContent = versionSelect.value === versions[0]?.id
-          ? "The latest available version is selected. You may choose an earlier version; the selected basis is locked on this batch."
-          : "An earlier available version is selected. The selected basis is locked on this batch.";
-        showStandardsAction(false);
-      }
-    }
-    if (!factorySelect.value || !stageSelect.value || !versionSelect.value) submit.disabled = true;
+    const everyProductHasVersion = productEntries.every((entry) => Boolean(entry.lineSelect.value && entry.versionSelect.value));
+    const hasCommonBasis = commonPairs.some((pair) => pair.factory === factorySelect.value && pair.stage === stageSelect.value);
+    applicabilityHelp.textContent = hasCommonBasis ? "" : "No shared factory and stage has ready standards for every selected product.";
+    applicabilityHelp.hidden = hasCommonBasis;
+    showStandardsAction(!hasCommonBasis || !everyProductHasVersion);
+    updateSubmitState(hasCommonBasis && everyProductHasVersion);
   };
-  const updateCountEligibility = () => {
-    const eligibleOqc = stageSelect.value.toUpperCase() === "OQC";
-    countForPO.disabled = !eligibleOqc;
-    if (!eligibleOqc) countForPO.checked = false;
-    else if (!countForPOTouched) countForPO.checked = true;
-    countHelp.textContent = eligibleOqc
-      ? "Final shipment: count the full quantity toward this PO line only after release. The physical lot number prevents counting the same goods twice."
-      : "Only OQC batches are eligible to count toward PO fulfillment. IQC batches cannot be counted.";
+  const updateSubmitState = (hasCommonBasis = false) => {
+    const lineIds = productEntries.map((entry) => entry.lineSelect.value);
+    const duplicateLines = lineIds.some((id, index) => id && lineIds.indexOf(id) !== index);
+    const duplicateNumber = Boolean(numberInput.value.trim()) && list(state.batches).some((batch) => String(batch.number || "").trim().toLocaleLowerCase() === numberInput.value.trim().toLocaleLowerCase());
+    const quantities = productEntries.map((entry) => Number(entry.quantityInput.value));
+    const quantitiesReady = quantities.every((value) => Number.isSafeInteger(value) && value > 0) && Number.isSafeInteger(quantities.reduce((sum, value) => sum + value, 0));
+    const productsReady = productEntries.length > 0 && !duplicateLines && productEntries.every((entry) => entry.lineSelect.value && entry.versionSelect.value);
+    const ordinaryFieldsReady = Boolean(orderSelect.value && numberInput.value.trim() && dateInput.value && recorderInput.value.trim());
+    submit.disabled = !(hasCommonBasis && productsReady && quantitiesReady && ordinaryFieldsReady && !duplicateNumber);
+    formError.textContent = duplicateLines ? "Select each purchase order line only once." : duplicateNumber ? "This batch number is already in use." : "";
   };
-  orderLine.addEventListener("change", versionOptionsForSelection);
-  versionSelect.addEventListener("change", refreshApplicability);
+  const refreshAll = () => {
+    refreshProductOptions();
+    for (const entry of productEntries) refreshEntryVersion(entry);
+    refreshApplicability();
+  };
+  function addProductEntry(lineId = "") {
+    const lineSelect = el("select", { required: true, name: "lineId" });
+    const quantityInput = el("input", { type: "number", required: true, min: "1", step: "1", name: "productQuantity", inputMode: "numeric" });
+    const versionSelect = el("select", { required: true, name: "versionId" });
+    const remove = button("Remove", () => {
+      if (productEntries.length <= 1) return;
+      const index = productEntries.indexOf(entry);
+      if (index >= 0) productEntries.splice(index, 1);
+      card.remove();
+      refreshAll();
+    }, "button button-secondary qc-ops-small-button");
+    const entry = { lineSelect, quantityInput, versionSelect, remove };
+    const card = el("div", { className: "qc-ops-product-entry" },
+      el("div", { className: "qc-ops-product-entry-fields" },
+        field("Product from this PO", lineSelect),
+        field("Product quantity", quantityInput),
+        field("Design version", versionSelect),
+      ),
+      remove,
+    );
+    productEntries.push(entry);
+    productsHost.append(card);
+    refreshProductOptions();
+    if (lineId && Array.from(lineSelect.options).some((option) => option.value === lineId)) lineSelect.value = lineId;
+    refreshEntryVersion(entry);
+    lineSelect.addEventListener("change", () => { entry.versionSelect.value = ""; refreshEntryVersion(entry); refreshProductOptions(); refreshApplicability(); });
+    versionSelect.addEventListener("change", refreshApplicability);
+    quantityInput.addEventListener("input", () => updateSubmitState(Boolean(factorySelect.value && stageSelect.value)));
+    refreshApplicability();
+  }
+  const resetProductsForOrder = () => {
+    productEntries.splice(0);
+    productsHost.replaceChildren();
+    const first = currentOrderLines()[0];
+    if (first) addProductEntry(first.line.id);
+    else refreshApplicability();
+  };
+  orderSelect.addEventListener("change", resetProductsForOrder);
   factorySelect.addEventListener("change", refreshApplicability);
   stageSelect.addEventListener("change", refreshApplicability);
-  countForPO.addEventListener("change", () => { countForPOTouched = true; });
-  versionOptionsForSelection();
+  for (const input of [numberInput, dateInput, recorderInput]) input.addEventListener("input", () => updateSubmitState(Boolean(factorySelect.value && stageSelect.value)));
+  numberInput.addEventListener("change", () => updateSubmitState(Boolean(factorySelect.value && stageSelect.value)));
   const form = el("form", { className: "qc-ops-form qc-ops-new-batch-form" },
-    field("Purchase order line 采购订单行", orderLine),
-    field("Product variant 产品规格", el("output", { className: "qc-ops-derived-output" }, "Selected from PO line")),
-    field("Design version 设计版本", versionSelect), versionHelp, standardsAction,
+    field("Purchase order 采购订单", orderSelect),
+    el("div", { className: "qc-ops-product-entry-heading" }, el("strong", {}, "Products and quantities"), addProduct),
+    productsHost,
+    applicabilityHelp, standardsAction,
     el("div", { className: "qc-ops-form-grid" }, field("Factory 工厂", factorySelect), field("Inspection stage 检验阶段", stageSelect)),
     field("Batch number 批次编号", numberInput),
-    field("Batch quantity 批次数量", quantityInput),
-    field("Physical lot number 实物批号", lotInput),
     el("div", { className: "qc-ops-form-grid" }, field("Batch date 批次日期", dateInput), field("Recorded by 记录人员", recorderInput)),
     field("Special notes 本批次特殊情况", notesInput),
-    el("label", { className: "qc-ops-checkbox-field" }, countForPO, el("span", {}, "Final shipment · count released quantity toward PO")),
-    countHelp,
     formError,
     el("div", { className: "qc-ops-dialog-actions" }, cancel, submit)
   );
-  const derivedOutput = form.querySelector("output");
-  const updateVariantOutput = () => {
-    const [, lineId] = orderLine.value.split("::");
-    const entry = lines.find((item) => item.line.id === lineId);
-    derivedOutput.textContent = entry?.variant?.label || "—";
-  };
-  orderLine.addEventListener("change", updateVariantOutput);
-  updateVariantOutput();
+  resetProductsForOrder();
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     formError.textContent = "";
-    const [orderId, lineId] = orderLine.value.split("::");
-    if (!orderId || !lineId || !versionSelect.value || !factorySelect.value || !stageSelect.value) {
-      formError.textContent = "Choose an order line, a design version, and applicable factory/stage inspection items.";
+    if (!form.reportValidity()) return;
+    const selectedProducts = productEntries.map((entry) => ({
+      lineId: entry.lineSelect.value,
+      quantity: Number(entry.quantityInput.value),
+      versionId: entry.versionSelect.value,
+    }));
+    if (!orderSelect.value || !factorySelect.value || !stageSelect.value || !selectedProducts.length || selectedProducts.some((product) => !product.lineId || !product.versionId || !Number.isSafeInteger(product.quantity) || product.quantity <= 0) || !Number.isSafeInteger(selectedProducts.reduce((sum, product) => sum + product.quantity, 0))) {
+      formError.textContent = "Choose a PO, a product quantity and version for each product, and a shared factory/stage.";
       return;
     }
-    if (!form.reportValidity()) return;
+    if (new Set(selectedProducts.map((product) => product.lineId)).size !== selectedProducts.length) {
+      formError.textContent = "Select each purchase order line only once.";
+      return;
+    }
+    if (list(state.batches).some((batch) => String(batch.number || "").trim().toLocaleLowerCase() === numberInput.value.trim().toLocaleLowerCase())) {
+      formError.textContent = "This batch number is already in use.";
+      return;
+    }
+    const commonKeys = productEntries.map(readyPairs).reduce((shared, pairs, index) => {
+      const keys = new Set(pairs.map((pair) => `${pair.factory}::${pair.stage}`));
+      return index === 0 ? pairs.map((pair) => `${pair.factory}::${pair.stage}`) : shared.filter((key) => keys.has(key));
+    }, []);
+    if (!commonKeys.includes(`${factorySelect.value}::${stageSelect.value}`)) {
+      formError.textContent = "Choose a factory and stage with ready standards for every selected product.";
+      return;
+    }
     const result = await runCommand(ctx, "createBatch", {
       number: numberInput.value.trim(),
-      orderId,
-      lineId,
-      quantity: Number(quantityInput.value),
+      orderId: orderSelect.value,
+      products: selectedProducts,
       factory: factorySelect.value,
       stage: stageSelect.value,
-      lotNumber: lotInput.value.trim(),
-      countForPO: Boolean(countForPO.checked),
-      versionId: versionSelect.value,
       date: dateInput.value,
       recorder: recorderInput.value.trim(),
       notes: notesInput.value
@@ -1035,7 +1158,9 @@ function renderBatchList(root, ctx) {
     el("option", { value: "all" }, `All ${plural[label] || `${label.toLocaleLowerCase()}s`}`),
     entries.map(({ value, label: entryLabel }) => el("option", { value }, entryLabel ?? value)),
   );
-  const families = [...new Set(batches.map((batch) => batch.familyId || variants.get(batch.variantId)?.familyId).filter(Boolean))].sort();
+  const families = [...new Set(batches.flatMap((batch) => isHistoricalBatch(batch)
+    ? [batch.familyId || variants.get(batch.variantId)?.familyId]
+    : batchProducts(batch, state).map((product) => product.familyId || variants.get(product.variantId)?.familyId)).filter(Boolean))].sort();
   const factories = [...new Set(batches.map((batch) => batch.factory).filter((value) => value !== null && value !== undefined && value !== ""))].map(String).sort();
   const stages = [...new Set(batches.map((batch) => batch.stage).filter((value) => value !== null && value !== undefined && value !== ""))].map(String).sort();
   const family = filterSelect("Family", families.map((value) => ({ value, label: familyById.get(value)?.name || value })));
@@ -1043,7 +1168,7 @@ function renderBatchList(root, ctx) {
   const stage = filterSelect("Stage", stages.map((value) => ({ value })));
   toolbar.append(field("Search", search), field("Family", family), field("Factory", factory), field("Stage", stage));
   const table = el("table", { className: "qc-ops-list-table qc-ops-batch-list-table" },
-    el("thead", {}, el("tr", {}, ...["Batch", "Attachments", "Product / model", "Purchase order", "Factory / stage", "Quantity", "Physical lot", "Date", ""].map((label) => el("th", { scope: "col" }, label)))),
+    el("thead", {}, el("tr", {}, ...["Batch", "Attachments", "Product / model", "Purchase order", "Factory / stage", "Total quantity", "Date", ""].map((label) => el("th", { scope: "col" }, label)))),
     el("tbody")
   );
   const tbody = table.querySelector("tbody");
@@ -1051,9 +1176,19 @@ function renderBatchList(root, ctx) {
     const displayNumber = displayNumbers.get(batch.id) ?? batch.number;
     const variant = variants.get(batch.variantId);
     const order = orders.find((item) => item.id === batch.orderId);
-    const batchFamily = batch.familyId || variant?.familyId || "";
+    const products = isHistoricalBatch(batch) ? [] : batchProducts(batch, state);
+    const batchFamilies = isHistoricalBatch(batch)
+      ? [batch.familyId || variant?.familyId].filter(Boolean)
+      : products.map((product) => product.familyId || variants.get(product.variantId)?.familyId).filter(Boolean);
+    const batchProductSummary = isHistoricalBatch(batch)
+      ? batchProductLabel(batch, state)
+      : products.length
+        ? products.map((product) => `${productLabel(product, state)} · ${quantity(product.quantity)} units`).join("\n")
+        : text(variant?.label, batch.variantId);
     const attachments = batchAttachments(batch, state);
-    const searchText = [displayNumber, batchFamily, familyById.get(batchFamily)?.name, batch.productLabel, batch.model, batch.color, variant?.label, order?.number, batch.factory, batch.stage, batch.lotNumber, batch.versionLabel, ...attachments.map((asset) => asset.name)]
+    const searchText = [displayNumber, ...batchFamilies, ...batchFamilies.map((familyId) => familyById.get(familyId)?.name), batch.productLabel, batch.model, batch.color, variant?.label,
+      ...products.flatMap((product) => [productLabel(product, state), product.quantity, product.versionLabel]),
+      order?.number, batch.factory, batch.stage, batch.versionLabel, ...attachments.map((asset) => asset.name)]
       .filter((value) => value !== null && value !== undefined).join(" ").toLocaleLowerCase();
     const attachmentCell = el("td", { className: "qc-ops-list-attachments" });
     if (attachments.length) {
@@ -1075,18 +1210,17 @@ function renderBatchList(root, ctx) {
       attachmentCell.append("—");
     }
     const tr = el("tr", {
-      "data-family": batchFamily,
+      "data-family": batchFamilies.join(" "),
       "data-factory": batch.factory || "",
       "data-stage": batch.stage || "",
       "data-search": searchText,
     },
       el("td", {}, text(displayNumber)),
       attachmentCell,
-      el("td", {}, batchProductLabel(batch, state)),
+      el("td", { className: "qc-ops-list-products" }, ...String(batchProductSummary).split("\n").map((item) => el("span", {}, item))),
       el("td", {}, text(order?.number)),
       el("td", {}, [batch.factory, batch.stage].filter((value) => value !== null && value !== undefined && value !== "").join(" · ") || "—"),
-      el("td", { className: "qc-ops-number" }, isHistoricalBatch(batch) ? sourceValue(batch.quantity) : quantity(batch.quantity)),
-      el("td", {}, text(batch.lotNumber)),
+      el("td", { className: "qc-ops-number" }, isHistoricalBatch(batch) ? sourceValue(batch.quantity) : quantity(totalProductQuantity(batch, state))),
       el("td", {}, dateLabel(batch.date)),
       el("td", {}, button("Open", () => ctx.navigate("batches", batch.id), "button button-secondary qc-ops-small-button")),
     );
@@ -1095,7 +1229,7 @@ function renderBatchList(root, ctx) {
   const updateFilters = () => {
     const query = search.value.trim().toLowerCase();
     for (const row of tbody.rows) {
-      const familyMatches = family.value === "all" || row.dataset.family === family.value;
+      const familyMatches = family.value === "all" || row.dataset.family.split(" ").includes(family.value);
       const factoryMatches = factory.value === "all" || row.dataset.factory === factory.value;
       const stageMatches = stage.value === "all" || row.dataset.stage === stage.value;
       const searchMatches = !query || row.dataset.search.includes(query);
@@ -1108,19 +1242,16 @@ function renderBatchList(root, ctx) {
   if (!batches.length && !orders.length) {
     sections.push(el("section", { className: "card qc-ops-empty-card" },
       el("h2", {}, "Start with a purchase order"),
-      el("p", {}, "A batch belongs to one explicit purchase order line and one product variant. Create an order first, then return here to create an inspection batch."),
       button("Open purchase orders", () => ctx.navigate("orders"), "button button-primary")
     ));
   } else if (!batches.length && orders.length && !orderLines.length) {
     sections.push(el("section", { className: "card qc-ops-empty-card" },
       el("h2", {}, "Add a purchase order line"),
-      el("p", {}, "Choose a product variant and ordered quantity on a purchase order before creating an inspection batch."),
       button("Open purchase orders", () => ctx.navigate("orders"), "button button-primary")
     ));
   } else if (!batches.length && orderLines.length && !createableLines.length) {
     sections.push(el("section", { className: "card qc-ops-empty-card" },
       el("h2", {}, "Review design versions"),
-      el("p", {}, "Check that an available version provides inspection rows for the product, factory, and stage you need."),
       button("Open standards", () => ctx.navigate("standards"), "button button-primary")
     ));
   }
@@ -1131,7 +1262,7 @@ function renderBatchList(root, ctx) {
     ]);
     sections.unshift(el("section", { className: "card qc-ops-draft-warning" },
       el("strong", {}, "Unsaved edits are held in this tab"),
-      el("p", {}, `${rowDrafts.size} inspection row(s) and ${batchDetailDrafts.size} batch detail set(s) still need saving. They will remain available while this tab stays open.`),
+      el("p", {}, `${rowDrafts.size} inspection row(s) and ${batchDetailDrafts.size} batch detail set(s) need saving.`),
       ...Array.from(pendingBatchIds).map((batchId) => {
         const batch = batches.find((item) => item.id === batchId);
         return batch ? button(`Resume ${text(batch.number)}`, () => ctx.navigate("batches", batchId, true), "button button-secondary qc-ops-small-button") : null;
@@ -1143,7 +1274,6 @@ function renderBatchList(root, ctx) {
   } else if (orders.length && orderLines.length && createableLines.length) {
     sections.push(el("section", { className: "card qc-ops-empty-card" },
       el("h2", {}, "No batches yet"),
-      el("p", {}, "Once a purchase order and published inspection version are ready, create the first batch here."),
       createButton
     ));
   }

@@ -86,15 +86,15 @@ function renderRecordedVersion(ctx, version) {
   );
 }
 
-function pageHeading(root, eyebrow, title, description, actions = []) {
+function pageHeading(root, eyebrow, title, _description, actions = []) {
   root.append(h("header", { className: "page-heading" },
-    h("div", {}, h("p", { className: "eyebrow" }, eyebrow), h("h2", {}, title), h("p", {}, description)),
+    h("div", {}, h("p", { className: "eyebrow" }, eyebrow), h("h2", {}, title)),
     actions.length ? h("div", { className: "page-heading-actions" }, actions) : null,
   ));
 }
 
 function emptyState(title, description, actions = []) {
-  return h("section", { className: "empty-state" }, h("h3", {}, title), h("p", {}, description), actions);
+  return h("section", { className: "empty-state" }, h("h3", {}, title), description ? h("p", {}, description) : null, actions);
 }
 
 function input(name, value = "", type = "text", props = {}) {
@@ -141,7 +141,7 @@ function renderCatalog(root, ctx) {
   ]);
   const familyGrid = h("div", { className: "admin-grid" }, ctx.state.families.map((family) => h("section", { className: "admin-card family-card card" },
     h("div", { className: "section-heading" },
-      h("div", {}, h("h3", {}, family.name), h("p", {}, "Shared inspection family")),
+      h("h3", {}, family.name),
       statusBadge(`${family.models.length} models`),
     ),
     h("div", { className: "family-models" }, family.models.map((model) => statusBadge(model))),
@@ -157,14 +157,14 @@ function renderCatalog(root, ctx) {
         await ctx.run("setVariantActive", { id: variant.id, active: !variant.active });
       }, variant.active ? "button-secondary" : "button-primary")),
     ))),
-  )) : emptyState("No product variants yet", "Add a variant when a color or minor product variation needs separate purchase quantity tracking.");
+  )) : emptyState("No product variants yet", "");
   root.append(h("div", { className: "admin-grid" },
     h("section", { className: "admin-card admin-card-wide card" },
-      h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Inspection families"), h("p", {}, "S11–S14 share one inspection family; S15 has its own inspection family.")), statusBadge(`${ctx.state.families.length} families`)),
+      h("div", { className: "section-heading" }, h("h3", {}, "Inspection families"), statusBadge(`${ctx.state.families.length} families`)),
       familyGrid,
     ),
     h("section", { className: "admin-card admin-card-wide card" },
-      h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Product variants"), h("p", {}, "Red uses the plain model name. Yellow carries a visible color label; every variant has its own purchase line.")), statusBadge(`${activeCount} active`, "green")),
+      h("div", { className: "section-heading" }, h("h3", {}, "Product variants"), statusBadge(`${activeCount} active`, "green")),
       variantTable,
     ),
   ));
@@ -185,7 +185,6 @@ function openVariantEditor(ctx) {
       field("Color", input("color", "", "text", { required: true, maxLength: 80, placeholder: "For example: Blue" })),
       field("Displayed product name", input("label", "", "text", { required: true, maxLength: 160, placeholder: "For example: S15 Blue" })),
     ),
-    h("p", { className: "source-note" }, "Variants in the same inspection family can share standards while remaining separate on purchase orders and quantity progress."),
     h("div", { className: "form-actions" },
       button("Cancel", () => closeDialog(), "button-secondary"),
       h("button", { type: "submit", className: "button button-primary" }, "Create active variant"),
@@ -263,7 +262,7 @@ function renderVersionEditor(ctx, version, initialFamilyId) {
       field("Version name", input("label", formSnapshot?.label ?? version?.label ?? `Version ${next}`, "text", { required: true, maxLength: 160 })),
       field("Sequence", input("sequence", formSnapshot?.sequence ?? version?.sequence ?? next, "number", { required: true, min: 1, step: 1 })),
       field("Effective date", input("effectiveDate", formSnapshot?.effectiveDate ?? version?.effectiveDate ?? today(), "date", { required: true })),
-      field("Notes and source", input("notes", formSnapshot?.notes ?? version?.notes ?? "", "text", { maxLength: 5000, className: "form-control" }), "Source notes stay with this design version."),
+      field("Notes and source", input("notes", formSnapshot?.notes ?? version?.notes ?? "", "text", { maxLength: 5000, className: "form-control" })),
     );
     const editorRows = itemsToDraw.map((item, index) => {
       const allModels = item.models?.length === 0;
@@ -281,22 +280,21 @@ function renderVersionEditor(ctx, version, initialFamilyId) {
         }, "button-danger")),
         input(`item.${index}.id`, item.id ?? "", "hidden"),
         h("div", { className: "item-editor-grid" },
-          field("History key", input(`item.${index}.key`, item.key ?? `manual-${id()}`, "text", { required: true, maxLength: 120 }), "Keep a key stable across versions to compare the same inspection item."),
+          field("History key", input(`item.${index}.key`, item.key ?? `manual-${id()}`, "text", { required: true, maxLength: 120 })),
           field("Row number", input(`item.${index}.no`, item.no ?? index + 1, "number", { required: true, min: 1, step: 1 })),
           field("Factory", input(`item.${index}.factory`, item.factory ?? "AP", "text", { required: true, maxLength: 100, placeholder: "AP, UI, or factory name" })),
           field("Stage", select(`item.${index}.stage`, ["IQC", "OQC"], item.stage ?? "OQC")),
           field("Inspection title", input(`item.${index}.title`, item.title ?? "", "text", { required: true, maxLength: 300 })),
           field("检验项目", input(`item.${index}.titleZh`, item.titleZh ?? "", "text", { maxLength: 300 })),
-          field("Specification", textarea(`item.${index}.specification`, item.specification ?? "", { required: true, maxLength: 5000, rows: 3 }), "The standard text copied to future batches."),
+          field("Specification", textarea(`item.${index}.specification`, item.specification ?? "", { required: true, maxLength: 5000, rows: 3 })),
           field("检验标准", textarea(`item.${index}.specificationZh`, item.specificationZh ?? "", { maxLength: 5000, rows: 3 })),
           field("Devices / 检测工具", input(`item.${index}.devices`, item.devices ?? "", "text", { maxLength: 1000 })),
-          field("Sampling %", input(`item.${index}.samplingPercent`, item.samplingPercent ?? 10, "number", { required: true, min: 0, max: 100, step: "any" }), "Determines inspected quantity; recording rule is separate."),
+          field("Sampling %", input(`item.${index}.samplingPercent`, item.samplingPercent ?? 10, "number", { required: true, min: 0, max: 100, step: "any" })),
           field("Recording rule", input(`item.${index}.recordingRule`, item.recordingRule ?? "", "text", { maxLength: 500, placeholder: "For example: 50% + all failed units" })),
           field("Time (seconds)", input(`item.${index}.timeSeconds`, item.timeSeconds ?? "", "number", { min: 0, step: 1 })),
           h("label", { className: "field" }, h("span", { className: "field-label" }, "Applicable models"),
             h("span", { className: "field-checkbox" }, allCheckbox, "All models in this family"),
             modelsSelect,
-            h("span", { className: "field-help" }, "Choose one or more models, or use all models."),
           ),
           field("Procedure URL", input(`item.${index}.procedureUrl`, item.procedureUrl ?? "", "url", { maxLength: 2000, placeholder: "https://…" })),
           h("label", { className: "field-checkbox" }, h("input", { type: "checkbox", name: `item.${index}.important`, checked: Boolean(item.important) }), "Important check (green in the inspection table)"),
@@ -315,7 +313,7 @@ function renderVersionEditor(ctx, version, initialFamilyId) {
             draw([...current.items, fresh], true, current);
           }, "button-secondary"),
         ),
-        editorRows.length ? h("div", { className: "item-editor-list" }, editorRows) : emptyState("No inspection items yet", "Add the standard rows that belong to this complete family version."),
+        editorRows.length ? h("div", { className: "item-editor-list" }, editorRows) : emptyState("No inspection items yet", ""),
       ),
       h("div", { className: "form-actions" }, button("Cancel", () => closeDialog(), "button-secondary"), h("button", { type: "submit", className: "button button-primary" }, version ? "Save draft" : "Create draft")),
     );
@@ -338,7 +336,6 @@ function openNewVersion(ctx, familyId) {
 function openCloneDialog(ctx, version) {
   const familySequence = nextSequence(ctx, version.familyId);
   const form = h("form", { className: "stack" },
-    h("p", { className: "source-note" }, `This creates an editable draft copy of ${version.label}. The published source remains unchanged.`),
     h("div", { className: "form-grid" },
       field("New version name", input("label", `${version.label} copy`, "text", { required: true, maxLength: 160 })),
       field("Sequence", input("sequence", familySequence, "number", { required: true, min: 1, step: 1 })),
@@ -413,7 +410,7 @@ function renderStandards(root, ctx) {
   ];
   pageHeading(root, "Standards", "Design versions and inspection standards", "Published versions are available for new batches. Archived versions remain available for reference.", actions);
   if (!ctx.state.versions.length) {
-    root.append(emptyState("No design versions yet", "Create a family version to start recording inspection standards."));
+    root.append(emptyState("No design versions yet", ""));
     return;
   }
   const sections = ctx.state.families.map((family) => {
@@ -489,13 +486,13 @@ function openOrderEditor(ctx, order = null) {
         field("Notes", textarea("notes", formSnapshot?.notes ?? order?.notes ?? "", { maxLength: 5000, rows: 2 })),
       ),
       h("section", { className: "stack" },
-        h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Purchase order lines"), h("p", {}, "Each product variant has its own ordered and released quantities.")), button("Add line", () => {
+        h("div", { className: "section-heading" }, h("h3", {}, "Purchase order lines"), button("Add line", () => {
           const details = readOrderForm(form, lineDrafts);
           const used = new Set(details.lines.map((item) => item.variantId));
           const nextVariant = activeVariants.find((variant) => !used.has(variant.id))?.id ?? activeVariants[0]?.id ?? "";
           draw([...details.lines, { variantId: nextVariant, orderedQty: 1 }], true, details);
         }, "button-secondary")),
-        linesUi.length ? linesUi : emptyState("No lines", "Add at least one product variant to this purchase order."),
+        linesUi.length ? linesUi : emptyState("No lines", ""),
       ),
       h("div", { className: "form-actions" }, button("Cancel", () => closeDialog(), "button-secondary"), h("button", { type: "submit", className: "button button-primary" }, order ? "Save purchase order" : "Create purchase order")),
     );
@@ -524,7 +521,7 @@ async function renderOrders(root, ctx) {
     button("New purchase order", () => openOrderEditor(ctx), "button-primary"),
   ]);
   if (!ctx.state.orders.length) {
-    root.append(emptyState("No purchase orders yet", "Create a purchase order with one or more product-variant lines. Release progress starts at zero and changes only when a batch is explicitly released.", [
+    root.append(emptyState("No purchase orders yet", "", [
       button("Create purchase order", () => openOrderEditor(ctx), "button-primary"),
     ]));
     return;
@@ -591,24 +588,22 @@ function fallbackMime(file) {
 function setUploadFeedback(node, message, tone = "") {
   node.textContent = message;
   node.className = `upload-feedback${tone ? ` upload-feedback-${tone}` : ""}`;
+  node.hidden = !message;
 }
 
 function openVersionAttachmentDialog(ctx, version) {
   let totalBytes = ctx.state.assets.reduce((sum, asset) => sum + bytesInDataUrl(asset.dataUrl), 0);
   let submitting = false;
-  const versionName = `${familyName(ctx, version.familyId)} · ${version.label || "Version label not recorded"}`;
   const filePicker = input("file", "", "file", {
     accept: ".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.log,.csv,.md,.markdown",
     required: true,
   });
-  const feedback = h("p", { className: "upload-feedback", role: "status", ariaLive: "polite" },
-    "This document will be linked to the selected version.");
+  const feedback = h("p", { className: "upload-feedback", role: "status", ariaLive: "polite", hidden: true });
   const limitNote = h("p", { className: "file-size" },
     `Maximum per document: ${formatBytes(DOCUMENT_MAX_BYTES)}. All stored attachment payloads together: ${formatBytes(totalBytes)} of ${formatBytes(ASSET_TOTAL_MAX_BYTES)}.`);
   const submitButton = h("button", { type: "submit", className: "button button-primary" }, "Upload attachment");
   const cancelButton = button("Close", () => closeDialog(true), "button-secondary");
   const form = h("form", { className: "stack version-attachment-form" },
-    h("p", { className: "source-note" }, `Add a document to ${versionName}.`),
     field("Choose one document", filePicker),
     limitNote,
     feedback,
@@ -787,7 +782,7 @@ function renderLibrary(root, ctx) {
       field("Choose a source file", input("file", "", "file", { accept: ".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.log,.csv,.md,.markdown", required: true })),
       h("p", { className: "file-size" }, `Maximum per library file: ${formatBytes(DOCUMENT_MAX_BYTES)}. All stored file payloads together: ${formatBytes(ASSET_TOTAL_MAX_BYTES)}.`),
     ),
-    field("Link to design version", select("versionId", versionOptions, ""), "Optional: retain the source version alongside the file."),
+    field("Link to design version", select("versionId", versionOptions, "")),
     h("div", { className: "form-actions" }, h("button", { type: "submit", className: "button button-primary" }, "Save file to library")),
   );
   form.addEventListener("submit", async (event) => {
@@ -822,7 +817,7 @@ function renderLibrary(root, ctx) {
         catch (error) { notify(error instanceof Error ? error.message : "The file could not be downloaded.", true); }
       }, "button-secondary"),
     );
-  })) : emptyState("No library files yet", "Upload original reference files and optionally link each one to a design version.");
+  })) : emptyState("No library files yet", "");
   root.append(h("div", { className: "admin-grid" },
     h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Add a reference file"), h("p", {}, `Stored payload: ${formatBytes(totalBytes)} of ${formatBytes(ASSET_TOTAL_MAX_BYTES)}.`))), form),
     h("section", { className: "admin-card admin-card-wide card" }, h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Library files"), h("p", {}, `${assets.length} file${assets.length === 1 ? "" : "s"} · download-only access`)), statusBadge(`${formatBytes(totalBytes)} stored`)), files),
@@ -847,9 +842,8 @@ function renderBackup(root, ctx) {
   const form = h("form", { className: "backup-panel" },
     h("div", { className: "file-choice" },
       field("Backup JSON file", input("backup", "", "file", { accept: ".json,application/json", required: true })),
-      h("p", { className: "file-size" }, `Maximum backup size: ${formatBytes(BACKUP_MAX_BYTES)}. Photos and reference files are included in the snapshot.`),
+      h("p", { className: "file-size" }, `Maximum backup size: ${formatBytes(BACKUP_MAX_BYTES)}.`),
     ),
-    h("div", { className: "backup-note" }, "Restore is additive. Matching records are skipped when their content is identical; a conflicting ID stops the import without changing this workspace."),
     h("div", { className: "form-actions" }, h("button", { type: "submit", className: "button button-secondary" }, "Validate and restore backup")),
   );
   form.addEventListener("submit", async (event) => {
@@ -900,14 +894,14 @@ function renderBackup(root, ctx) {
     h("div", { className: "progress-stat" }, h("span", {}, "Attachment payload"), h("strong", {}, `${formatBytes(assetBytes)} / ${formatBytes(ASSET_TOTAL_MAX_BYTES)}`)),
   );
   root.append(h("div", { className: "admin-grid" },
-    h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Export current workspace"), h("p", {}, "Keep a copy outside this browser and computer."))), exportButton,
+    h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("h3", {}, "Export current workspace")), exportButton,
       h("p", { className: "file-size" }, `Serialized backup limit: ${formatBytes(BACKUP_MAX_BYTES)}.`)),
-    h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Restore into this workspace"), h("p", {}, "Choose a backup file and let the service validate the complete data graph."))), form),
+    h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("h3", {}, "Restore into this workspace")), form),
     !ctx.isDemo ? h("section", { className: "admin-card card" },
-      h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Move existing browser data"), h("p", {}, "Add the QC records and attachments from this browser’s previous workspace. The source data stays in place, and any conflict stops the migration without partial changes."))),
+      h("div", { className: "section-heading" }, h("h3", {}, "Move existing browser data")),
       migrationButton,
     ) : null,
-    h("section", { className: "admin-card admin-card-wide card" }, h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, ctx.isDemo ? "Current demo workspace" : "Current shared workspace"), h("p", {}, "Stored in a local SQLite database on this computer."))), metrics),
+    h("section", { className: "admin-card admin-card-wide card" }, h("div", { className: "section-heading" }, h("h3", {}, ctx.isDemo ? "Current demo workspace" : "Current shared workspace")), metrics),
   ));
 }
 

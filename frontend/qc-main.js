@@ -1,5 +1,4 @@
 import { qcService, createDemoQCService, exportLegacyBrowserBackup } from "../core/qc-app.js";
-import { getBatchVersions } from "../core/qc-batch-versions.js";
 import { renderAdminPage } from "./qc-admin.js";
 import { renderOperationsPage } from "./qc-operations.js";
 import { button, el, notify, showDialog, closeDialog } from "./qc-ui.js";
@@ -219,39 +218,6 @@ function getContext() {
   };
 }
 
-function renderGettingStarted() {
-  const hasStarted = state.orders.length > 0 || state.batches.length > 0;
-  if (currentRoute !== "batches" || hasStarted) return null;
-  const families = Array.isArray(state.families) ? state.families : [];
-  const familiesWithVersions = families.filter((family) => getBatchVersions(state, family.id).length > 0).length;
-  const intro = el("section", { className: "getting-started card", "aria-labelledby": "getting-started-title" },
-    el("div", { className: "getting-started-heading" },
-      el("div", {}, el("p", { className: "eyebrow" }, "First run"), el("h2", { id: "getting-started-title" }, "Set up your first inspection")),
-      el("p", { className: "muted" }, "Review design versions, create a purchase order, then create an inspection batch."),
-    ),
-    el("ol", { className: "setup-steps" },
-      el("li", {},
-        el("strong", {}, "Review design versions"),
-        el("span", {}, familiesWithVersions
-          ? `Version records are available for ${familiesWithVersions} product famil${familiesWithVersions === 1 ? "y" : "ies"}. Review their inspection items in Standards.`
-          : "Create or review a design version for the product family in Standards."),
-        button("Open standards", () => navigate("standards"), "button-secondary"),
-      ),
-      el("li", {},
-        el("strong", {}, "Create a purchase order"),
-        el("span", {}, "Add one or more variant lines with ordered quantities."),
-        button("Open purchase orders", () => navigate("orders"), "button-secondary"),
-      ),
-      el("li", {},
-        el("strong", {}, "Create the inspection batch"),
-        el("span", {}, "Choose a purchase order line and an applicable version. The selected version and inspection rows are locked on the batch."),
-        button("Open batches", () => navigate("batches"), "button-secondary"),
-      ),
-    ),
-  );
-  return intro;
-}
-
 function renderApp() {
   if (!state) return;
   const thisRender = ++renderNumber;
@@ -293,7 +259,6 @@ function renderApp() {
     realUrl.hash = "#/batches";
     workspace.append(el("aside", { className: "demo-banner", role: "status" },
       el("strong", {}, "Demo workspace · Stored separately"),
-      el("span", {}, "Demo records use a separate local database on this computer."),
       el("a", { href: `${realUrl.pathname}${realUrl.search}${realUrl.hash}` }, "Open your real workspace"),
     ));
   }
@@ -302,8 +267,6 @@ function renderApp() {
     button("Reload latest data", requestRefresh, "button-secondary"),
   ));
   const main = el("main", { className: "app-main", id: "main-content" });
-  const firstRun = renderGettingStarted();
-  if (firstRun) main.append(firstRun);
   const slot = el("div", { className: "page-render-slot" });
   main.append(slot);
   workspace.append(main);

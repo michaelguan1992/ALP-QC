@@ -1,4 +1,5 @@
 import { deepEqual, fail } from "./qc-domain.js";
+import { getBatchProducts } from "./qc-batch-products.js";
 
 export const S15_TRIAL_VERSION_ID = "lark:recvwbnjOo2r4P:s15";
 
@@ -88,10 +89,15 @@ function collectExactStringPaths(value, target, prefix, output, seen = new Set()
 function findTrialVersionReferences(state) {
   const references = [];
   for (const batch of state.batches ?? []) {
-    if (batch.versionId === S15_TRIAL_VERSION_ID) references.push(`batch ${batch.number || batch.id}`);
+    if (batch.versionId === S15_TRIAL_VERSION_ID ||
+      getBatchProducts(batch).some((product) => product.versionId === S15_TRIAL_VERSION_ID)) {
+      references.push(`batch ${batch.number || batch.id}`);
+    }
   }
   for (const issue of state.issues ?? []) {
-    if (issue.versionId === S15_TRIAL_VERSION_ID || issue.sourceSnapshot?.versionId === S15_TRIAL_VERSION_ID) {
+    if (issue.versionId === S15_TRIAL_VERSION_ID || issue.sourceSnapshot?.versionId === S15_TRIAL_VERSION_ID ||
+      issue.sourceSnapshot?.products?.some((product) => product.versionId === S15_TRIAL_VERSION_ID) ||
+      issue.sourceSnapshot?.row?.versionId === S15_TRIAL_VERSION_ID) {
       references.push(`issue ${issue.number || issue.id}`);
     }
   }

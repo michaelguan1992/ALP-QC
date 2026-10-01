@@ -8,6 +8,11 @@ import {
   requireRecord,
   requireString,
 } from "./qc-domain.js";
+import { getBatchProducts } from "./qc-batch-products.js";
+
+function batchUsesLine(batch, orderId, lineId) {
+  return batch.orderId === orderId && getBatchProducts(batch).some((product) => product.lineId === lineId);
+}
 
 function normalizeOrderLines(state, orderId, linesInput, idFactory, previousLines = []) {
   const inputs = requireArray(linesInput, "Purchase order lines");
@@ -21,7 +26,7 @@ function normalizeOrderLines(state, orderId, linesInput, idFactory, previousLine
       ? previousLines.find((line) => line.id === input.id)
       : previousLines.find((line) => line.variantId === variantId);
     const id = input.id ? requireString(input.id, "Purchase order line ID", { maxLength: 120 }) : previous?.id ?? makeId(idFactory);
-    if (previous && previous.variantId !== variantId && state.batches.some((batch) => batch.orderId === orderId && batch.lineId === previous.id)) {
+    if (previous && previous.variantId !== variantId && state.batches.some((batch) => batchUsesLine(batch, orderId, previous.id))) {
       fail("A purchase order line used by a batch cannot change its product variant.");
     }
     return { id, variantId, orderedQty: requirePositiveInteger(input.orderedQty, "Ordered quantity") };
@@ -31,7 +36,7 @@ function normalizeOrderLines(state, orderId, linesInput, idFactory, previousLine
 
   const nextIds = new Set(lines.map((line) => line.id));
   for (const previous of previousLines) {
-    if (!nextIds.has(previous.id) && state.batches.some((batch) => batch.orderId === orderId && batch.lineId === previous.id)) {
+    if (!nextIds.has(previous.id) && state.batches.some((batch) => batchUsesLine(batch, orderId, previous.id))) {
       fail("A purchase order line used by a batch cannot be removed.");
     }
   }
@@ -75,17 +80,22 @@ export function getPurchaseOrderProgress(state, orderId) {
   const lines = order.lines.map((line) => {
     const variant = state.variants.find((candidate) => candidate.id === line.variantId);
     const batches = state.batches
-      .filter((batch) => batch.orderId === order.id && batch.lineId === line.id && batch.status === "released" && batch.countForPO === true && batch.stage === "OQC")
+      .filter((batch) => batch.orderId === order.id && batch.status === "released" && batch.countForPO === true && batch.stage === "OQC")
       .sort((left, right) => left.date.localeCompare(right.date) || left.createdAt.localeCompare(right.createdAt))
-      .map((batch) => ({
-        id: batch.id,
-        number: batch.number,
-        lotNumber: batch.lotNumber,
-        date: batch.date,
-        quantity: batch.quantity,
-        versionLabel: batch.versionLabel,
-      }));
+      .flatMap((batch) => getBatchProducts(batch)
+        .filter((product) => product.lineId === line.id)
+        .map((product) => ({
+          id: batch.id,
+          number: batch.number,
+          productLineId: product.lineId,
+          variantId: product.variantId,
+          lotNumber: typeof batch.lotNumber === "string" ? batch.lotNumber : null,
+          date: batch.date,
+          quantity: product.quantity,
+          versionLabel: product.versionLabel,
+        })));
     const releasedQty = batches.reduce((total, batch) => total + batch.quantity, 0);
+    if (!Number.isSafeInteger(releasedQty)) fail(`Released quantity for purchase order line ${line.id} exceeds a safe whole number.`);
     return {
       ...line,
       variant: structuredClone(variant),

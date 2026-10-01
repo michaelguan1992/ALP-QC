@@ -138,6 +138,28 @@
 .qc-ops-form input:not([type="checkbox"]), .qc-ops-form select, .qc-ops-form textarea, .qc-ops-derived-output { width: 100%; }
 .qc-ops-form textarea { resize: vertical; }
 .qc-ops-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.qc-ops-product-entry-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: -5px; color: #35443a; font-size: 12px; }
+.qc-ops-product-entries { display: grid; gap: 7px; }
+.qc-ops-product-entry { display: flex; align-items: end; gap: 8px; border: 1px solid var(--line, #d1d8d2); border-radius: var(--radius, 6px); padding: 8px; background: var(--surface-soft, #f7f9f7); }
+.qc-ops-product-entry-fields { display: grid; flex: 1 1 auto; grid-template-columns: minmax(150px, 1.3fr) minmax(100px, .65fr) minmax(155px, 1fr); gap: 8px; min-width: 0; }
+.qc-ops-product-entry-fields .field { min-width: 0; }
+.qc-ops-product-entry-fields input, .qc-ops-product-entry-fields select { width: 100%; min-width: 0; }
+.qc-ops-product-entry > .button { flex: 0 0 auto; margin-bottom: 1px; }
+.qc-ops-product-locks { margin-top: 10px; border-top: 1px solid var(--line, #d1d8d2); padding-top: 9px; }
+.qc-ops-product-locks h3 { margin: 0 0 6px; color: var(--muted, #626a64); font-size: 11px; font-weight: 650; }
+.qc-ops-product-lock-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px 14px; }
+.qc-ops-product-lock-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; min-width: 0; border-left: 2px solid #b9d1be; padding-left: 7px; font-size: 11px; }
+.qc-ops-product-lock-list strong { overflow-wrap: anywhere; }
+.qc-ops-product-lock-list span { color: var(--muted, #626a64); }
+.qc-ops-product-lock-list span:last-child { grid-column: 1 / -1; }
+.qc-ops-list-products span { display: block; white-space: pre-wrap; }
+.qc-ops-product-context strong { display: block; font-size: 9px; }
+.qc-ops-product-context small { display: block; margin-top: 3px; color: #68716a; font-size: 8px; }
+.qc-ops-mixed-product-table { width: 1424px; min-width: 1424px; }
+.qc-ops-report-products { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin: 0; border-top: 1px solid var(--line, #d1d8d2); padding-top: 7px; }
+.qc-ops-report-products dt { color: var(--muted, #626a64); font-size: 10px; font-weight: 700; }
+.qc-ops-report-products dd { margin: 4px 0 0; }
+.qc-ops-report-products ul { display: grid; gap: 3px; margin: 0; padding-left: 17px; font-size: 11px; }
 .qc-ops-checkbox-field { display: flex; align-items: flex-start; gap: 9px; border: 1px solid #d2d9d3; border-radius: var(--radius, 6px); padding: 10px; background: #f8faf8; font-size: 12px; }
 .qc-ops-checkbox-field input { margin-top: 2px; }
 .qc-ops-form-error { margin: 0; color: var(--danger, #9a3328); font-size: 12px; }
@@ -188,6 +210,8 @@
   .qc-ops-batch-meta button { justify-self: start; }
   .qc-ops-section-heading { flex-direction: column; }
   .qc-ops-historical-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qc-ops-product-entry-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qc-ops-product-entry-fields .field:first-child { grid-column: 1 / -1; }
 }
 
 @media (max-width: 520px) {
@@ -196,6 +220,14 @@
   .qc-ops-list-toolbar, .qc-ops-list-toolbar .field, .qc-ops-list-toolbar input { width: 100%; min-width: 0; }
   .qc-ops-batch-facts { flex-direction: column; gap: 6px; }
   .qc-ops-source-facts, .qc-ops-confirmations, .qc-ops-historical-facts { grid-template-columns: 1fr; }
+  .qc-ops-product-entry { align-items: stretch; flex-direction: column; }
+  .qc-ops-product-entry-fields { grid-template-columns: 1fr; }
+  .qc-ops-product-entry-fields .field:first-child { grid-column: auto; }
+  .qc-ops-product-entry > .button { align-self: flex-start; }
   .qc-ops-attachment-item { align-items: flex-start; flex-direction: column; }
   .qc-ops-historical-source-facts { grid-template-columns: max-content minmax(0, 1fr); }
+}
+
+@media print {
+  body.printing .qc-ops-inspection-table.qc-ops-mixed-product-table { width: 1424px !important; min-width: 1424px !important; }
 }

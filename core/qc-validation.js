@@ -22,6 +22,7 @@ import {
 } from "./qc-domain.js";
 import { normalizeStandardItems, selectApplicableItems } from "./qc-standards.js";
 import { getBatchVersionItems, getBatchVersionReadiness } from "./qc-batch-versions.js";
+import { getBatchProducts, getBatchRowProduct } from "./qc-batch-products.js";
 import { validateHistoryState } from "./qc-history.js";
 import { createHistoricalBatch } from "./qc-historical-batches.js";
 import { validateVersionMergeEvidence } from "./qc-version-merge.js";
@@ -266,11 +267,11 @@ function validateOrders(state, variants) {
   ensureUnique(lineIds, "Purchase order line ID");
 }
 
-function validateBatchRow(row, batch, family, variant, assets) {
+function validateBatchRow(row, batch, family, variant, assets, productQuantity = batch.quantity) {
   requirePositiveInteger(row.no, "Inspection item number");
   requireNonNegativeInteger(row.inspectedQty, "Calculated inspection quantity");
   assert(typeof row.samplingPercent === "number" && Number.isFinite(row.samplingPercent) && row.samplingPercent >= 0 && row.samplingPercent <= 100, "Batch row sampling percentage is invalid.");
-  const expectedQty = Math.ceil(batch.quantity * row.samplingPercent / 100);
+  const expectedQty = Math.ceil(productQuantity * row.samplingPercent / 100);
   assert(row.inspectedQty === expectedQty, `Locked inspection quantity for ${row.title} is inconsistent with the batch basis.`);
   assert(row.defectiveQty === null || (Number.isSafeInteger(row.defectiveQty) && row.defectiveQty >= 0 && row.defectiveQty <= row.inspectedQty), `Defective quantity for ${row.title} is invalid.`);
   assertText(row.remarks, "Inspection remarks", { maxLength: 5000, allowBlank: true });
@@ -323,6 +324,138 @@ function validateHistoricalBatch(state, batch, assets) {
   validateBatchAttachments(batch, assets);
 }
 
+function validateProductRows(batch, product, family, variant, version, assets) {
+  const productRows = batch.rows.filter((row) => row.productLineId === product.lineId);
+  assert(productRows.length > 0, `Batch ${batch.number} product line ${product.lineId} must contain inspection rows.`);
+  assert(productRows.every((row) => typeof row.sourceItemId === "string" && row.sourceItemId.trim()),
+    `Batch ${batch.number} rows must preserve their source standard item IDs.`);
+  const normalizedLockedRows = normalizeStandardItems(
+    productRows.map((row) => ({ ...row, id: row.sourceItemId })),
+    family,
+    () => fail("A locked inspection row is missing its source standard ID."),
+    productRows,
+  );
+  const readiness = getBatchVersionReadiness(version, batch.factory, batch.stage, variant.model);
+  assert(readiness.ready, `Batch ${batch.number} uses incomplete inspection standards. ${readiness.message}`);
+  const projectedVersion = { ...version, items: getBatchVersionItems(version) };
+  const applicableSourceItems = selectApplicableItems(projectedVersion, batch.factory, batch.stage, variant.model);
+  const sourceItems = normalizeStandardItems(applicableSourceItems, family,
+    () => fail("A projected inspection standard is incomplete."), applicableSourceItems);
+  assert(sourceItems.length === productRows.length, `Batch ${batch.number} rows do not match its product version applicability.`);
+  const standardFields = ["id", "key", "no", "title", "titleZh", "specification", "specificationZh", "devices", "factory", "stage", "models", "samplingPercent", "recordingRule", "important", "timeSeconds", "procedureUrl"];
+  for (let index = 0; index < sourceItems.length; index += 1) {
+    assert(normalizedLockedRows[index].id === sourceItems[index].id,
+      `Batch ${batch.number} row ${index + 1} changed its source standard item ID.`);
+    const expected = Object.fromEntries(standardFields.map((field) => [field, sourceItems[index][field]]));
+    const actual = Object.fromEntries(standardFields.map((field) => [field,
+      field === "id" ? productRows[index].sourceItemId : productRows[index][field]]));
+    assert(stableStringify(actual) === stableStringify(expected),
+      `Batch ${batch.number} locked standard row ${index + 1} differs from product line ${product.lineId}'s version.`);
+    assert(productRows[index].productLineId === product.lineId,
+      `Batch ${batch.number} inspection row has the wrong product line.`);
+    validateBatchRow(productRows[index], batch, family, variant, assets, product.quantity);
+  }
+}
+
+function validateOperationalBatchFacts(state, batch) {
+  assert(batch.kind === undefined || batch.kind === "operational", `Batch ${batch.number} has an unsupported kind.`);
+  assert(!Object.hasOwn(batch, "historyInspectionId"), `Operational batch ${batch.number} cannot reference historical inspection evidence.`);
+  requirePositiveInteger(batch.quantity, "Batch quantity");
+  const factory = normalizeFactory(batch.factory);
+  const stage = normalizeStage(batch.stage);
+  assert(factory && factory === batch.factory, `Batch ${batch.number} factory is not normalized.`);
+  assert(stage && stage === batch.stage, `Batch ${batch.number} stage is not normalized.`);
+  if (factory === "AP" && stage === "IQC") fail("AP IQC batches are not supported.");
+  assert(typeof batch.countForPO === "boolean", "PO-counting flag must be boolean.");
+  if (batch.countForPO) assert(stage === "OQC", "Only OQC batches may count toward PO released quantity.");
+  requireDate(batch.date, "Batch date");
+  assertText(batch.recorder, "Recorder", { maxLength: 200, allowBlank: true });
+  assertText(batch.notes, "Batch notes", { maxLength: 5000, allowBlank: true });
+  assert(["draft", "released"].includes(batch.status), `Batch ${batch.number} has an invalid status.`);
+  requireTimestamp(batch.createdAt, "Batch created time");
+  assert(Array.isArray(batch.rows) && batch.rows.length > 0, `Batch ${batch.number} must contain applicable inspection rows.`);
+  assertUniqueIds(batch.rows, `Inspection row in batch ${batch.number}`);
+}
+
+function validateLegacyBatch(state, batch, families, variants, orders, versions, assets, lots) {
+  validateOperationalBatchFacts(state, batch);
+  validateBatchAttachments(batch, assets);
+  const order = orders.get(batch.orderId);
+  assert(order, `Batch ${batch.number} refers to an unknown purchase order.`);
+  const line = order.lines.find((candidate) => candidate.id === batch.lineId);
+  assert(line, `Batch ${batch.number} refers to a line outside its purchase order.`);
+  const variant = variants.get(batch.variantId);
+  assert(variant && line.variantId === variant.id, `Batch ${batch.number} variant does not match its purchase order line.`);
+  const family = families.get(batch.familyId);
+  assert(family && family.id === variant.familyId, `Batch ${batch.number} family does not match its product variant.`);
+  const version = versions.get(batch.versionId);
+  assert(version && version.familyId === family.id && ["recorded", "published", "superseded"].includes(version.status), `Batch ${batch.number} must reference a recorded, published, or superseded version in its family.`);
+  if (batch.lotNumber != null && batch.lotNumber !== "") assertText(batch.lotNumber, "Physical lot number", { maxLength: 160 });
+  assertText(batch.versionLabel, "Locked version label", { maxLength: 160 });
+  assert(batch.versionLabel === version.label, `Batch ${batch.number} version label does not match its immutable inspection version.`);
+  const readiness = getBatchVersionReadiness(version, batch.factory, batch.stage, variant.model);
+  assert(readiness.ready, `Batch ${batch.number} uses incomplete inspection standards. ${readiness.message}`);
+  const projectedVersion = { ...version, items: getBatchVersionItems(version) };
+  const applicableSourceItems = selectApplicableItems(projectedVersion, batch.factory, batch.stage, variant.model);
+  const sourceItems = normalizeStandardItems(applicableSourceItems, family, () => fail("A projected inspection standard is incomplete."), applicableSourceItems);
+  assert(sourceItems.length === batch.rows.length, `Batch ${batch.number} rows do not match its published version applicability.`);
+  const standardFields = ["id", "key", "no", "title", "titleZh", "specification", "specificationZh", "devices", "factory", "stage", "models", "samplingPercent", "recordingRule", "important", "timeSeconds", "procedureUrl"];
+  for (let index = 0; index < sourceItems.length; index += 1) {
+    const expected = Object.fromEntries(standardFields.map((field) => [field, sourceItems[index][field]]));
+    const actual = Object.fromEntries(standardFields.map((field) => [field, batch.rows[index][field]]));
+    assert(stableStringify(actual) === stableStringify(expected), `Batch ${batch.number} locked standard row ${index + 1} differs from its published version.`);
+    validateBatchRow(batch.rows[index], batch, family, variant, assets);
+  }
+  if (batch.status === "released" && batch.countForPO && typeof batch.lotNumber === "string" && batch.lotNumber.trim()) {
+    lots.push(`${variant.id}|${batch.lotNumber.trim().toLocaleLowerCase()}`);
+  }
+}
+
+function validateProductBatch(state, batch, families, variants, orders, versions, assets, lots) {
+  validateOperationalBatchFacts(state, batch);
+  validateBatchAttachments(batch, assets);
+  const order = orders.get(batch.orderId);
+  assert(order, `Batch ${batch.number} refers to an unknown purchase order.`);
+  assert(!Object.hasOwn(batch, "lotNumber"), `Product batch ${batch.number} cannot contain a physical lot number.`);
+  assert(Array.isArray(batch.products) && batch.products.length > 0 && batch.products.length <= 500,
+    `Batch ${batch.number} must contain between 1 and 500 product lines.`);
+  ensureUnique(batch.products.map((product) => product?.lineId), `Product lines in batch ${batch.number}`);
+  const products = [];
+  let totalQuantity = 0;
+  for (const product of batch.products) {
+    requireRecord(product, `Batch ${batch.number} product`);
+    const lineId = requireString(product.lineId, "Batch product purchase order line ID", { maxLength: 120 });
+    const line = order.lines.find((candidate) => candidate.id === lineId);
+    assert(line, `Batch ${batch.number} product refers to a line outside its purchase order.`);
+    const variant = variants.get(product.variantId);
+    assert(variant && line.variantId === variant.id, `Batch ${batch.number} product does not match its purchase order line.`);
+    const family = families.get(product.familyId);
+    assert(family && family.id === variant.familyId, `Batch ${batch.number} product family does not match its variant.`);
+    const version = versions.get(product.versionId);
+    assert(version && version.familyId === family.id && ["recorded", "published", "superseded"].includes(version.status),
+      `Batch ${batch.number} product must reference a recorded, published, or superseded version in its family.`);
+    requirePositiveInteger(product.quantity, "Batch product quantity");
+    totalQuantity += product.quantity;
+    assert(Number.isSafeInteger(totalQuantity), `Batch ${batch.number} total quantity must be a safe whole number.`);
+    assertText(product.versionLabel, "Locked product version label", { maxLength: 160 });
+    assert(product.versionLabel === version.label, `Batch ${batch.number} product version label does not match its immutable inspection version.`);
+    products.push({ product, line, variant, family, version });
+  }
+  assert(totalQuantity === batch.quantity, `Batch ${batch.number} total quantity does not equal its product allocations.`);
+  const topLevelFields = ["lineId", "variantId", "familyId", "versionId", "versionLabel"];
+  const onlyProduct = products.length === 1 ? products[0].product : null;
+  for (const field of topLevelFields) {
+    assert(batch[field] === (onlyProduct?.[field] ?? null),
+      `Batch ${batch.number} top-level ${field} must reflect one product or be null for a mixed batch.`);
+  }
+  const lineIds = new Set(batch.products.map((product) => product.lineId));
+  assert(batch.rows.every((row) => typeof row.productLineId === "string" && lineIds.has(row.productLineId)),
+    `Batch ${batch.number} inspection rows must identify a product line.`);
+  for (const { product, variant, family, version } of products) {
+    validateProductRows(batch, product, family, variant, version, assets);
+  }
+}
+
 function validateBatches(state, families, variants, orders, versions, assets) {
   assertUniqueIds(state.batches, "Batch", 160);
   ensureUnique(state.batches.map((batch) => batch.number.toLocaleLowerCase()), "Batch number");
@@ -333,58 +466,17 @@ function validateBatches(state, families, variants, orders, versions, assets) {
       validateHistoricalBatch(state, batch, assets);
       continue;
     }
-    assert(batch.kind === undefined || batch.kind === "operational", `Batch ${batch.number} has an unsupported kind.`);
-    assert(!Object.hasOwn(batch, "historyInspectionId"), `Operational batch ${batch.number} cannot reference historical inspection evidence.`);
-    validateBatchAttachments(batch, assets);
-    const order = orders.get(batch.orderId);
-    assert(order, `Batch ${batch.number} refers to an unknown purchase order.`);
-    const line = order.lines.find((candidate) => candidate.id === batch.lineId);
-    assert(line, `Batch ${batch.number} refers to a line outside its purchase order.`);
-    const variant = variants.get(batch.variantId);
-    assert(variant && line.variantId === variant.id, `Batch ${batch.number} variant does not match its purchase order line.`);
-    const family = families.get(batch.familyId);
-    assert(family && family.id === variant.familyId, `Batch ${batch.number} family does not match its product variant.`);
-    const version = versions.get(batch.versionId);
-    assert(version && version.familyId === family.id && ["recorded", "published", "superseded"].includes(version.status), `Batch ${batch.number} must reference a recorded, published, or superseded version in its family.`);
-    requirePositiveInteger(batch.quantity, "Batch quantity");
-    const factory = normalizeFactory(batch.factory);
-    const stage = normalizeStage(batch.stage);
-    assert(factory && factory === batch.factory, `Batch ${batch.number} factory is not normalized.`);
-    assert(stage && stage === batch.stage, `Batch ${batch.number} stage is not normalized.`);
-    if (factory === "AP" && stage === "IQC") fail("AP IQC batches are not supported.");
-    assertText(batch.lotNumber, "Physical lot number", { maxLength: 160 });
-    assert(typeof batch.countForPO === "boolean", "PO-counting flag must be boolean.");
-    if (batch.countForPO) assert(stage === "OQC", "Only OQC batches may count toward PO released quantity.");
-    assertText(batch.versionLabel, "Locked version label", { maxLength: 160 });
-    assert(batch.versionLabel === version.label, `Batch ${batch.number} version label does not match its immutable inspection version.`);
-    requireDate(batch.date, "Batch date");
-    assertText(batch.recorder, "Recorder", { maxLength: 200, allowBlank: true });
-    assertText(batch.notes, "Batch notes", { maxLength: 5000, allowBlank: true });
-    assert(["draft", "released"].includes(batch.status), `Batch ${batch.number} has an invalid status.`);
-    requireTimestamp(batch.createdAt, "Batch created time");
-    assert(Array.isArray(batch.rows) && batch.rows.length > 0, `Batch ${batch.number} must contain applicable inspection rows.`);
-    assertUniqueIds(batch.rows, `Inspection row in batch ${batch.number}`);
-    normalizeStandardItems(batch.rows, family, () => fail("A locked inspection row is missing an ID."), batch.rows);
-    const readiness = getBatchVersionReadiness(version, factory, stage, variant.model);
-    assert(readiness.ready, `Batch ${batch.number} uses incomplete inspection standards. ${readiness.message}`);
-    const projectedVersion = { ...version, items: getBatchVersionItems(version) };
-    const applicableSourceItems = selectApplicableItems(projectedVersion, factory, stage, variant.model);
-    const sourceItems = normalizeStandardItems(applicableSourceItems, family, () => fail("A projected inspection standard is incomplete."), applicableSourceItems);
-    assert(sourceItems.length === batch.rows.length, `Batch ${batch.number} rows do not match its published version applicability.`);
-    const standardFields = ["id", "key", "no", "title", "titleZh", "specification", "specificationZh", "devices", "factory", "stage", "models", "samplingPercent", "recordingRule", "important", "timeSeconds", "procedureUrl"];
-    for (let index = 0; index < sourceItems.length; index += 1) {
-      const expected = Object.fromEntries(standardFields.map((field) => [field, sourceItems[index][field]]));
-      const actual = Object.fromEntries(standardFields.map((field) => [field, batch.rows[index][field]]));
-      assert(stableStringify(actual) === stableStringify(expected), `Batch ${batch.number} locked standard row ${index + 1} differs from its published version.`);
+    if (Object.hasOwn(batch, "products")) {
+      validateProductBatch(state, batch, families, variants, orders, versions, assets, lots);
+    } else {
+      validateLegacyBatch(state, batch, families, variants, orders, versions, assets, lots);
     }
-    for (const row of batch.rows) validateBatchRow(row, batch, family, variant, assets);
     if (batch.status === "draft") assert(batch.releasedAt === null, `Draft batch ${batch.number} cannot have a release time.`);
     else {
       requireTimestamp(batch.releasedAt, "Batch release time");
       assert(batch.recorder.trim(), `Released batch ${batch.number} must have a recorder.`);
       assert(batch.rows.every((row) => row.savedAt !== null && row.defectiveQty !== null), `Released batch ${batch.number} must have all rows saved.`);
       assert(!state.issues.some((issue) => issue.batchId === batch.id && issue.status === "open"), `Released batch ${batch.number} cannot have open linked issues.`);
-      if (batch.countForPO) lots.push(`${batch.variantId}|${batch.lotNumber.toLocaleLowerCase()}`);
     }
   }
   ensureUnique(lots, "Released counting batch physical lot and variant");
@@ -456,19 +548,61 @@ function validateIssues(state, batches, variants, assets) {
       assert(batch.kind !== "historical", `Issue ${issue.number} cannot be linked to a historical batch.`);
       assert(issue.sourceSnapshot && issue.sourceSnapshot.batchId === batch.id && issue.sourceSnapshot.batchNumber === batch.number, `Issue ${issue.number} has an invalid batch source snapshot.`);
       const source = issue.sourceSnapshot;
-      const line = state.orders.find((order) => order.id === batch.orderId)?.lines.find((candidate) => candidate.id === batch.lineId);
-      const variant = variants.get(batch.variantId);
-      assert(source.orderId === batch.orderId && source.lineId === batch.lineId && source.variantId === batch.variantId, `Issue ${issue.number} source snapshot references the wrong order, line, or variant.`);
-      assert(source.variantLabel === variant.label, `Issue ${issue.number} source snapshot has an invalid variant label.`);
+      const products = getBatchProducts(batch);
+      const expectedProducts = products.map((product) => ({
+        lineId: product.lineId,
+        variantId: product.variantId,
+        variantLabel: variants.get(product.variantId)?.label ?? null,
+        versionId: product.versionId,
+        versionLabel: product.versionLabel,
+        quantity: product.quantity,
+      }));
+      assert(source.orderId === batch.orderId, `Issue ${issue.number} source snapshot references the wrong order.`);
       assert(source.factory === batch.factory && source.stage === batch.stage, `Issue ${issue.number} source snapshot has an invalid factory or stage.`);
-      assert(source.versionId === batch.versionId && source.versionLabel === batch.versionLabel, `Issue ${issue.number} source snapshot has an invalid design version.`);
       requireDate(source.date, "Issue source batch date");
-      assert(line && line.variantId === source.variantId, `Issue ${issue.number} source line does not match its variant.`);
+      if (Array.isArray(source.products)) {
+        assert(stableStringify(source.products) === stableStringify(expectedProducts),
+          `Issue ${issue.number} source snapshot changed its locked product allocations or versions.`);
+        const single = expectedProducts.length === 1 ? expectedProducts[0] : null;
+        const singleFamilyId = products.length === 1 ? products[0].familyId : null;
+        for (const [field, expected] of Object.entries({
+          lineId: single?.lineId ?? null,
+          variantId: single?.variantId ?? null,
+          variantLabel: single?.variantLabel ?? null,
+          familyId: singleFamilyId,
+          versionId: single?.versionId ?? null,
+          versionLabel: single?.versionLabel ?? null,
+        })) {
+          const detail = field === "versionId" || field === "versionLabel"
+            ? "invalid design version product projection"
+            : `invalid ${field} product projection`;
+          assert(source[field] === expected, `Issue ${issue.number} source snapshot has an ${detail}.`);
+        }
+      } else {
+        assert(!Array.isArray(batch.products), `Issue ${issue.number} must preserve product allocation snapshots.`);
+        const legacyProduct = expectedProducts[0];
+        const line = state.orders.find((order) => order.id === batch.orderId)?.lines.find((candidate) => candidate.id === batch.lineId);
+        const variant = variants.get(batch.variantId);
+        assert(products.length === 1 && source.lineId === batch.lineId && source.variantId === batch.variantId,
+          `Issue ${issue.number} source snapshot references the wrong order line or variant.`);
+        assert(source.variantLabel === variant?.label && source.versionId === legacyProduct.versionId && source.versionLabel === legacyProduct.versionLabel,
+          `Issue ${issue.number} source snapshot has an invalid variant or design version.`);
+        assert(line && line.variantId === source.variantId, `Issue ${issue.number} source line does not match its variant.`);
+      }
       if (issue.rowId === null) assert(issue.sourceSnapshot.row === null, `Batch-level issue ${issue.number} cannot contain an inspection row snapshot.`);
       else {
         const row = batch.rows.find((candidate) => candidate.id === issue.rowId);
+        const rowProduct = row ? getBatchRowProduct(batch, row) : null;
+        const rowVariant = rowProduct ? variants.get(rowProduct.variantId) : null;
         const sourceRow = issue.sourceSnapshot.row;
         assert(row && sourceRow && sourceRow.id === row.id, `Issue ${issue.number} has an invalid inspection row link.`);
+        if (sourceRow.productLineId !== undefined || Array.isArray(batch.products)) {
+          assert(rowProduct && sourceRow.productLineId === rowProduct.lineId &&
+            sourceRow.variantId === rowProduct.variantId && sourceRow.variantLabel === rowVariant?.label &&
+            sourceRow.familyId === rowProduct.familyId && sourceRow.versionId === rowProduct.versionId &&
+            sourceRow.versionLabel === rowProduct.versionLabel && sourceRow.productQuantity === rowProduct.quantity,
+          `Issue ${issue.number} source row snapshot has an invalid product or design version.`);
+        }
         for (const field of ["key", "no", "title", "titleZh", "specification", "specificationZh", "inspectedQty"]) {
           assert(sourceRow[field] === row[field], `Issue ${issue.number} source snapshot changed locked row field ${field}.`);
         }
@@ -488,7 +622,6 @@ function validateIssues(state, batches, variants, assets) {
           assert(asset && asset.kind === "photo" && asset.batchId === issue.batchId && asset.rowId === issue.rowId, `Issue ${issue.number} references missing or out-of-scope photo evidence.`);
         }
       }
-      assert(issue.sourceSnapshot.variantId === variant.id && issue.sourceSnapshot.variantLabel === variant.label, `Issue ${issue.number} has an invalid variant snapshot.`);
     }
   }
   ensureUnique(rowKeys, "Linked issue per batch inspection row");

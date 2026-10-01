@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createMemoryQCAdapter } from "../storage/memory-qc-adapter.js";
 import { createQCService } from "../core/qc-service.js";
+import { validateQCState } from "../core/qc-validation.js";
 import {
   ASSET_TOTAL_MAX_BYTES,
   BACKUP_MAX_BYTES,
@@ -42,6 +43,12 @@ function makeHarness() {
       const current = await service.getState();
       return service.command(type, data, revision ?? current.revision);
     },
+    async mutateStoredState(mutator) {
+      return base.transact((state) => {
+        mutator(state);
+        return { state, result: {} };
+      });
+    },
   };
 }
 
@@ -73,20 +80,21 @@ async function createBatch(harness, options = {}) {
   let order = options.order;
   let line = options.line;
   if (!order || !line) ({ order, line } = await createOrder(harness, variant, { number: options.orderNumber || `PO-${state.revision + 1}` }));
-  const result = await harness.command("createBatch", {
+  const command = {
     number: options.number || `B-${state.batches.length + 1}`,
     orderId: order.id,
     lineId: line.id,
     quantity: options.quantity ?? 423,
     factory: options.factory ?? "奥途莱 AP",
     stage: options.stage ?? "OQC",
-    lotNumber: options.lotNumber || `LOT-${state.batches.length + 1}`,
-    countForPO: options.countForPO ?? true,
     versionId: options.useDefaultVersion ? undefined : version.id,
     date: options.date || DATE,
     recorder: options.recorder ?? "Inspector",
     notes: options.notes ?? "",
-  });
+  };
+  if (options.lotNumber) command.lotNumber = options.lotNumber;
+  if (Object.hasOwn(options, "countForPO")) command.countForPO = options.countForPO;
+  const result = await harness.command("createBatch", command);
   return { id: result.entityId, order, line, variant, version };
 }
 
@@ -282,13 +290,14 @@ test("released operational batch attachments are immutable", async () => {
   assert.equal(afterRejectedChanges.assets.length, beforeRelease.assets.length);
 });
 
-test("release validates every row, deduplicates physical lots, and ignores non-counting batches", async () => {
+test("release validates every row, deduplicates physical lots, and counts OQC batches regardless of legacy input flags", async () => {
   const harness = makeHarness();
   await harness.service.initialize();
   await publishAPReferences(harness);
   const state = await harness.state();
   const variant = state.variants.find((item) => item.model === "S15" && item.color === "Red");
   const first = await createBatch(harness, { variant, number: "B-LOT-1", quantity: 25, lotNumber: "PHYS-1" });
+  assert.equal((await harness.state()).batches.find((batch) => batch.id === first.id).countForPO, true);
   await assert.rejects(harness.command("releaseBatch", { id: first.id }), /Save all .* inspection rows/i);
   await saveAllRows(harness, first.id);
   await harness.command("releaseBatch", { id: first.id });
@@ -297,13 +306,80 @@ test("release validates every row, deduplicates physical lots, and ignores non-c
   await saveAllRows(harness, duplicateLot.id);
   await assert.rejects(harness.command("releaseBatch", { id: duplicateLot.id }), /already counted/i);
   const secondOrder = await createOrder(harness, variant, { number: "PO-NONCOUNT" });
-  const nonCounting = await createBatch(harness, {
-    variant, order: secondOrder.order, line: secondOrder.line, number: "B-NONCOUNT", quantity: 5, lotNumber: "PHYS-1", countForPO: false,
+  const legacyOptOut = await createBatch(harness, {
+    variant, order: secondOrder.order, line: secondOrder.line, number: "B-LEGACY-OPTOUT", quantity: 5, countForPO: false,
   });
-  await saveAllRows(harness, nonCounting.id);
-  await harness.command("releaseBatch", { id: nonCounting.id });
+  assert.equal((await harness.state()).batches.find((batch) => batch.id === legacyOptOut.id).countForPO, true);
+  await saveAllRows(harness, legacyOptOut.id);
+  await harness.command("releaseBatch", { id: legacyOptOut.id });
   const progress = await harness.service.getPurchaseOrderProgress(secondOrder.order.id);
-  assert.equal(progress.lines[0].releasedQty, 0);
+  assert.equal(progress.lines[0].releasedQty, 5);
+  assert.deepEqual(progress.lines[0].batches.map((batch) => batch.id), [legacyOptOut.id]);
+});
+
+test("IQC remains excluded while saved legacy OQC false flags stay unchanged and readable", async () => {
+  const harness = makeHarness();
+  await harness.service.initialize();
+  const versions = await publishAPReferences(harness);
+  const s15Version = versions.find((version) => version.familyId === "s15");
+  const iqcVersionResult = await harness.command("createVersion", {
+    familyId: "s15",
+    label: "Factory B incoming check",
+    sequence: 2,
+    effectiveDate: DATE,
+    notes: "",
+    items: [{
+      ...s15Version.items[0],
+      id: "factory-b-iqc-s15",
+      key: "factory-b-incoming-check",
+      no: 1,
+      factory: "Factory B",
+      stage: "IQC",
+      models: ["S15"],
+    }],
+  });
+  await harness.command("publishVersion", { id: iqcVersionResult.entityId });
+  const state = await harness.state();
+  const variant = state.variants.find((item) => item.model === "S15" && item.color === "Red");
+  const iqcOrder = await createOrder(harness, variant, { number: "PO-IQC-NO-COUNT" });
+  const iqcVersion = state.versions.find((version) => version.id === iqcVersionResult.entityId);
+  const iqcBatch = await createBatch(harness, {
+    variant,
+    order: iqcOrder.order,
+    line: iqcOrder.line,
+    version: iqcVersion,
+    number: "B-IQC-NO-COUNT",
+    quantity: 12,
+    factory: "Factory B",
+    stage: "IQC",
+    countForPO: true,
+  });
+  assert.equal((await harness.state()).batches.find((batch) => batch.id === iqcBatch.id).countForPO, false);
+  await saveAllRows(harness, iqcBatch.id);
+  await harness.command("releaseBatch", { id: iqcBatch.id });
+  assert.equal((await harness.service.getPurchaseOrderProgress(iqcOrder.order.id)).lines[0].releasedQty, 0);
+
+  const legacyOrder = await createOrder(harness, variant, { number: "PO-LEGACY-FALSE" });
+  const legacyBatch = await createBatch(harness, {
+    variant,
+    order: legacyOrder.order,
+    line: legacyOrder.line,
+    version: s15Version,
+    number: "B-LEGACY-FALSE",
+    quantity: 19,
+  });
+  await harness.mutateStoredState((stored) => {
+    stored.batches.find((batch) => batch.id === legacyBatch.id).countForPO = false;
+  });
+  const savedState = await harness.state();
+  assert.equal(savedState.batches.find((batch) => batch.id === legacyBatch.id).countForPO, false);
+  validateQCState(savedState);
+  const backup = await harness.service.exportBackup();
+  assert.equal(backup.state.batches.find((batch) => batch.id === legacyBatch.id).countForPO, false);
+  await saveAllRows(harness, legacyBatch.id);
+  await harness.command("releaseBatch", { id: legacyBatch.id });
+  assert.equal((await harness.state()).batches.find((batch) => batch.id === legacyBatch.id).countForPO, false);
+  assert.equal((await harness.service.getPurchaseOrderProgress(legacyOrder.order.id)).lines[0].releasedQty, 0);
 });
 
 test("purchase order progress keeps variants separate and reports shortage and overdelivery", async () => {

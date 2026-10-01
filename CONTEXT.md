@@ -43,11 +43,11 @@ _Avoid_: Inspection record
 The IQC or OQC context used with the factory to identify the applicable inspection items.
 
 **Batch (批次)**:
-The business object for a batch inspection. Newly entered batches lock a design version and applicable inspection standards at creation. Historical batches preserve the version, standards, and results recorded in the original inspection, including unknown order or variant links. Both appear in the same Batches workspace.
+The business object for a batch inspection. A newly entered batch belongs to one purchase order and contains one or more products with separate quantities. Each product locks its design version and applicable inspection standards at creation. Historical batches preserve the version, standards, and results recorded in the original inspection, including unknown order or variant links. Both appear in the same Batches workspace.
 
 **Batch attachment (批次附件)**:
 An optional document associated with a batch, such as its original inspection PDF. The attachment is supporting evidence, not the batch itself. One source document may support several batches, and a batch entered directly in the system need not have a PDF.
 
 **Inspection record (检测记录)**:
-The recorded inspection facts for an inspection item in a particular batch. Records for the same item in different batches are separate facts.
+The recorded inspection facts for an inspection item and product in a particular batch. Records for different products or batches are separate facts, even when they use the same standard item.
 _Avoid_: Inspection standard, inspection item

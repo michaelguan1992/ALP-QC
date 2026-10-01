@@ -41,7 +41,7 @@ See [User Guide](docs/user-guide.md) for the complete workflow and [Local App Ac
 - Batches lock applicable standards and calculate inspection quantities automatically.
 - Each inspection row owns its photographs. Issues preserve a source snapshot and keep discussion separate from formal disposition.
 - Manual issue closure requires an owner, disposition, and three entered confirmation names. These names are not authenticated signatures.
-- Only explicitly released, eligible full-batch quantities count toward the selected PO line.
+- Every new OQC batch counts each product's full quantity toward its PO line after explicit release; IQC and historical records do not contribute.
 - Backup exports contain records and attachments. Restore validates the entire backup and rejects conflicting records without partial import.
 - Batches includes imported historical inspections and newly entered batches. Optional batch attachments retain original PDFs; historical quantities, printed versions, and missing-check provenance stay intact without inventing release or PO accounting. See [Original PDF Import](docs/pdf-import.md).
 

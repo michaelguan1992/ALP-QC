@@ -138,7 +138,6 @@ test("new batches lock current archived defaults, explicit old archives, and the
     factory: "奥途莱 AP",
     stage: "OQC",
     lotNumber: "LOT-S11-DEFAULT-ARCHIVE",
-    countForPO: false,
     date: "2026-09-29",
     recorder: "Inspector",
   });
@@ -159,7 +158,6 @@ test("new batches lock current archived defaults, explicit old archives, and the
     factory: "AP",
     stage: "OQC",
     lotNumber: "LOT-S11-OLD-ARCHIVE",
-    countForPO: false,
     versionId: oldVersion.id,
     date: "2026-09-29",
     recorder: "Inspector",
@@ -179,7 +177,6 @@ test("new batches lock current archived defaults, explicit old archives, and the
     factory: "AP",
     stage: "OQC",
     lotNumber: "LOT-S15-ARCHIVE",
-    countForPO: false,
     date: "2026-09-29",
     recorder: "Inspector",
   });
@@ -229,7 +226,6 @@ test("an unknown archived sampling ratio blocks batch creation instead of becomi
     factory: "AP",
     stage: "OQC",
     lotNumber: "LOT-UNKNOWN-SAMPLING",
-    countForPO: false,
     versionId: version.id,
     date: "2026-09-29",
     recorder: "Inspector",

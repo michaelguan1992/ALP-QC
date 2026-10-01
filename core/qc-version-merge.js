@@ -9,6 +9,7 @@ import {
   requireTimestamp,
 } from "./qc-domain.js";
 import { normalizeStandardItems } from "./qc-standards.js";
+import { getBatchProducts } from "./qc-batch-products.js";
 
 export const AP_VERSION_MERGE_PAIRS = Object.freeze([
   Object.freeze({
@@ -66,10 +67,13 @@ function findEvidence(state, pair) {
 }
 
 function assertNoLockedReferences(state, pair) {
-  if (state.batches?.some((batch) => batch.versionId === pair.id)) {
+  if (state.batches?.some((batch) => batch.versionId === pair.id ||
+    getBatchProducts(batch).some((product) => product.versionId === pair.id))) {
     fail(`Version ${pair.id} is locked by a batch and cannot be merged.`);
   }
-  if (state.issues?.some((issue) => issue.versionId === pair.id || issue.sourceSnapshot?.versionId === pair.id)) {
+  if (state.issues?.some((issue) => issue.versionId === pair.id || issue.sourceSnapshot?.versionId === pair.id ||
+    issue.sourceSnapshot?.products?.some((product) => product.versionId === pair.id) ||
+    issue.sourceSnapshot?.row?.versionId === pair.id)) {
     fail(`Version ${pair.id} is referenced by an issue and cannot be merged.`);
   }
 }

@@ -1,11 +1,11 @@
 import {
+  ensureUnique,
   fail,
   factoryKey,
   makeId,
   normalizeFactory,
   normalizeStage,
   requireArray,
-  requireBoolean,
   requireDate,
   requireNonNegativeInteger,
   requirePositiveInteger,
@@ -13,6 +13,7 @@ import {
 } from "./qc-domain.js";
 import { normalizeStandardItems, selectApplicableItems } from "./qc-standards.js";
 import { getBatchVersionItems, getBatchVersionReadiness, getBatchVersions } from "./qc-batch-versions.js";
+import { getBatchProducts, getBatchRowProduct } from "./qc-batch-products.js";
 import { resolveBatchDisplayNumbers } from "./qc-batch-display.js";
 
 export function requireBatch(state, batchId) {
@@ -35,41 +36,27 @@ export function batchReleaseBlockers(state, batch) {
   if (!batch.recorder.trim()) blockers.push("Enter the recorder before release.");
   const openIssues = state.issues.filter((issue) => issue.batchId === batch.id && issue.status === "open");
   if (openIssues.length) blockers.push(`Close all linked issues before release; ${openIssues.length} remain open.`);
-  if (batch.countForPO) {
-    const duplicate = state.batches.find((candidate) => candidate.id !== batch.id && candidate.variantId === batch.variantId && candidate.lotNumber.toLocaleLowerCase() === batch.lotNumber.toLocaleLowerCase() && candidate.status === "released" && candidate.countForPO);
+  if (batch.countForPO && typeof batch.lotNumber === "string" && batch.lotNumber.trim()) {
+    const lotKey = batch.lotNumber.trim().toLocaleLowerCase();
+    const variants = new Set(getBatchProducts(batch).map((product) => product.variantId));
+    const duplicate = state.batches.find((candidate) => candidate.id !== batch.id &&
+      candidate.status === "released" && candidate.countForPO === true &&
+      typeof candidate.lotNumber === "string" && candidate.lotNumber.trim().toLocaleLowerCase() === lotKey &&
+      getBatchProducts(candidate).some((product) => variants.has(product.variantId)));
     if (duplicate) blockers.push(`Lot ${batch.lotNumber} is already counted in released batch ${duplicate.number}.`);
   }
   return blockers;
 }
 
-export function createBatch(state, data, context) {
-  const number = requireString(data.number, "Batch number", { maxLength: 160 });
-  if (state.batches.some((batch) => batch.number.toLocaleLowerCase() === number.toLocaleLowerCase())) fail("Batch number must be unique.");
-  const order = state.orders.find((candidate) => candidate.id === data.orderId);
-  if (!order) fail("Choose an available purchase order.");
-  const line = order.lines.find((candidate) => candidate.id === data.lineId);
-  if (!line) fail("Choose a purchase order line from the selected order.");
-  const variant = state.variants.find((candidate) => candidate.id === line.variantId);
-  if (!variant) fail("The selected purchase order line has no available product variant.");
-  if (!variant.active) fail("Reactivate the product variant before creating a new batch.");
-  const family = state.families.find((candidate) => candidate.id === variant.familyId);
-  const quantity = requirePositiveInteger(data.quantity, "Batch quantity");
-  const factory = normalizeFactory(data.factory);
-  if (!factory) fail("Factory is required.");
-  const stage = normalizeStage(data.stage);
-  if (!stage) fail("Inspection stage must be IQC or OQC.");
-  if (factory === "AP" && stage === "IQC") fail("AP batches are OQC only; AP IQC batches cannot be created.");
-  const lotNumber = requireString(data.lotNumber, "Physical lot number", { maxLength: 160 });
-  const countForPO = requireBoolean(data.countForPO, "Final-shipment PO counting flag");
-  if (countForPO && stage !== "OQC") fail("Only OQC batches can count released quantity toward a purchase order.");
-
+function selectProductVersion(state, family, variant, factory, stage, requestedVersionId) {
   const familyVersions = getBatchVersions(state, family.id);
   let version;
-  if (data.versionId == null || String(data.versionId).trim() === "") {
+  if (requestedVersionId == null || String(requestedVersionId).trim() === "") {
     version = familyVersions[0];
     if (!version) fail(`No recorded or published design version is available for ${family.name}.`);
   } else {
-    version = familyVersions.find((candidate) => candidate.id === data.versionId);
+    const versionId = requireString(String(requestedVersionId), "Design version ID", { maxLength: 120 });
+    version = familyVersions.find((candidate) => candidate.id === versionId);
     if (!version) fail("Choose a recorded, published, or superseded design version from the selected product family.");
   }
   const readiness = getBatchVersionReadiness(version, factory, stage, variant.model);
@@ -77,32 +64,118 @@ export function createBatch(state, data, context) {
   const projectedVersion = { ...version, items: getBatchVersionItems(version) };
   const applicableItems = selectApplicableItems(projectedVersion, factory, stage, variant.model);
   if (!applicableItems.length) fail(`Version ${version.label} has no ${factory} ${stage} standards applicable to ${variant.model}.`);
-  const lockedItems = normalizeStandardItems(applicableItems, family, context.idFactory, applicableItems);
+  return { version, applicableItems };
+}
+
+function uniqueInspectionRowId(idFactory, usedIds) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const id = makeId(idFactory);
+    if (!usedIds.has(id)) {
+      usedIds.add(id);
+      return id;
+    }
+  }
+  fail("The ID generator could not create unique inspection row IDs.");
+}
+
+export function createBatch(state, data, context) {
+  const number = requireString(data.number, "Batch number", { maxLength: 160 });
+  if (state.batches.some((batch) => batch.number.toLocaleLowerCase() === number.toLocaleLowerCase())) fail("Batch number must be unique.");
+  const order = state.orders.find((candidate) => candidate.id === data.orderId);
+  if (!order) fail("Choose an available purchase order.");
+  const multiProduct = Object.hasOwn(data, "products");
+  const productInputs = multiProduct
+    ? requireArray(data.products, "Batch products")
+    : [{ lineId: data.lineId, quantity: data.quantity, versionId: data.versionId }];
+  if (productInputs.length === 0) fail("Add at least one product from the selected purchase order.");
+  if (productInputs.length > 500) fail("A batch cannot contain more than 500 purchase order lines.");
+
+  const factory = normalizeFactory(data.factory);
+  if (!factory) fail("Factory is required.");
+  const stage = normalizeStage(data.stage);
+  if (!stage) fail("Inspection stage must be IQC or OQC.");
+  if (factory === "AP" && stage === "IQC") fail("AP batches are OQC only; AP IQC batches cannot be created.");
+  const countForPO = stage === "OQC";
+
+  const usedLineIds = new Set();
+  const products = [];
+  let quantity = 0;
+  for (const [index, input] of productInputs.entries()) {
+    const label = `Batch product ${index + 1}`;
+    if (!input || typeof input !== "object" || Array.isArray(input)) fail(`${label} must be an object.`);
+    const lineId = requireString(input.lineId, `${label} purchase order line ID`, { maxLength: 120 });
+    if (usedLineIds.has(lineId)) fail("Each purchase order line can appear only once in a batch.");
+    usedLineIds.add(lineId);
+    const line = order.lines.find((candidate) => candidate.id === lineId);
+    if (!line) fail("Choose purchase order lines from the selected order.");
+    const variant = state.variants.find((candidate) => candidate.id === line.variantId);
+    if (!variant) fail("A selected purchase order line has no available product variant.");
+    if (!variant.active) fail("Reactivate every selected product variant before creating a new batch.");
+    const family = state.families.find((candidate) => candidate.id === variant.familyId);
+    if (!family) fail("A selected product variant has no available inspection family.");
+    const productQuantity = requirePositiveInteger(input.quantity, `${label} quantity`);
+    quantity += productQuantity;
+    if (!Number.isSafeInteger(quantity)) fail("The total batch quantity must be a safe whole number.");
+    const { version, applicableItems } = selectProductVersion(state, family, variant, factory, stage, input.versionId);
+    const lockedItems = normalizeStandardItems(applicableItems, family, context.idFactory, applicableItems);
+    products.push({
+      lineId: line.id,
+      variantId: variant.id,
+      familyId: family.id,
+      quantity: productQuantity,
+      versionId: version.id,
+      versionLabel: version.label,
+      variant,
+      family,
+      version,
+      lockedItems,
+    });
+  }
+  ensureUnique(products.map((product) => product.lineId), "Purchase order lines in a batch");
+
+  let legacyLotNumber = null;
+  if (!multiProduct && data.lotNumber != null && !(typeof data.lotNumber === "string" && data.lotNumber.trim() === "")) {
+    legacyLotNumber = requireString(data.lotNumber, "Physical lot number", { maxLength: 160 });
+  }
+  const productRecords = products.map(({ lineId, variantId, familyId, quantity: productQuantity, versionId, versionLabel }) => ({
+    lineId,
+    variantId,
+    familyId,
+    quantity: productQuantity,
+    versionId,
+    versionLabel,
+  }));
+  const firstProduct = productRecords.length === 1 ? productRecords[0] : null;
 
   const id = makeId(context.idFactory);
-  const rows = lockedItems.map((item) => ({
+  const usedRowIds = new Set();
+  const rows = products.flatMap((product) => product.lockedItems.map((item) => ({
     ...structuredClone(item),
-    inspectedQty: Math.ceil(quantity * item.samplingPercent / 100),
+    ...(multiProduct ? {
+      id: uniqueInspectionRowId(context.idFactory, usedRowIds),
+      sourceItemId: item.id,
+      productLineId: product.lineId,
+    } : {}),
+    inspectedQty: Math.ceil(product.quantity * item.samplingPercent / 100),
     defectiveQty: null,
     remarks: "",
     savedAt: null,
     photoIds: [],
-  }));
-  state.batches.push({
+  })));
+  const batch = {
     id,
     kind: "operational",
     number,
     orderId: order.id,
-    lineId: line.id,
-    variantId: variant.id,
-    familyId: family.id,
+    lineId: firstProduct?.lineId ?? null,
+    variantId: firstProduct?.variantId ?? null,
+    familyId: firstProduct?.familyId ?? null,
     quantity,
     factory,
     stage,
-    lotNumber,
     countForPO,
-    versionId: version.id,
-    versionLabel: version.label,
+    versionId: firstProduct?.versionId ?? null,
+    versionLabel: firstProduct?.versionLabel ?? null,
     date: requireDate(data.date, "Batch date"),
     recorder: requireString(data.recorder ?? "", "Recorder", { maxLength: 200, allowBlank: true }),
     notes: requireString(data.notes ?? "", "Batch notes", { maxLength: 5000, allowBlank: true }),
@@ -111,8 +184,14 @@ export function createBatch(state, data, context) {
     attachmentIds: [],
     createdAt: context.now(),
     releasedAt: null,
-  });
-  return { entityId: id, action: "createBatch", summary: `Created draft batch ${number} using locked version ${version.label}.` };
+  };
+  if (multiProduct) batch.products = productRecords;
+  else if (legacyLotNumber !== null) batch.lotNumber = legacyLotNumber;
+  state.batches.push(batch);
+  const versionSummary = firstProduct
+    ? ` using locked version ${firstProduct.versionLabel}`
+    : ` across ${productRecords.length} product lines and their locked versions`;
+  return { entityId: id, action: "createBatch", summary: `Created draft batch ${number}${versionSummary}.` };
 }
 
 export function saveBatchDetails(state, data) {
@@ -163,6 +242,15 @@ export function getBatchWorkspace(state, batchId) {
   const version = state.versions.find((candidate) => candidate.id === batch.versionId);
   const order = state.orders.find((candidate) => candidate.id === batch.orderId);
   const historical = batch.kind === "historical";
+  const products = getBatchProducts(batch).map((product) => ({
+    ...product,
+    variant: state.variants.some((candidate) => candidate.id === product.variantId)
+      ? structuredClone(state.variants.find((candidate) => candidate.id === product.variantId))
+      : null,
+    version: state.versions.some((candidate) => candidate.id === product.versionId)
+      ? structuredClone(state.versions.find((candidate) => candidate.id === product.versionId))
+      : null,
+  }));
   const rows = batch.rows.map((row) => {
     if (historical) {
       return {
@@ -172,26 +260,33 @@ export function getBatchWorkspace(state, batchId) {
         history: [],
       };
     }
+    const product = getBatchRowProduct(batch, row);
+    const rowVariant = product ? state.variants.find((candidate) => candidate.id === product.variantId) : null;
     const rate = row.defectiveQty == null || row.inspectedQty === 0
       ? null
       : Number(((row.defectiveQty / row.inspectedQty) * 100).toFixed(2));
     const photos = row.photoIds.map((assetId) => state.assets.find((asset) => asset.id === assetId)).filter(Boolean).map((asset) => structuredClone(asset));
     const issues = state.issues.filter((issue) => issue.batchId === batch.id && issue.rowId === row.id).map((issue) => structuredClone(issue));
     const history = state.batches
-      .filter((candidate) => candidate.id !== batch.id && candidate.variantId === batch.variantId &&
+      .filter((candidate) => candidate.id !== batch.id && candidate.kind !== "historical" &&
         factoryKey(candidate.factory) === factoryKey(batch.factory) && candidate.stage === batch.stage &&
         (candidate.date < batch.date || (candidate.date === batch.date && candidate.createdAt < batch.createdAt)))
       .flatMap((candidate) => {
-        const historicalRow = candidate.rows.find((candidateRow) => candidateRow.key === row.key && candidateRow.savedAt !== null && candidateRow.defectiveQty !== null);
+        const historicalRow = candidate.rows.find((candidateRow) => {
+          const candidateProduct = getBatchRowProduct(candidate, candidateRow);
+          return candidateProduct?.variantId === product?.variantId && candidateRow.key === row.key &&
+            candidateRow.savedAt !== null && candidateRow.defectiveQty !== null;
+        });
         if (!historicalRow) return [];
         const rate = historicalRow.inspectedQty === 0
           ? null
           : Number(((historicalRow.defectiveQty / historicalRow.inspectedQty) * 100).toFixed(2));
+        const historicalProduct = getBatchRowProduct(candidate, historicalRow);
         return [{
           batchId: candidate.id,
           batchNumber: candidate.number,
           date: candidate.date,
-          versionLabel: candidate.versionLabel,
+          versionLabel: historicalProduct?.versionLabel ?? null,
           inspectedQty: historicalRow.inspectedQty,
           defectiveQty: historicalRow.defectiveQty,
           rate,
@@ -202,6 +297,12 @@ export function getBatchWorkspace(state, batchId) {
       .slice(0, 4);
     return {
       ...structuredClone(row),
+      productLineId: product?.lineId ?? row.productLineId ?? null,
+      variantId: product?.variantId ?? null,
+      productLabel: rowVariant?.label ?? null,
+      productQuantity: product?.quantity ?? null,
+      versionId: product?.versionId ?? null,
+      versionLabel: product?.versionLabel ?? null,
       defectiveRate: rate,
       photos,
       issues,
@@ -225,6 +326,7 @@ export function getBatchWorkspace(state, batchId) {
     variant: variant ? structuredClone(variant) : null,
     version: version ? structuredClone(version) : null,
     order: order ? structuredClone(order) : null,
+    products,
     rows,
     attachments,
     releaseBlockers: batch.status === "released" && !historical ? [] : batchReleaseBlockers(state, batch),

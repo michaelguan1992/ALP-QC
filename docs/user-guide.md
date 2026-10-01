@@ -18,13 +18,13 @@ Each recorded, draft, published, or superseded version card places its attachmen
 
 ## Order and inspect
 
-Create a purchase order with one line per separately tracked product variant. Create a batch from an order line, set its quantity and physical lot number, choose factory/stage, and use the latest eligible version or choose an older recorded, published, or superseded version. Enter the inspection date and recorder. A batch contains one variant for one order line.
+Create a purchase order with one line per separately tracked product variant. Select a PO, add one or more products from its lines, and enter each product's quantity. Choose the shared factory/stage and each product's version, defaulting to the latest eligible version. Enter the batch number, date, and recorder. There is no physical-lot field, final-shipment selection, or batch reinspection workflow.
 
 The batch captures its applicable standards and sample quantities when created. Later version changes do not alter it. Sample quantities round up to whole units. Fill defective quantities and remarks in the familiar inspection table, save each row, and attach evidence separately to each row. Green identifies important checks, not successful results.
 
 Raise an issue from an inspection row to preserve its source facts and evidence references. Issues can also be entered independently, with optional batch association. Record discussion separately from formal disposition. Enter the disposition owner and three manual confirmation names, save, and explicitly close the issue. Names are staff-entered confirmations, not authenticated digital signatures.
 
-Release remains a separate action. Complete every row, provide the recorder, and close linked issues before release. Released records are read-only. Only eligible final-shipment releases contribute to the order, using batch quantity rather than inspected sample quantity. Separate variants show separate shortages and excess quantities.
+Release remains a separate action. Complete every row, provide the recorder, and close linked issues before release. Released records are read-only. Every new OQC batch contributes each product's full quantity to its PO line after release. IQC and historical records do not contribute; inspection sample quantities are not fulfillment quantities. Previously saved counting choices remain unchanged. Separate variants show separate shortages and excess quantities.
 
 ## Batch reports and documents
 
@@ -34,7 +34,7 @@ The library stores local documents and can associate them with a design version.
 
 ## Historical batches and attachments
 
-Use **Batches** for both imported inspections and newly entered batches. Filter by family, factory, or stage, or search for the batch you need. Open an imported record to see its original quantities, defects, notes, printed version, and source page. The **Attachments** column and batch detail provide its original PDF, including signatures, photographs, and the complete layout.
+Use **Batches** for both imported inspections and newly entered batches. Filter by family, factory, or stage, or search for the batch you need. Open an imported record to see its original quantities, defects, notes, printed version, and distinct printed dates. The **Attachments** column and batch detail provide its original PDF, including signatures, photographs, and the complete layout.
 
 Batch names show product/model or family, date, factory, and stage, for example `S15-20260521-UI-OQC`. An explicitly recorded original batch number takes priority when available. Only matching names receive short suffixes such as `-01` and `-02`. Original-PDF provenance and source page numbers appear in the attachment/source details; imported batches have no separate Historical status label. Operational Draft/Released status remains available in batch detail. The same names appear in batch reports and CSV exports.
 

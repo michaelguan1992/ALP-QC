@@ -14,6 +14,7 @@ import {
   timestampLabel
 } from "./qc-ops-common.js";
 import { closeDialog, showDialog } from "./qc-ui.js";
+import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
 
 const issueDrafts = new Map();
 
@@ -30,6 +31,46 @@ function batchById(state) {
 
 function variantById(state) {
   return new Map(list(state.variants).map((variant) => [variant.id, variant]));
+}
+
+function issueProducts(issue, state) {
+  const snapshot = sourceSnapshot(issue);
+  const batchSnapshot = snapshot.batch || {};
+  const currentBatch = batchById(state).get(issue.batchId || batchSnapshot.id);
+  const rawProducts = list(snapshot.products).length
+    ? list(snapshot.products)
+    : getBatchProducts(batchSnapshot).length
+      ? getBatchProducts(batchSnapshot)
+      : getBatchProducts(currentBatch || {});
+  const variants = variantById(state);
+  return rawProducts.map((product) => ({
+    ...product,
+    variant: product.variant || variants.get(product.variantId) || null,
+  }));
+}
+
+function issueProductLabel(product, state) {
+  const variant = product?.variant || variantById(state).get(product?.variantId);
+  return text(product?.variantLabel || product?.productLabel || product?.label || variant?.label, product?.variantId || "Product");
+}
+
+function productSummary(products, state) {
+  return products.map((product) => {
+    const quantityLabel = product.quantity === null || product.quantity === undefined ? "quantity unknown" : `${quantity(product.quantity)} units`;
+    const version = product.version?.label || product.versionLabel;
+    return `${issueProductLabel(product, state)} · ${quantityLabel}${version ? ` · Version ${version}` : ""}`;
+  }).join("; ");
+}
+
+function issueRowProduct(issue, state) {
+  const snapshot = sourceSnapshot(issue);
+  const row = snapshot.row || (sourceRow(issue) ? snapshot : null);
+  if (!row) return null;
+  const batchSnapshot = snapshot.batch || batchById(state).get(issue.batchId) || {};
+  const linked = getBatchRowProduct(batchSnapshot, row) || {};
+  const products = issueProducts(issue, state);
+  const matched = products.find((product) => product.lineId === (row.productLineId || linked.lineId));
+  return { ...linked, ...matched, ...row };
 }
 
 function sourceSnapshot(issue) {
@@ -50,7 +91,13 @@ function sourceRow(issue) {
 
 function sourceText(issue, state) {
   const row = sourceRow(issue);
+  const products = issueProducts(issue, state);
+  const rowProduct = issueRowProduct(issue, state);
   const parts = [sourceBatch(issue, state)];
+  if (rowProduct?.variantLabel || rowProduct?.productLabel || rowProduct?.productLineId || rowProduct?.variantId) {
+    parts.push(`Inspection product: ${text(rowProduct.variantLabel || rowProduct.productLabel, issueProductLabel(rowProduct, state))}`);
+  }
+  if (products.length) parts.push(productSummary(products, state));
   if (row) parts.push(text(row.title || row.titleZh || row.no || row.id));
   return parts.join(" · ");
 }
@@ -96,14 +143,20 @@ function sourceCard(issue, state) {
   const batch = snapshot.batch || {};
   const sourceTitle = row?.title || snapshot.title || "Standalone issue";
   const sourceTitleZh = row?.titleZh;
+  const products = issueProducts(issue, state);
+  const rowProduct = issueRowProduct(issue, state);
+  const rowProductName = rowProduct ? text(row?.variantLabel || row?.productLabel || rowProduct.variantLabel, issueProductLabel(rowProduct, state)) : "";
+  const rowProductQuantity = row?.productQuantity ?? rowProduct?.productQuantity ?? rowProduct?.quantity;
+  const rowVersion = row?.versionLabel || rowProduct?.versionLabel || rowProduct?.version?.label;
   const metadata = [
     `Batch: ${text(snapshot.batchNumber || batch.number || batch.batchNumber, "Standalone")}`,
-    `Variant: ${text(snapshot.variantLabel || batch.variantLabel)}`,
+    rowProduct ? `Inspection product: ${rowProductName} · ${rowProductQuantity === null || rowProductQuantity === undefined ? "quantity unknown" : `${quantity(rowProductQuantity)} units`}${rowVersion ? ` · Version ${rowVersion}` : ""}` : "",
+    products.length ? `Products in batch: ${productSummary(products, state)}` : `Product: ${text(snapshot.variantLabel || batch.variantLabel)}`,
     `Factory / stage: ${text(snapshot.factory || batch.factory)} · ${text(snapshot.stage || batch.stage)}`,
     `Batch date: ${dateLabel(snapshot.date || batch.date)}`,
-    `Version: ${text(snapshot.versionLabel || batch.versionLabel)}`,
+    products.length ? "" : `Version: ${text(snapshot.versionLabel || batch.versionLabel)}`,
     row ? `Inspection row: ${text(row.no || row.id)}` : "No inspection row linked"
-  ];
+  ].filter(Boolean);
   const facts = [
     ["Inspection quantity", row?.inspectedQty],
     ["Defective quantity", row?.defectiveQty],
@@ -250,14 +303,11 @@ function openIssueDialog(issue, state, ctx) {
       ...confirmationInputs.map((input, index) => field(`Confirmation ${index + 1}`, input))
     ),
     el("section", { className: "qc-ops-discussion" },
-      el("div", {}, el("h3", {}, "Discussion"), el("p", {}, "Discussion entries are stored separately from the formal disposition.")),
+      el("h3", {}, "Discussion"),
       discussionList,
       field("New discussion entry", discussionText),
       discussionButton
     ),
-    el("p", { className: "qc-ops-closure-help" }, readOnly
-      ? `Issue closed ${issue.closedAt ? timestampLabel(issue.closedAt) : ""}. The source snapshot and disposition are read-only.`
-      : "Saving the disposition does not close the issue. After saving, explicitly close it when the owner and all three names are present."),
     formError,
     el("div", { className: "qc-ops-dialog-actions" }, button("Done", () => closeDialog(), "button button-secondary"), saveButton, closeButton)
   );
@@ -270,8 +320,9 @@ function openNewIssueDialog(state, ctx) {
   const titleInput = el("input", { type: "text", required: true, maxLength: "180", name: "title", placeholder: "Describe the issue" });
   const editableBatches = list(state.batches).filter((batch) => batch.kind !== "historical" && batch.status !== "released");
   const batchSelect = el("select", { name: "batchId" }, el("option", { value: "" }, "No batch link"), ...editableBatches.map((batch) => {
-    const variant = variantById(state).get(batch.variantId);
-    return el("option", { value: batch.id }, `${text(batch.number)} · ${text(variant?.label)} · ${text(batch.factory)} ${text(batch.stage)}`);
+    const products = getBatchProducts(batch).map((product) => ({ ...product, variant: variantById(state).get(product.variantId) }));
+    const summary = products.length ? productSummary(products, state) : text(variantById(state).get(batch.variantId)?.label, batch.variantId);
+    return el("option", { value: batch.id }, `${text(batch.number)} · ${summary} · ${text(batch.factory)} ${text(batch.stage)}`);
   }));
   const rowSelect = el("select", { name: "rowId", disabled: true }, el("option", { value: "" }, "No inspection row"));
   const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
@@ -280,7 +331,15 @@ function openNewIssueDialog(state, ctx) {
     const batch = list(state.batches).find((entry) => entry.id === batchSelect.value);
     const rows = list(batch?.rows);
     rowSelect.disabled = !batch || !rows.length;
-    rowSelect.replaceChildren(el("option", { value: "" }, "No inspection row"), ...rows.map((row) => el("option", { value: row.id }, `${text(row.no)} · ${text(row.title)}${row.titleZh ? ` · ${row.titleZh}` : ""}`)));
+    rowSelect.replaceChildren(el("option", { value: "" }, "No inspection row"), ...rows.map((row) => {
+      const product = getBatchRowProduct(batch, row) || {};
+      const label = text(row.productLabel, issueProductLabel(product, state));
+      const productQty = row.productQuantity ?? product.quantity;
+      const productContext = row.productLineId || product.lineId
+        ? `${label} · ${productQty === null || productQty === undefined ? "quantity unknown" : `${quantity(productQty)} units`} · `
+        : "";
+      return el("option", { value: row.id }, `${productContext}${text(row.no)} · ${text(row.title)}${row.titleZh ? ` · ${row.titleZh}` : ""}`);
+    }));
   };
   batchSelect.addEventListener("change", updateRows);
   const submit = el("button", { type: "submit", className: "button button-primary" }, "Create issue");
@@ -305,9 +364,6 @@ function openNewIssueDialog(state, ctx) {
     field("Issue title", titleInput),
     field("Related batch (optional)", batchSelect),
     field("Inspection row (optional)", rowSelect),
-    el("p", { className: "qc-ops-hint" }, editableBatches.length
-      ? "An inspection row creates an immutable snapshot of its saved standard, result, remarks, and row photos. Released batches are read-only and cannot receive new issues."
-      : "An inspection row creates an immutable snapshot of its saved standard, result, remarks, and row photos. There are no editable batches to link; you can still create a standalone issue."),
     formError,
     el("div", { className: "qc-ops-dialog-actions" }, button("Cancel", () => closeDialog(), "button button-secondary"), submit)
   );
@@ -357,7 +413,6 @@ function renderIssueListPage(root, ctx) {
   const sections = [];
   if (!issues.length) sections.push(el("section", { className: "card qc-ops-empty-card" },
     el("h2", {}, "No issues recorded"),
-    el("p", {}, "Create a standalone issue or link one to a batch and a saved inspection row."),
     create
   ));
   else sections.push(el("section", { className: "card qc-ops-list-card" }, filters, el("div", { className: "qc-ops-table-scroll" }, table)));

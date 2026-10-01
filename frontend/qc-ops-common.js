@@ -53,9 +53,9 @@ export function labeledControl(labelText, control, hint = "") {
   return wrapper;
 }
 
-export function pageHeading(title, description, actions = []) {
+export function pageHeading(title, _description, actions = []) {
   return el("header", { className: "page-heading qc-ops-heading" },
-    el("div", {}, el("h1", {}, title), description ? el("p", {}, description) : null),
+    el("div", {}, el("h1", {}, title)),
     actions.length ? el("div", { className: "qc-ops-heading-actions" }, ...actions) : null
   );
 }

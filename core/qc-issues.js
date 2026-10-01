@@ -5,6 +5,7 @@ import {
   requireRecord,
   requireString,
 } from "./qc-domain.js";
+import { getBatchProducts, getBatchRowProduct } from "./qc-batch-products.js";
 import { requireBatch, requireEditableBatch } from "./qc-inspections.js";
 
 function makeIssueNumber(id) {
@@ -18,21 +19,45 @@ function rowRate(row) {
     : Number(((row.defectiveQty / row.inspectedQty) * 100).toFixed(2));
 }
 
-function makeSourceSnapshot(batch, variant, row = null) {
+function makeSourceSnapshot(state, batch, row = null, rowProduct = null) {
+  const products = getBatchProducts(batch).map((product) => {
+    const variant = state.variants.find((candidate) => candidate.id === product.variantId);
+    return {
+      lineId: product.lineId,
+      variantId: product.variantId,
+      variantLabel: variant?.label ?? null,
+      versionId: product.versionId,
+      versionLabel: product.versionLabel,
+      quantity: product.quantity,
+    };
+  });
+  const product = products.length === 1 ? products[0] : null;
+  const rowVariant = rowProduct
+    ? state.variants.find((candidate) => candidate.id === rowProduct.variantId)
+    : null;
   return {
     batchId: batch.id,
     batchNumber: batch.number,
     orderId: batch.orderId,
-    lineId: batch.lineId,
-    variantId: batch.variantId,
-    variantLabel: variant.label,
+    lineId: product?.lineId ?? null,
+    variantId: product?.variantId ?? null,
+    variantLabel: product?.variantLabel ?? null,
+    familyId: products.length === 1 ? getBatchProducts(batch)[0]?.familyId ?? null : null,
     factory: batch.factory,
     stage: batch.stage,
     date: batch.date,
-    versionId: batch.versionId,
-    versionLabel: batch.versionLabel,
+    versionId: product?.versionId ?? null,
+    versionLabel: product?.versionLabel ?? null,
+    products,
     row: row ? {
       id: row.id,
+      productLineId: rowProduct?.lineId ?? null,
+      variantId: rowProduct?.variantId ?? null,
+      variantLabel: rowVariant?.label ?? null,
+      familyId: rowProduct?.familyId ?? null,
+      versionId: rowProduct?.versionId ?? null,
+      versionLabel: rowProduct?.versionLabel ?? null,
+      productQuantity: rowProduct?.quantity ?? null,
       key: row.key,
       no: row.no,
       title: row.title,
@@ -54,7 +79,7 @@ export function createIssue(state, data, context) {
   const title = requireString(input.title, "Issue title", { maxLength: 300 });
   let batch = null;
   let row = null;
-  let variant = null;
+  let rowProduct = null;
   let batchId = null;
   let rowId = null;
   let sourceSnapshot = null;
@@ -63,18 +88,19 @@ export function createIssue(state, data, context) {
     batch = requireBatch(state, input.batchId);
     requireEditableBatch(batch);
     batchId = batch.id;
-    variant = state.variants.find((candidate) => candidate.id === batch.variantId);
     if (input.rowId != null && String(input.rowId).trim() !== "") {
       rowId = requireString(input.rowId, "Inspection row ID", { maxLength: 120 });
       row = batch.rows.find((candidate) => candidate.id === rowId);
       if (!row) fail("That inspection row is not part of the selected batch.");
+      rowProduct = getBatchRowProduct(batch, row);
+      if (!rowProduct) fail("That inspection row has no locked product allocation.");
       if (row.savedAt === null) fail("Save the inspection row before creating an issue from it.");
       const existing = state.issues.find((issue) => issue.batchId === batchId && issue.rowId === rowId);
       if (existing) return { entityId: existing.id, changed: false, action: "createIssue", summary: `Issue ${existing.number} already exists for this inspection row.` };
     } else if (input.rowId != null) {
       fail("An inspection row cannot be linked without a batch.");
     }
-    sourceSnapshot = makeSourceSnapshot(batch, variant, row);
+    sourceSnapshot = makeSourceSnapshot(state, batch, row, rowProduct);
   } else if (input.rowId != null && String(input.rowId).trim() !== "") {
     fail("An inspection row cannot be linked without a batch.");
   }

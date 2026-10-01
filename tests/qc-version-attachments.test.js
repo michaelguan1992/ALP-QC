@@ -111,7 +111,6 @@ test("batch-referenced version assets are unlinked, retained, and restorable", a
     factory: "奥途莱 AP",
     stage: "OQC",
     lotNumber: "LOT-VERSION-ATTACHMENT",
-    countForPO: true,
     versionId: version.id,
     date: DATE,
     recorder: "Inspector",

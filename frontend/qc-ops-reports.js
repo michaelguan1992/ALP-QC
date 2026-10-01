@@ -3,6 +3,7 @@ import {
 } from "./qc-ops-common.js";
 import { downloadFile, notify } from "./qc-ui.js";
 import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
+import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
 
 const h = el;
 
@@ -75,14 +76,53 @@ function lookupOrderLine(order, batch) {
   return list(order?.lines).find((line) => line.id === batch.lineId) ?? null;
 }
 
-function makeReadOnlyTable(workspace) {
+function reportProducts(workspace, state) {
+  if (isHistoricalBatch(workspace.batch)) return [];
+  const products = Array.isArray(workspace.products) && workspace.products.length
+    ? workspace.products
+    : getBatchProducts(workspace.batch).map((product) => ({
+      ...product,
+      variant: list(state.variants).find((variant) => variant.id === product.variantId) || null,
+      version: list(state.versions).find((version) => version.id === product.versionId) || null,
+    }));
+  return products;
+}
+
+function productLabel(product, state) {
+  const variant = product?.variant || list(state.variants).find((entry) => entry.id === product?.variantId);
+  return text(product?.variantLabel || product?.productLabel || variant?.label, product?.variantId || "Product");
+}
+
+function allProductsSummary(products, state, order = null) {
+  return products.map((product) => {
+    const line = list(order?.lines).find((entry) => entry.id === product.lineId);
+    return `${productLabel(product, state)} · ${quantity(product.quantity)} units · Version ${text(product.version?.label || product.versionLabel)}${line ? ` · ${quantity(line.orderedQty)} ordered` : ""}`;
+  }).join("; ");
+}
+
+function totalBatchQuantity(workspace, state) {
+  if (isHistoricalBatch(workspace.batch)) return workspace.batch.quantity;
+  const products = reportProducts(workspace, state);
+  return products.length ? products.reduce((sum, product) => sum + Number(product.quantity || 0), 0) : workspace.batch.quantity;
+}
+
+function rowProduct(workspace, row, state) {
+  const batch = workspace.batch;
+  const linked = getBatchRowProduct(batch, row) || {};
+  const product = reportProducts(workspace, state).find((entry) => entry.lineId === (row.productLineId || linked.lineId));
+  return { ...linked, ...product, ...linked };
+}
+
+function makeReadOnlyTable(workspace, state) {
   const historical = isHistoricalBatch(workspace.batch);
-  const table = h("table", { className: "qc-ops-inspection-table qc-ops-report-table" });
-  const widths = ["34px", "100px", "185px", "80px", "60px", "76px", "55px", "55px", "52px", "52px", "52px", "52px", "52px", "44px", "64px", "165px", "128px"];
+  const multipleProducts = !historical && reportProducts(workspace, state).length > 1;
+  const table = h("table", { className: `qc-ops-inspection-table qc-ops-report-table${multipleProducts ? " qc-ops-mixed-product-table" : ""}` });
+  const widths = ["34px", ...(multipleProducts ? ["118px"] : []), "100px", "185px", "80px", "60px", "76px", "55px", "55px", "52px", "52px", "52px", "52px", "52px", "44px", "64px", "165px", "128px"];
   const colgroup = h("colgroup", {}, widths.map((width) => h("col", { style: { width } })));
   const thead = h("thead", {},
     h("tr", { className: "qc-ops-group-head" },
       h("th", { rowSpan: "2", scope: "col" }, "No.", h("br"), h("span", { lang: "zh" }, "序号")),
+      multipleProducts ? h("th", { rowSpan: "2", scope: "col" }, "Product / qty", h("br"), h("span", { lang: "zh" }, "产品 / 数量")) : null,
       h("th", { rowSpan: "2", scope: "col" }, "QC task", h("br"), h("span", { lang: "zh" }, "检验项目")),
       h("th", { rowSpan: "2", scope: "col" }, "Specifications / inspection points", h("br"), h("span", { lang: "zh" }, "规格尺寸 / 检验要点")),
       h("th", { rowSpan: "2", scope: "col" }, "Devices / methods", h("br"), h("span", { lang: "zh" }, "检测仪器 / 方法")),
@@ -105,6 +145,13 @@ function makeReadOnlyTable(workspace) {
   const body = h("tbody", { className: "qc-ops-table-body" }, list(workspace.rows).map((row, index) => {
     const tr = h("tr", { className: `${row.important === true ? "qc-ops-important-row" : ""}${historical && row.status === "missing-from-source" ? " qc-ops-historical-missing-row" : ""}`.trim() });
     tr.append(h("td", { className: "qc-ops-no" }, text(row.no, String(index + 1))));
+    if (multipleProducts) {
+      const product = rowProduct(workspace, row, state);
+      tr.append(h("td", { className: "qc-ops-product-context" },
+        h("strong", {}, text(row.productLabel || productLabel(product, state))),
+        h("small", {}, `${quantity(row.productQuantity ?? product.quantity)} units`),
+      ));
+    }
     const title = h("th", { scope: "row", className: "qc-ops-task" });
     displayTitle(title, row.title, row.titleZh);
     if (historical && row.status === "missing-from-source") {
@@ -171,24 +218,32 @@ function reportMetadata(workspace, state) {
   const historical = isHistoricalBatch(batch);
   const inspection = historical ? sourceInspection(batch, state) : null;
   const order = workspace.order || lookupOrder(state, batch);
-  const line = lookupOrderLine(order, batch);
   const variant = workspace.variant || lookupVariant(state, batch);
+  const products = reportProducts(workspace, state);
   const openIssues = list(state.issues).filter((issue) => issue.batchId === batch.id && issue.status === "open").length;
   const fields = [
     ["Batch number 批次编号", workspace.displayNumber ?? batch.number],
-    [historical ? "Product / model 产品型号" : "Product variant 产品规格", batchProductLabel(batch, variant)],
+    ...(historical ? [["Product / model 产品型号", batchProductLabel(batch, variant)]] : []),
     ["Purchase order 采购订单", order?.number],
-    ["Ordered quantity 订单数量", line?.orderedQty === undefined ? "—" : quantity(line.orderedQty)],
     ["Inspection stage 检验阶段", batchInspection(batch.stage, batch.factory)],
-    ["Batch quantity 批次数量", historical ? sourceText(batch.quantity) : quantity(batch.quantity)],
-    ["Physical lot number 实物批号", batch.lotNumber],
+    ["Total batch quantity 批次总数量", historical ? sourceText(batch.quantity) : quantity(totalBatchQuantity(workspace, state))],
     ["Batch date 批次日期", dateLabel(batch.date)],
     ["Recorded by 记录人员", historical ? inspection?.recorder : batch.recorder],
-    ["Design version 设计版本", workspace.version?.label || batch.versionLabel],
-    ["PO progress 采购订单进度", historical ? "Excluded · historical record" : batch.countForPO ? "Counts full quantity after release" : "Not counted"],
+    ...(historical ? [["Design version 设计版本", workspace.version?.label || batch.versionLabel]] : []),
+    ["PO progress 采购订单进度", historical ? "Excluded · historical record" : batch.countForPO ? "Counts each product quantity after release" : "Not counted"],
     ["Open linked issues 未关闭问题", openIssues],
   ];
-  return h("dl", { className: "qc-ops-report-meta" }, fields.flatMap(([label, value]) => [h("dt", {}, label), h("dd", {}, String(value ?? "—"))]));
+  const productDetails = products.length ? h("dl", { className: "qc-ops-report-products" },
+    h("dt", {}, "Products and locked versions 产品及锁定版本"),
+    h("dd", {}, h("ul", {}, products.map((product) => {
+      const line = list(order?.lines).find((entry) => entry.id === product.lineId);
+      return h("li", {}, h("strong", {}, productLabel(product, state)), ` · ${quantity(product.quantity)} units · Version ${text(product.version?.label || product.versionLabel)}`, line ? ` · ${quantity(line.orderedQty)} ordered` : "");
+    }))),
+  ) : null;
+  return h("div", { className: "qc-ops-report-metadata" },
+    h("dl", { className: "qc-ops-report-meta" }, fields.flatMap(([label, value]) => [h("dt", {}, label), h("dd", {}, String(value ?? "—"))])),
+    productDetails,
+  );
 }
 
 function exportRows(workspace, state) {
@@ -198,10 +253,14 @@ function exportRows(workspace, state) {
   const historical = isHistoricalBatch(batch);
   const order = workspace.order || lookupOrder(state, batch);
   const variant = workspace.variant || lookupVariant(state, batch);
-  const productLabel = batchProductLabel(batch, variant);
+  const products = reportProducts(workspace, state);
+  const productsSummary = historical
+    ? `${batchProductLabel(batch, variant)} · ${sourceText(batch.quantity)} units · Version ${text(workspace.version?.label || batch.versionLabel)}`
+    : allProductsSummary(products, state, order);
   const headers = [
-    "Batch number", "Batch date", "Status", "Product variant", "Purchase order", "Factory", "Stage", "Batch quantity", "Physical lot", "Design version",
-    "No.", "Inspection title", "检验项目", "Specification", "检验标准", "Devices", "Sampling percent", "Recording rule", "Inspected quantity", "Defective quantity", "Defective rate",
+    "Batch number", "Batch date", "Status", "Batch products summary", "Purchase order", "Factory", "Stage", "Total batch quantity", "PO progress",
+    "No.", "Product", "Product quantity", "PO line ordered quantity", "Design version",
+    "Inspection title", "检验项目", "Specification", "检验标准", "Devices", "Sampling percent", "Recording rule", "Inspected quantity", "Defective quantity", "Defective rate",
     "Prior 1", "Prior 2", "Prior 3", "Prior 4", "Time seconds", "Procedure URL", "Remarks", "Linked issues", "Photo file names",
   ];
   const rows = [csvRow(headers.map((value) => ({ value, textField: false })))];
@@ -214,9 +273,16 @@ function exportRows(workspace, state) {
     });
     const issues = list(row.issues).map((issue) => `${text(issue.number, "Issue")} (${text(issue.status)})`).join("; ");
     const photos = list(row.photos).map((photo) => photo.name).filter(Boolean).join("; ");
+    const linkedProduct = historical ? null : rowProduct(workspace, row, state);
+    const ownerProduct = products.find((product) => product.lineId === (row.productLineId || linkedProduct?.lineId)) || linkedProduct;
+    const ownerLabel = historical ? batchProductLabel(batch, variant) : text(row.productLabel, productLabel(ownerProduct || {}, state));
+    const ownerQuantity = historical ? batch.quantity : row.productQuantity ?? ownerProduct?.quantity;
+    const ownerVersion = historical ? workspace.version?.label || batch.versionLabel : row.versionLabel || ownerProduct?.version?.label || ownerProduct?.versionLabel;
+    const orderLine = ownerProduct ? list(order?.lines).find((line) => line.id === ownerProduct.lineId) : lookupOrderLine(order, batch);
     const values = [
-      [displayNumber, true], [batch.date, false], [historical ? "" : batch.status, false], [productLabel, true], [order?.number, true], [batch.factory, true], [batch.stage, true],
-      [batch.quantity, false], [batch.lotNumber, true], [batch.versionLabel, true], [row.no, true], [row.title, true], [row.titleZh, true],
+      [displayNumber, true], [batch.date, false], [historical ? "" : batch.status, false], [productsSummary, true], [order?.number, true], [batch.factory, true], [batch.stage, true],
+      [historical ? batch.quantity : totalBatchQuantity(workspace, state), false], [historical ? "Excluded · historical record" : batch.countForPO ? "Counts after release" : "Not counted", true],
+      [row.no, true], [ownerLabel, true], [ownerQuantity, false], [orderLine?.orderedQty, false], [ownerVersion, true], [row.title, true], [row.titleZh, true],
       [row.specification, true], [row.specificationZh, true], [row.devices, true], [row.samplingPercent, false], [row.recordingRule, true],
       [historical ? row.sourceInspectedQty : row.inspectedQty, false], [row.defectiveQty, false], [historical ? row.sourceDefectiveRate : row.defectiveRate === null || row.defectiveRate === undefined ? "" : percent(row.defectiveRate), false],
       ...priorValues.map((value) => [value, true]), [row.timeSeconds ?? "", false], [row.procedureUrl, true], [row.remarks, true], [issues, true], [photos, true],
@@ -253,8 +319,9 @@ async function renderReportDetail(root, ctx) {
   const historical = isHistoricalBatch(batch);
   const variant = workspace.variant || lookupVariant(state, batch);
   const order = workspace.order || lookupOrder(state, batch);
-  const productLabel = batchProductLabel(batch, variant);
-  const reportTitle = `${text(workspace.displayNumber ?? batch.number)} · ${text(productLabel)}`;
+  const productNames = historical ? [batchProductLabel(batch, variant)] : reportProducts(workspace, state).map((product) => productLabel(product, state));
+  const productsTitle = productNames.join(", ");
+  const reportTitle = `${text(workspace.displayNumber ?? batch.number)} · ${text(productsTitle)}`;
   const unsavedRows = historical ? 0 : list(workspace.rows).filter((row) => row.savedAt === null || row.defectiveQty === null).length;
   const scope = h("article", { className: "print-scope qc-ops-report" },
     h("header", { className: "qc-ops-report-document-heading" },
@@ -264,10 +331,10 @@ async function renderReportDetail(root, ctx) {
     ),
     reportMetadata(workspace, state),
     batch.notes ? h("section", { className: "qc-ops-report-notes" }, h("strong", {}, "Batch notes / 本批次备注"), h("p", {}, batch.notes)) : null,
-    unsavedRows ? h("p", { className: "qc-ops-report-unsaved-note" }, `${unsavedRows} inspection row${unsavedRows === 1 ? "" : "s"} have no saved result. Unsaved browser edits are not included in this report.`) : null,
+    unsavedRows ? h("p", { className: "qc-ops-report-unsaved-note" }, `${unsavedRows} inspection row${unsavedRows === 1 ? "" : "s"} are unsaved and omitted from this report.`) : null,
     h("section", { className: "qc-ops-report-table-section" },
-      h("div", { className: "qc-ops-section-heading" }, h("div", {}, h("h2", {}, "Batch inspection table"), h("p", {}, historical ? "Transcribed source results are preserved, including blank cells and printed defective rates." : "Saved results, historical rates, linked issues, and photos appear on the same inspection row."))),
-      makeReadOnlyTable(workspace),
+      h("div", { className: "qc-ops-section-heading" }, h("h2", {}, "Batch inspection table")),
+      makeReadOnlyTable(workspace, state),
     ),
   );
   const header = pageHeading("Batch report", historical ? "Read-only report of this batch and its source-recorded values." : "Read-only report of saved batch records and their row-specific evidence.", [
@@ -276,7 +343,7 @@ async function renderReportDetail(root, ctx) {
       try {
         const csv = exportRows(workspace, state);
         await downloadFile(`${safeFilename(workspace.displayNumber ?? batch.number, "qc-batch")}-report.csv`, csv, "text/csv;charset=utf-8");
-        notify("CSV report downloaded. Text cells are quoted and formula-neutralized.");
+        notify("CSV report downloaded.");
       } catch (error) {
         notify(error instanceof Error ? error.message : "The CSV report could not be downloaded.", true);
       }
