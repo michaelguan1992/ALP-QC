@@ -22,7 +22,7 @@ import {
   removeVersionAttachment,
   setRowAttachment,
 } from "./qc-assets.js";
-import { addDiscussion, closeIssue, createIssue, saveIssue } from "./qc-issues.js";
+import { addDiscussion, closeIssue, createIssue, deleteIssue, saveIssue } from "./qc-issues.js";
 import { autosaveInspection, createBatch, deleteBatch, getBatchWorkspace as readBatchWorkspace, releaseBatch, saveBatchDetails, saveInspection } from "./qc-inspections.js";
 import { createOrder, getPurchaseOrderProgress, saveOrder } from "./qc-purchasing.js";
 import { createVersion, cloneVersion, installAPReferences, publishVersion, saveVersion, supersedeOutdatedAPVersions } from "./qc-standards.js";
@@ -75,6 +75,7 @@ const COMMANDS = new Map([
   ["addBatchAttachment", addBatchAttachment],
   ["removeBatchAttachment", removeBatchAttachment],
   ["createIssue", createIssue],
+  ["deleteIssue", deleteIssue],
   ["addIssueAttachments", addIssueAttachments],
   ["removeIssueAttachment", removeIssueAttachment],
   ["saveIssue", saveIssue],

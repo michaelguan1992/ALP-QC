@@ -604,6 +604,10 @@ function validateIssues(state, batches, variants, assets) {
   for (const issue of state.issues) {
     assertText(issue.number, "Issue number", { maxLength: 120 });
     assertText(issue.title, "Issue title", { maxLength: 300 });
+    if (Object.hasOwn(issue, "reportedBy")) {
+      assertText(issue.reportedBy, "Reported by", { maxLength: 200 });
+      assert(issue.reportedBy === issue.reportedBy.trim(), `Issue ${issue.number} reporter name must be trimmed.`);
+    }
     if (Object.hasOwn(issue, "description")) assertText(issue.description, "Issue description", { maxLength: 10000, allowBlank: true });
     if (Object.hasOwn(issue, "requestId")) {
       assertText(issue.requestId, "Issue request ID", { maxLength: 120 });

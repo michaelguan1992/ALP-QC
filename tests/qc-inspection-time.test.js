@@ -110,6 +110,7 @@ test("saving inspection time requires a finite non-negative value and rejects in
   assert.equal(savedRow.timeSeconds, standardTime);
 
   const issueResult = await service.command("createIssue", {
+    reportedBy: "Inspector",
     title: "Measured-time evidence",
     batchId: batch.id,
     rowId: row.id,
@@ -285,7 +286,7 @@ test("inspection autosave persists partial rows, completes and clears results, a
   assert.equal(restoredPartial.actualTimeSeconds, null);
   assert.equal(restoredPartial.remarks, "Check this defect");
   assert.equal(restoredPartial.savedAt, null);
-  await assert.rejects(service.command("createIssue", { title: "Incomplete result", batchId: batch.id, rowId: row.id }, state.revision), /save the inspection row/i);
+  await assert.rejects(service.command("createIssue", { reportedBy: "Inspector", title: "Incomplete result", batchId: batch.id, rowId: row.id }, state.revision), /save the inspection row/i);
   await assert.rejects(service.command("releaseBatch", { id: batch.id }, state.revision), /Complete all .* inspection rows.*remain incomplete/i);
 
   const repeated = await service.command("autosaveInspection", partialPayload, state.revision);

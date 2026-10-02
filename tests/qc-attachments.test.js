@@ -142,6 +142,7 @@ test("multiple row Issues have request-key idempotency and atomic evidence uploa
   const { batchId, rowId } = await prepareBatch(service, "MULTI-ISSUE");
   await command(service, "addPhotos", { batchId, rowId, files: [{ name: "legacy-row.png", mimeType: "image/png", dataUrl: PNG_URL }] });
   const request = {
+    reportedBy: "Inspector",
     title: "Seal wear",
     description: "Visible marks around the seal.",
     requestId: "11111111-1111-4111-8111-111111111111",
@@ -154,6 +155,7 @@ test("multiple row Issues have request-key idempotency and atomic evidence uploa
   };
   const first = await command(service, "createIssue", request);
   const second = await command(service, "createIssue", {
+    reportedBy: "Inspector",
     title: "Separate review",
     description: "A second issue for the same inspection item.",
     requestId: "22222222-2222-4222-8222-222222222222",
@@ -189,6 +191,7 @@ test("multiple row Issues have request-key idempotency and atomic evidence uploa
   assert.ok(beforeRetry.revision < beforeRetryAfterDescriptionEdit.revision);
   assert.equal((await service.getState()).assets.filter((asset) => asset.kind === "issueAttachment" && asset.issueId === first.entityId).length, 3);
   await assert.rejects(command(service, "createIssue", { ...request, title: "Different payload" }), /request ID.*different/i);
+  await assert.rejects(command(service, "createIssue", { ...request, reportedBy: "Another inspector" }), /request ID.*different/i);
 
   const workspace = await service.getBatchWorkspace(batchId);
   const issues = workspace.rows.find((row) => row.id === rowId).issues;
@@ -203,6 +206,7 @@ test("multiple row Issues have request-key idempotency and atomic evidence uploa
 
   const beforeBadCreate = await service.getState();
   await assert.rejects(command(service, "createIssue", {
+    reportedBy: "Inspector",
     title: "Invalid evidence must not partially create",
     requestId: "33333333-3333-4333-8333-333333333333",
     batchId,
@@ -227,6 +231,7 @@ test("photo and general file limits accept the exact boundary and reject one byt
   const { batchId, rowId } = await prepareBatch(service, "BOUNDARY");
   const photo = fileDataUrl("image/png", PHOTO_MAX_BYTES);
   const photoResult = await command(service, "createIssue", {
+    reportedBy: "Inspector",
     title: "Maximum photo",
     requestId: "44444444-4444-4444-8444-444444444444",
     batchId,
@@ -286,6 +291,7 @@ test("attachments survive backup restore, SQLite reopen, and older field-omittin
     batchId, rowId, category: "procedures", file: { name: "procedure.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", dataUrl: "data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,eA==" },
   });
   const issue = await command(service, "createIssue", {
+    reportedBy: "Inspector",
     title: "Durable issue",
     description: "Stored with evidence.",
     requestId: "55555555-5555-4555-8555-555555555555",
@@ -348,20 +354,22 @@ test("new Issues require an uploaded photo for standalone and row-linked creatio
   await service.initialize();
   const emptyState = await service.getState();
   for (const payload of [
-    { title: "Empty standalone issue" },
-    { title: "Empty list standalone issue", files: [] },
-    { title: "General-file-only standalone issue", files: [{ name: "evidence.pdf", mimeType: "application/pdf", dataUrl: PDF_URL, category: "file" }] },
+    { reportedBy: "Inspector", title: "Empty standalone issue" },
+    { reportedBy: "Inspector", title: "Empty list standalone issue", files: [] },
+    { reportedBy: "Inspector", title: "General-file-only standalone issue", files: [{ name: "evidence.pdf", mimeType: "application/pdf", dataUrl: PDF_URL, category: "file" }] },
   ]) {
     await assert.rejects(command(service, "createIssue", payload), /at least one uploaded photo/i);
     assert.deepEqual(await service.getState(), emptyState);
   }
   await assert.rejects(command(service, "createIssue", {
+    reportedBy: "Inspector",
     title: "Invalid photo standalone issue",
     files: [{ name: "evidence.pdf", mimeType: "application/pdf", dataUrl: PDF_URL, category: "photo" }],
   }), /issue photos must be/i);
   assert.deepEqual(await service.getState(), emptyState);
 
   const standalone = await command(service, "createIssue", {
+    reportedBy: "Inspector",
     title: "Standalone issue with photo",
     files: [{ name: "standalone.png", mimeType: "image/png", dataUrl: PNG_URL }],
   });
@@ -375,6 +383,7 @@ test("new Issues require an uploaded photo for standalone and row-linked creatio
   });
   const beforeRowReject = await service.getState();
   await assert.rejects(command(service, "createIssue", {
+    reportedBy: "Inspector",
     title: "Legacy row photo is not an upload",
     requestId: "66666666-6666-4666-8666-666666666666",
     batchId,
@@ -384,6 +393,7 @@ test("new Issues require an uploaded photo for standalone and row-linked creatio
   assert.deepEqual(await service.getState(), beforeRowReject);
 
   const request = {
+    reportedBy: "Inspector",
     title: "Row issue with uploaded photo",
     requestId: "77777777-7777-4777-8777-777777777777",
     batchId,

@@ -188,7 +188,7 @@ test("history import preserves evidence in canonical batches without creating PO
   assert.equal(workspace.releaseBlockers.length, 1);
   await assert.rejects(service.command("releaseBatch", { id: batch.id }), /historical.*cannot be released/i);
   await assert.rejects(service.command("saveInspection", { batchId: batch.id, rowId: workspace.rows[0].id, defectiveQty: 0 }), /historical.*read-only/i);
-  await assert.rejects(service.command("createIssue", { title: "Historical issue", batchId: batch.id, rowId: workspace.rows[0].id }), /historical.*read-only/i);
+  await assert.rejects(service.command("createIssue", { reportedBy: "Inspector", title: "Historical issue", batchId: batch.id, rowId: workspace.rows[0].id }), /historical.*read-only/i);
 
   const s15 = state.variants.find((variant) => variant.model === "S15" && variant.color === "Red");
   const order = await service.command("createOrder", {

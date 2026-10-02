@@ -30,6 +30,8 @@
 .qc-ops-list-table th { color: var(--muted, #626a64); font-size: 10px; font-weight: 700; letter-spacing: .025em; text-transform: uppercase; }
 .qc-ops-list-table:not(.qc-ops-batch-list-table) tbody tr:hover,
 .qc-ops-batch-list-table tbody .qc-ops-batch-row:hover { background: var(--surface-soft, #f5f7f5); }
+.qc-ops-list-table tbody .qc-ops-issue-row { cursor: pointer; }
+.qc-ops-list-table tbody .qc-ops-issue-row:focus-visible { outline: 2px solid var(--green, #26735b); outline-offset: -2px; background: var(--surface-soft, #f5f7f5); }
 .qc-ops-batch-list-table tbody .qc-ops-batch-row { cursor: pointer; }
 .qc-ops-batch-list-table tbody .qc-ops-batch-row:focus-visible { outline: 2px solid var(--green, #26735b); outline-offset: -2px; background: var(--surface-soft, #f5f7f5); }
 .qc-ops-list-attachment { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; min-width: 0; padding: 2px 0; }
@@ -139,6 +141,10 @@
 .qc-ops-photo-preview p { margin: 8px 0 0; overflow-wrap: anywhere; color: var(--muted, #626a64); font-size: 12px; }
 .qc-ops-dialog-content { display: grid; gap: 12px; }
 .qc-ops-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.qc-ops-delete-confirmation { display: grid; gap: 8px; border: 1px solid #e6c6c1; border-radius: 9px; padding: 10px; background: #fff7f5; }
+.qc-ops-delete-confirmation[hidden] { display: none; }
+.qc-ops-delete-confirmation p { margin: 0; color: #752a22; font-size: 12px; }
+.qc-ops-delete-confirmation .button-row { justify-content: flex-end; }
 .qc-ops-form { display: grid; gap: 11px; }
 .qc-ops-form .field { min-width: 0; }
 .qc-ops-form input:not([type="checkbox"]), .qc-ops-form select, .qc-ops-form textarea, .qc-ops-derived-output { width: 100%; }
@@ -335,6 +341,7 @@
 .qc-ops-issue-attachment-actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .qc-ops-issue-attachment-list, .qc-ops-selected-issue-file-list { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .qc-ops-issue-attachment-list li, .qc-ops-selected-issue-file-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; border-top: 1px solid #e1e7e2; padding: 6px 0; }
+.qc-ops-issue-attachment-thumbnail { display: block; flex: 0 1 auto; width: auto; max-width: 240px; max-width: min(100%, 240px); max-height: 160px; border: 1px solid #bdc8bf; border-radius: 4px; object-fit: contain; background: white; }
 .qc-ops-issue-attachment-name, .qc-ops-selected-issue-file-list li > span { min-width: 0; flex: 1 1 100%; overflow-wrap: anywhere; color: #2f3b33; font-size: 11px; }
 .qc-ops-issue-attachment-list small, .qc-ops-selected-issue-file-list small { color: var(--muted, #626a64); font-size: 9px; }
 .qc-ops-issue-attachment-list .qc-ops-small-button, .qc-ops-selected-issue-file-list .qc-ops-small-button { padding: 2px 0; font-size: 10px; }

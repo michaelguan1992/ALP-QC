@@ -192,6 +192,7 @@ test("deleteBatch blocks linked issues, released batches, and historical source 
   }, issueState.revision);
   issueState = await issueService.getState();
   const issue = await issueService.command("createIssue", {
+    reportedBy: "Inspector",
     title: "Retained issue",
     batchId: batch.id,
     rowId: issueRow.id,

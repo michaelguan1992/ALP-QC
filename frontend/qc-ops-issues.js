@@ -186,11 +186,15 @@ function hasIssueDraft(issue, draft) {
 }
 
 function sourcePhotos(issue, state) {
-  const snapshot = sourceSnapshot(issue);
-  const row = snapshot.row || snapshot;
-  const photoIds = list(row.photoIds || snapshot.photoIds);
+  const photoIds = sourcePhotoIds(issue);
   const assets = new Map(list(state.assets).map((asset) => [asset.id, asset]));
   return photoIds.map((id) => assets.get(id)).filter(Boolean);
+}
+
+function sourcePhotoIds(issue) {
+  const snapshot = sourceSnapshot(issue);
+  const row = snapshot.row || snapshot;
+  return list(row.photoIds ?? snapshot.photoIds);
 }
 
 function issueAttachments(issue, state) {
@@ -216,7 +220,9 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
   let disabled = readOnly;
   let disposed = false;
   let previewCleanup = () => {};
+  let pendingOperationError = null;
   const startOperation = (work) => {
+    pendingOperationError = null;
     const operation = Promise.resolve().then(work);
     pendingOperations.add(operation);
     operation.then(
@@ -230,7 +236,7 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
     : runCommand(ctx, type, data, options);
   const flushPending = async () => {
     while (pendingOperations.size) await Promise.allSettled([...pendingOperations]);
-    return true;
+    return !pendingOperationError;
   };
   const clearPreview = () => {
     previewCleanup();
@@ -277,7 +283,10 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
       }));
       if (disposed) return;
       const response = await issueCommand("addIssueAttachments", { id: issue.id, files }, { render: false });
-      if (!response.ok) return;
+      if (!response.ok) {
+        pendingOperationError = response.error || new Error("The issue evidence could not be saved.");
+        return;
+      }
       input.value = "";
       const latestState = response.state || state;
       const latestIssue = list(latestState.issues).find((entry) => entry.id === issue.id) || issue;
@@ -285,6 +294,7 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
       render(latestIssue, latestState);
       markDraftForPreservation();
     } catch (error) {
+      pendingOperationError = error;
       notify(errorText(error, "Could not read the selected file."), true);
     }
   };
@@ -297,13 +307,17 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
     markDraftForPreservation();
     try {
       const response = await issueCommand("removeIssueAttachment", { id: issue.id, assetId: asset.id }, { render: false });
-      if (!response.ok) return;
+      if (!response.ok) {
+        pendingOperationError = response.error || new Error("The issue attachment could not be removed.");
+        return;
+      }
       const latestState = response.state || state;
       const latestIssue = list(latestState.issues).find((entry) => entry.id === issue.id) || issue;
       onIssueUpdated?.(latestIssue, latestState);
       render(latestIssue, latestState);
       markDraftForPreservation();
     } catch (error) {
+      pendingOperationError = error;
       notify(errorText(error, "Could not remove the attachment."), true);
     }
   };
@@ -313,18 +327,33 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
     const attachments = issueAttachments(currentIssue, currentState);
     const listHost = attachments.length
       ? el("ul", { className: "qc-ops-issue-attachment-list" }, ...attachments.map((asset) => {
+        const category = asset.category || issueAttachmentCategory(asset.mimeType);
+        const assetName = text(asset.name, "Attachment");
+        const thumbnail = category === "photo" && asset.dataUrl
+          ? el("img", {
+            className: "qc-ops-issue-attachment-thumbnail",
+            src: asset.dataUrl,
+            alt: assetName,
+            title: assetName,
+            loading: "lazy",
+          })
+          : null;
         const preview = attachmentCanPreview(asset)
           ? button("Preview", () => showInlinePreview(asset), "button-quiet qc-ops-small-button")
           : null;
-        const category = asset.category || issueAttachmentCategory(asset.mimeType);
+        if (preview) preview.setAttribute("aria-label", `Preview ${assetName}`);
+        const download = attachmentDownload(asset);
+        download.setAttribute("aria-label", `Download ${assetName}`);
         const remove = button("Remove", () => { void startOperation(() => removeAttachment(asset)); }, "button-quiet qc-ops-attachment-remove");
+        remove.setAttribute("aria-label", `Remove ${assetName} from this issue`);
         remove.disabled = disabled;
         removeButtons.add(remove);
         return el("li", {},
-          el("span", { className: "qc-ops-issue-attachment-name", title: text(asset.name) }, text(asset.name, "Attachment")),
+          thumbnail,
+          el("span", { className: "qc-ops-issue-attachment-name", title: assetName }, assetName),
           el("small", {}, category === "photo" ? "Photo" : "File"),
           preview,
-          attachmentDownload(asset),
+          download,
           remove,
         );
       }))
@@ -370,6 +399,7 @@ function sourceCard(issue, state) {
   const rowProductQuantity = row?.productQuantity ?? rowProduct?.productQuantity ?? rowProduct?.quantity;
   const rowVersion = row?.versionLabel || rowProduct?.versionLabel || rowProduct?.version?.label;
   const metadata = [
+    Object.hasOwn(issue, "reportedBy") ? `Reported by: ${text(issue.reportedBy)}` : "",
     `Batch: ${text(snapshot.batchNumber || batch.number || batch.batchNumber, "Standalone")}`,
     rowProduct ? `Inspection product: ${rowProductName} · ${rowProductQuantity === null || rowProductQuantity === undefined ? "quantity unknown" : `${quantity(rowProductQuantity)} units`}${rowVersion ? ` · Version ${rowVersion}` : ""}` : "",
     products.length ? `Products in batch: ${productSummary(products, state)}` : `Product: ${text(snapshot.variantLabel || batch.variantLabel)}`,
@@ -384,14 +414,20 @@ function sourceCard(issue, state) {
     ["Defective rate", row?.defectiveRate === null || row?.defectiveRate === undefined ? "—" : `${Number(row.defectiveRate).toFixed(2)}%`],
     ["Inspection saved", row?.savedAt ? timestampLabel(row.savedAt) : "Not saved at issue creation"]
   ];
+  const sourceIds = sourcePhotoIds(issue);
   const evidence = sourcePhotos(issue, state);
-  const evidenceBlock = el("div", { className: "qc-ops-issue-evidence" },
-    el("strong", {}, `Source photos (${evidence.length})`),
-    evidence.length ? el("div", { className: "qc-ops-issue-evidence-list" }, ...evidence.map((asset) => el("figure", {},
-      el("img", { src: asset.dataUrl, alt: asset.name || "Issue source photo" }),
-      el("figcaption", {}, text(asset.name, "Inspection photo"))
-    ))) : el("p", {}, row?.photoIds?.length ? "Some source photos are unavailable in this browser snapshot." : "No row photos were attached when this issue was created.")
-  );
+  const evidenceBlock = sourceIds.length || evidence.length
+    ? el("div", { className: "qc-ops-issue-evidence" },
+      el("strong", {}, "Source photos"),
+      evidence.length ? el("div", { className: "qc-ops-issue-evidence-list" }, ...evidence.map((asset) => el("figure", {},
+        el("img", { src: asset.dataUrl, alt: asset.name || "Inspection source photo" }),
+        el("figcaption", {}, text(asset.name, "Inspection photo"))
+      ))) : null,
+      sourceIds.length > evidence.length
+        ? el("p", {}, "Some inspection source photos are unavailable in this workspace.")
+        : null
+    )
+    : null;
   return el("section", { className: "qc-ops-source-card" },
     el("div", { className: "qc-ops-source-heading" },
       el("div", {}, el("small", {}, "Immutable source snapshot"), el("h3", {}, sourceTitle), sourceTitleZh ? el("p", { lang: "zh" }, sourceTitleZh) : null),
@@ -426,7 +462,7 @@ function openIssueDialog(issue, state, ctx) {
   let currentState = state;
   const readOnly = currentIssue.status === "closed";
   const draft = issueDraft(currentIssue);
-  const owner = el("input", { type: "text", maxLength: "100", value: draft.owner, disabled: readOnly, name: "owner" });
+  const owner = el("input", { type: "text", maxLength: "200", value: draft.owner, disabled: readOnly, name: "owner" });
   const disposition = el("textarea", { rows: "3", maxLength: "1200", disabled: readOnly, name: "disposition" }, draft.disposition);
   const confirmationInputs = [0, 1, 2].map((index) => el("input", {
     type: "text", maxLength: "100", value: draft.confirmations[index] || "", disabled: readOnly, name: `confirmation${index + 1}`
@@ -453,7 +489,7 @@ function openIssueDialog(issue, state, ctx) {
     const row = [...document.querySelectorAll("tr[data-issue-id]")].find((item) => item.dataset.issueId === currentIssue.id);
     const ownerCell = row?.querySelector("[data-issue-owner]");
     if (ownerCell) ownerCell.textContent = currentIssue.owner || "Unassigned";
-    if (row) row.dataset.search = [currentIssue.number, currentIssue.title, currentIssue.owner, sourceText(currentIssue, currentState), currentIssue.disposition].join(" ").toLowerCase();
+    if (row) row.dataset.search = [currentIssue.number, currentIssue.title, currentIssue.reportedBy, currentIssue.owner, sourceText(currentIssue, currentState), currentIssue.disposition].join(" ").toLowerCase();
   };
   const adoptLatestIssue = (latestIssue, latestState) => {
     if (!latestIssue) return false;
@@ -494,10 +530,15 @@ function openIssueDialog(issue, state, ctx) {
   const autosaveController = readOnly ? null : createInspectionAutosaveController();
   let closeSubmitting = false;
   let discussionSubmitting = false;
+  let deleteSubmitting = false;
   let runtime = null;
   let dialog = null;
   let discussionButton;
   let closeButton;
+  let deleteButton;
+  let deleteConfirmation;
+  let cancelDeleteButton;
+  let confirmDeleteButton;
 
   const reloadLatestButton = button("Reload latest data", async () => {
     if (runtime?.busy) return;
@@ -644,6 +685,89 @@ function openIssueDialog(issue, state, ctx) {
   }, "button button-danger");
   closeButton.disabled = readOnly;
 
+  const linkedBatch = list(currentState.batches).find((batch) => batch.id === currentIssue.batchId);
+  const protectedBatchIssue = Boolean(linkedBatch &&
+    (linkedBatch.kind === "historical" || linkedBatch.status === "historical" || linkedBatch.status === "released"));
+  const runIssueDeletion = async () => {
+    if (deleteSubmitting || closeSubmitting || discussionSubmitting || runtime?.busy || protectedBatchIssue) return;
+    deleteSubmitting = true;
+    if (runtime) runtime.busy = true;
+    const mutableInputs = [...dispositionInputs, discussionAuthorName, discussionText];
+    const priorDisabled = mutableInputs.map((input) => input.disabled);
+    mutableInputs.forEach((input) => { input.disabled = true; });
+    evidence.setDisabled(true);
+    if (discussionButton) discussionButton.disabled = true;
+    if (closeButton) closeButton.disabled = true;
+    if (deleteButton) deleteButton.disabled = true;
+    if (cancelDeleteButton) cancelDeleteButton.disabled = true;
+    if (confirmDeleteButton) confirmDeleteButton.disabled = true;
+    reloadLatestButton.disabled = true;
+    let deleted = false;
+    try {
+      if (!(await flushDisposition())) return;
+      if (!(await evidence.flushPending())) {
+        formError.textContent = "Issue evidence changes could not be saved. Try again before deleting this issue.";
+        return;
+      }
+      markDraftForPreservation();
+      const response = await runCommand(ctx, "deleteIssue", { id: currentIssue.id }, { render: false });
+      if (!response.ok && !response.committed) {
+        formError.textContent = errorText(response.error, "The issue could not be deleted.");
+        return;
+      }
+      if (response.committed && !response.ok && typeof ctx.refreshState === "function") {
+        const refresh = await ctx.refreshState({ render: false });
+        if (!refresh?.ok) notify("The issue was deleted, but the latest issue list could not be loaded. Reload before continuing.", true);
+        else currentState = refresh.state;
+      }
+      deleted = true;
+      issueDrafts.delete(currentIssue.id);
+      runtime?.dispose();
+      closeDialog(true);
+      await ctx.navigate("issues", null, true);
+    } finally {
+      deleteSubmitting = false;
+      if (!deleted) {
+        mutableInputs.forEach((input, index) => { input.disabled = priorDisabled[index]; });
+        evidence.setDisabled(false);
+        if (discussionButton) discussionButton.disabled = readOnly;
+        if (closeButton) closeButton.disabled = readOnly;
+        if (deleteButton) deleteButton.disabled = protectedBatchIssue;
+        if (cancelDeleteButton) cancelDeleteButton.disabled = false;
+        if (confirmDeleteButton) confirmDeleteButton.disabled = false;
+        reloadLatestButton.disabled = false;
+      }
+      if (runtime) runtime.busy = false;
+    }
+  };
+  cancelDeleteButton = button("Cancel", () => {
+    if (deleteSubmitting || runtime?.busy) return;
+    deleteConfirmation.hidden = true;
+    deleteButton.hidden = false;
+    deleteButton.focus();
+  }, "button button-secondary");
+  confirmDeleteButton = button("Confirm delete", async () => {
+    if (deleteConfirmation.hidden) return;
+    await runIssueDeletion();
+  }, "button button-danger");
+  deleteConfirmation = el("section", {
+    className: "qc-ops-delete-confirmation",
+    hidden: true,
+    role: "group",
+    ariaLabel: "Confirm issue deletion",
+  },
+    el("p", {}, `Delete issue ${text(currentIssue.number, "Issue")}? Its discussion and uploaded evidence will be removed. This action cannot be undone.`),
+    el("div", { className: "button-row" }, cancelDeleteButton, confirmDeleteButton),
+  );
+  deleteButton = button("Delete issue", () => {
+    if (deleteSubmitting || closeSubmitting || discussionSubmitting || runtime?.busy || protectedBatchIssue) return;
+    deleteButton.hidden = true;
+    deleteConfirmation.hidden = false;
+    cancelDeleteButton.focus();
+  }, "button button-danger");
+  deleteButton.disabled = protectedBatchIssue;
+  if (protectedBatchIssue) deleteButton.title = "Issues linked to released or historical batches cannot be deleted.";
+
   discussionButton = button("Add discussion entry", async () => {
     if (discussionSubmitting || closeSubmitting) return;
     discussionSubmitting = true;
@@ -732,7 +856,8 @@ function openIssueDialog(issue, state, ctx) {
     ),
     formError,
     reloadLatestButton,
-    el("div", { className: "qc-ops-dialog-actions" }, closeButton)
+    deleteConfirmation,
+    el("div", { className: "qc-ops-dialog-actions" }, closeButton, deleteButton)
   );
   dialog = showDialog(`${text(currentIssue.number, "Issue")} · ${text(currentIssue.title)}`, form);
   dialog.dataset.operationDraftId = currentIssue.id;
@@ -778,6 +903,8 @@ export function openNewIssueDialog(state, ctx, options = {}) {
   const requestId = options.requestId || newRequestId();
   const fixedBatch = options.batchId ? list(state.batches).find((batch) => batch.id === options.batchId) : null;
   const fixedRow = fixedBatch ? list(fixedBatch.rows).find((row) => row.id === options.rowId) : null;
+  const reportedByInput = el("input", { type: "text", required: true, maxLength: "200", name: "reportedBy", value: options.reportedBy || "" });
+  const initialOwnerInput = el("input", { type: "text", maxLength: "200", name: "owner", value: options.owner || "" });
   const titleInput = el("input", {
     type: "text", required: true, maxLength: "180", name: "title", placeholder: "Describe the issue", value: options.title || "",
   });
@@ -817,6 +944,9 @@ export function openNewIssueDialog(state, ctx, options = {}) {
   };
   photoInput.addEventListener("change", () => collectFiles(photoInput));
   fileInput.addEventListener("change", () => collectFiles(fileInput));
+  reportedByInput.addEventListener("input", () => {
+    if (reportedByInput.value.trim()) formError.textContent = "";
+  });
 
   const editableBatches = list(state.batches).filter((batch) => batch.kind !== "historical" && batch.status !== "released");
   const batchSelect = el("select", { name: "batchId" }, el("option", { value: "" }, "No batch link"), ...editableBatches.map((batch) => {
@@ -854,6 +984,12 @@ export function openNewIssueDialog(state, ctx, options = {}) {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     formError.textContent = "";
+    const reportedBy = reportedByInput.value.trim();
+    if (!reportedBy) {
+      formError.textContent = "Enter the name of the person reporting this issue.";
+      reportedByInput.focus();
+      return;
+    }
     if (!form.reportValidity()) return;
     if (!hasRequiredIssuePhoto(selectedFiles)) {
       formError.textContent = "Choose at least one photo.";
@@ -861,7 +997,7 @@ export function openNewIssueDialog(state, ctx, options = {}) {
       return;
     }
     submit.disabled = true;
-    const data = { title: titleInput.value.trim(), requestId, files: [] };
+    const data = { reportedBy, owner: initialOwnerInput.value.trim(), title: titleInput.value.trim(), requestId, files: [] };
     const description = descriptionInput.value.trim();
     if (description) data.description = description;
     const batchId = fixedBatch?.id || batchSelect.value;
@@ -893,6 +1029,8 @@ export function openNewIssueDialog(state, ctx, options = {}) {
     else ctx.navigate("issues", null, true);
   });
   form.append(
+    field("Reported by", reportedByInput),
+    field("Initial disposition owner (optional)", initialOwnerInput),
     field("Issue title", titleInput),
     field("Description", descriptionInput),
     associationFields,
@@ -926,21 +1064,42 @@ function renderIssueListPage(root, ctx) {
   const search = filters.querySelector('input[type="search"]');
   const status = filters.querySelector("select");
   const tbody = el("tbody");
+  const isInteractiveTarget = (target) => target instanceof Element && Boolean(target.closest(
+    "button, a, input, select, textarea, summary, label, form, [contenteditable='true'], [role='button'], [role='link']"
+  ));
   for (const issue of issues) {
     const source = sourceText(issue, state);
-    const searchText = [issue.number, issue.title, issue.owner, source, issue.disposition].join(" ").toLowerCase();
-    const open = button("Open", () => {
-      if (ctx.selectedId !== issue.id) ctx.navigate("issues", issue.id);
-      else openIssueDialog(issue, state, ctx);
-    }, "button button-secondary qc-ops-small-button");
-    tbody.append(el("tr", { "data-issue-id": issue.id, "data-status": issue.status, "data-search": searchText },
+    const searchText = [issue.number, issue.title, issue.reportedBy, issue.owner, source, issue.disposition].join(" ").toLowerCase();
+    const row = el("tr", {
+      className: "qc-ops-issue-row",
+      tabIndex: 0,
+      ariaLabel: `Open issue ${issue.number}`,
+      "data-issue-id": issue.id,
+      "data-status": issue.status,
+      "data-search": searchText,
+    },
       el("td", {}, text(issue.number)),
       el("td", {}, el("strong", {}, text(issue.title)), el("small", { className: "qc-ops-subline" }, source)),
       el("td", { "data-issue-owner": "true" }, text(issue.owner, "Unassigned")),
       el("td", {}, statusPill(issue.status)),
-      el("td", {}, dateLabel(issue.createdAt)),
-      el("td", {}, open)
-    ));
+      el("td", {}, dateLabel(issue.createdAt))
+    );
+    const openIssue = () => {
+      if (ctx.selectedId !== issue.id) ctx.navigate("issues", issue.id);
+      else openIssueDialog(issue, state, ctx);
+    };
+    row.addEventListener("click", (event) => {
+      if (isInteractiveTarget(event.target)) return;
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed && (row.contains(selection.anchorNode) || row.contains(selection.focusNode))) return;
+      openIssue();
+    });
+    row.addEventListener("keydown", (event) => {
+      if ((event.key !== "Enter" && event.key !== " ") || isInteractiveTarget(event.target)) return;
+      event.preventDefault();
+      openIssue();
+    });
+    tbody.append(row);
   }
   const updateFilters = () => {
     const query = search.value.trim().toLowerCase();
@@ -949,7 +1108,7 @@ function renderIssueListPage(root, ctx) {
   search.addEventListener("input", updateFilters);
   status.addEventListener("change", updateFilters);
   const table = el("table", { className: "qc-ops-list-table" },
-    el("thead", {}, el("tr", {}, ...["Issue", "Source", "Owner", "Status", "Created", ""].map((label) => el("th", { scope: "col" }, label)))),
+    el("thead", {}, el("tr", {}, ...["Issue", "Source", "Owner", "Status", "Created"].map((label) => el("th", { scope: "col" }, label)))),
     tbody
   );
   const sections = [];

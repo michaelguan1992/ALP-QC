@@ -21,6 +21,7 @@ function createService(adapter) {
 async function createIssueWithDiscussion(service) {
   await service.initialize();
   const issue = await service.command("createIssue", {
+    reportedBy: "Inspector",
     title: "Review the replacement",
     files: [{ name: "discussion-evidence.png", mimeType: "image/png", dataUrl: PNG_URL, category: "photo" }],
   }, 0);
@@ -41,6 +42,7 @@ test("discussion entries require a name and rejected names leave revision and au
   const service = createService(createMemoryQCAdapter());
   await service.initialize();
   const issue = await service.command("createIssue", {
+    reportedBy: "Inspector",
     title: "Review the replacement",
     files: [{ name: "discussion-evidence.png", mimeType: "image/png", dataUrl: PNG_URL, category: "photo" }],
   }, 0);
@@ -121,11 +123,12 @@ test("discussion authors survive SQLite reopen and validated backup import", asy
   await target.close();
 });
 
-test("legacy backups without discussion author names remain valid and import unchanged", async () => {
+test("legacy backups without discussion author or Issue reporter names remain valid and import unchanged", async () => {
   const source = createService(createMemoryQCAdapter());
   const issueId = await createIssueWithDiscussion(source);
   const legacyBackup = structuredClone(await source.exportBackup());
   const legacyIssue = legacyBackup.state.issues.find((item) => item.id === issueId);
+  delete legacyIssue.reportedBy;
   for (const entry of legacyIssue.discussion) delete entry.authorName;
   assert.doesNotThrow(() => validateQCState(legacyBackup.state));
 
@@ -134,5 +137,6 @@ test("legacy backups without discussion author names remain valid and import unc
   await target.importBackup(legacyBackup, 0);
   const importedIssue = (await target.getState()).issues.find((item) => item.id === issueId);
   assert.deepEqual(importedIssue.discussion, legacyIssue.discussion);
+  assert.equal(Object.hasOwn(importedIssue, "reportedBy"), false);
   assert.ok(importedIssue.discussion.every((entry) => !Object.hasOwn(entry, "authorName")));
 });

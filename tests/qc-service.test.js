@@ -241,12 +241,13 @@ test("saved row photos remain in an issue snapshot, open issues block release, a
     batchId: created.id, rowId: row.id, files: [{ name: "evidence.png", mimeType: "image/png", dataUrl: PNG_URL }],
   });
   const issue = await harness.command("createIssue", {
+    reportedBy: "Inspector",
     title: "Abnormal pressure",
     batchId: created.id,
     rowId: row.id,
     files: [{ name: "issue-evidence.png", mimeType: "image/png", dataUrl: PNG_URL, category: "photo" }],
   });
-  const duplicateIssue = await harness.command("createIssue", { title: "Should be ignored", batchId: created.id, rowId: row.id });
+  const duplicateIssue = await harness.command("createIssue", { reportedBy: "Inspector", title: "Should be ignored", batchId: created.id, rowId: row.id });
   assert.equal(duplicateIssue.entityId, issue.entityId);
   await harness.command("removePhoto", { batchId: created.id, rowId: row.id, assetId: (await harness.state()).batches.find((batch) => batch.id === created.id).rows[0].photoIds[0] });
   let afterRemoval = await harness.state();
@@ -521,6 +522,7 @@ test("backup validation rejects malformed issue evidence and unsafe library asse
   await saveAllRows(harness, batch.id);
   const row = (await harness.service.getBatchWorkspace(batch.id)).rows[0];
   const issue = await harness.command("createIssue", {
+    reportedBy: "Inspector",
     title: "Source issue",
     batchId: batch.id,
     rowId: row.id,

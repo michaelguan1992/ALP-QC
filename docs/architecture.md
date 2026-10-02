@@ -27,6 +27,10 @@ The core module decomposition is described in [Core Business Design](core-busine
 
 Dynamic repeated inspection rows use HTML templates so they are easy to edit directly. A visible name is not an internal field key; layout changes must not change business record IDs. Database errors pass through the data layer, and the interface reports failure rather than pretending that a save succeeded.
 
+New Issue creation validates and persists the manually entered `reportedBy` name in core. The aggregate validator accepts older Issues without this field, while validating it when present. The field travels through existing queries, SQLite persistence, and backup restore without a schema reset or synthetic backfill.
+
+New Issue creation may initialize the existing `owner` field from an optional disposition owner; it does not add a separate attribution field. Issue photo thumbnails resolve Issue-owned evidence independently from immutable source-row photo references. These display and command changes preserve existing assets and snapshots without a migration.
+
 ## Current Storage
 
 The main app and demo use separate SQLite workspaces managed by the local application service. All browsers using the same `http://127.0.0.1:4173` service read the same selected workspace. The browser HTTP facade preserves the asynchronous core-service interface; the server's `createQCService` validates business commands and expected revisions inside atomic SQLite transactions. The API accepts only explicit application operations, never arbitrary SQL, caller functions, or unrestricted state replacement.

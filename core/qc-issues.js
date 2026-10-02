@@ -76,7 +76,7 @@ function makeSourceSnapshot(state, batch, row = null, rowProduct = null) {
   };
 }
 
-function issueRequestFingerprint({ title, description, batchId, rowId, files }) {
+function issueRequestFingerprint({ title, description, reportedBy, initialOwner, batchId, rowId, files }) {
   let first = 2166136261;
   let second = 0x9e3779b9;
   const update = (value) => {
@@ -89,7 +89,12 @@ function issueRequestFingerprint({ title, description, batchId, rowId, files }) 
     first = Math.imul(first ^ 0, 16777619);
     second = Math.imul(second ^ 0, 0x85ebca6b);
   };
-  for (const value of [title, description, batchId ?? "", rowId ?? ""]) update(value);
+  for (const value of [title, description, reportedBy]) update(value);
+  if (initialOwner) {
+    update("initialOwner");
+    update(initialOwner);
+  }
+  for (const value of [batchId ?? "", rowId ?? ""]) update(value);
   for (const file of files) {
     for (const value of [file.category, file.name, file.mimeType, file.dataUrl]) update(value);
   }
@@ -99,6 +104,11 @@ function issueRequestFingerprint({ title, description, batchId, rowId, files }) 
 export function createIssue(state, data, context) {
   const input = requireRecord(data, "Issue");
   const title = requireString(input.title, "Issue title", { maxLength: 300 });
+  if (!Object.hasOwn(input, "reportedBy")) fail("Reported by is required.");
+  const reportedBy = requireString(input.reportedBy, "Reported by", { maxLength: 200 });
+  const initialOwner = Object.hasOwn(input, "owner")
+    ? requireString(input.owner, "Initial disposition owner", { maxLength: 200, allowBlank: true })
+    : "";
   const description = requireString(input.description ?? "", "Issue description", { maxLength: 10000, allowBlank: true });
   const requestId = input.requestId == null ? null : requireString(input.requestId, "Issue request ID", { maxLength: 120 });
   const files = prepareIssueEvidenceFiles(input.files ?? []);
@@ -110,7 +120,7 @@ export function createIssue(state, data, context) {
     : requireString(input.rowId, "Inspection row ID", { maxLength: 120 });
 
   if (requestId !== null) {
-    const requestFingerprint = issueRequestFingerprint({ title, description, batchId: batchIdInput, rowId: rowIdInput, files });
+    const requestFingerprint = issueRequestFingerprint({ title, description, reportedBy, initialOwner, batchId: batchIdInput, rowId: rowIdInput, files });
     const existingByRequest = state.issues.find((issue) => issue.requestId === requestId);
     if (existingByRequest) {
       if (existingByRequest.batchId !== batchIdInput || existingByRequest.rowId !== rowIdInput ||
@@ -163,16 +173,17 @@ export function createIssue(state, data, context) {
     id,
     number,
     title,
+    reportedBy,
     description,
     ...(requestId !== null ? {
       requestId,
-      requestFingerprint: issueRequestFingerprint({ title, description, batchId, rowId, files }),
+      requestFingerprint: issueRequestFingerprint({ title, description, reportedBy, initialOwner, batchId, rowId, files }),
     } : {}),
     batchId,
     rowId,
     sourceSnapshot,
     status: "open",
-    owner: "",
+    owner: initialOwner,
     disposition: "",
     confirmations: ["", "", ""],
     discussion: [],
@@ -183,6 +194,30 @@ export function createIssue(state, data, context) {
   appendIssueEvidence(state, issue, files, context);
   state.issues.push(issue);
   return { entityId: id, action: "createIssue", summary: `Created open issue ${number}.` };
+}
+
+export function deleteIssue(state, data) {
+  const id = requireString(data.id, "Issue ID", { maxLength: 120 });
+  const issueIndex = state.issues.findIndex((candidate) => candidate.id === id);
+  if (issueIndex < 0) fail("That issue is no longer available.");
+  const issue = state.issues[issueIndex];
+  if (issue.batchId !== null) {
+    const batch = requireBatch(state, issue.batchId);
+    if (batch.kind === "historical" || batch.status === "historical") {
+      fail("Issues linked to historical batches cannot be deleted.");
+    }
+    if (batch.status === "released") {
+      fail("Issues linked to released batches cannot be deleted.");
+    }
+  }
+
+  state.issues.splice(issueIndex, 1);
+  state.assets = state.assets.filter((asset) => !(asset.kind === "issueAttachment" && asset.issueId === issue.id));
+  return {
+    entityId: issue.id,
+    action: "deleteIssue",
+    summary: `Deleted issue ${issue.number} and its uploaded evidence.`,
+  };
 }
 
 export function saveIssue(state, data) {
