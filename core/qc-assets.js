@@ -15,6 +15,13 @@ import { requireBatch, requireEditableBatch } from "./qc-inspections.js";
 const PHOTO_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const DOCUMENT_MIME_TYPES = new Set([
   "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/zip",
   "image/png",
   "image/jpeg",
   "image/webp",
@@ -22,18 +29,35 @@ const DOCUMENT_MIME_TYPES = new Set([
   "text/plain",
   "text/csv",
   "text/markdown",
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
 ]);
+const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
+const IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const DANGEROUS_EXTENSIONS = /\.(?:html?|xhtml|svg|js|mjs|cjs|wasm|hta|jar|exe|bat|cmd|sh|ps1)$/i;
 const TEXT_EXTENSIONS = new Set([".txt", ".csv", ".md", ".markdown", ".log"]);
 const DOCUMENT_EXTENSIONS = new Map([
   ["application/pdf", new Set([".pdf"])],
+  ["application/msword", new Set([".doc"])],
+  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", new Set([".docx"])],
+  ["application/vnd.ms-excel", new Set([".xls"])],
+  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", new Set([".xlsx"])],
+  ["application/vnd.ms-powerpoint", new Set([".ppt"])],
+  ["application/vnd.openxmlformats-officedocument.presentationml.presentation", new Set([".pptx"])],
+  ["application/zip", new Set([".zip"])],
   ["image/png", new Set([".png"])],
   ["image/jpeg", new Set([".jpg", ".jpeg"])],
   ["image/webp", new Set([".webp"])],
   ["image/gif", new Set([".gif"])],
   ["text/csv", new Set([".csv"])],
   ["text/markdown", new Set([".md", ".markdown"])],
+  ["video/mp4", new Set([".mp4"])],
+  ["video/quicktime", new Set([".mov"])],
+  ["video/webm", new Set([".webm"])],
 ]);
+
+const ROW_ATTACHMENT_CATEGORIES = new Set(["videos", "procedures", "log"]);
 
 function extensionOf(name) {
   const index = name.lastIndexOf(".");
@@ -61,10 +85,157 @@ function validateAssetPayload({ name, mimeType, dataUrl }, allowedMimes, maxByte
   return { name: normalizedName, mimeType: declaredMime, dataUrl, decodedBytes: parsed.decodedBytes };
 }
 
-function requireTotalCapacity(state, incomingBytes) {
-  if (currentAssetBytes(state) + incomingBytes > ASSET_TOTAL_MAX_BYTES) {
+function requireTotalCapacity(state, incomingBytes, replacedAssetId = null) {
+  const replacedAsset = replacedAssetId && state.assets.find((asset) => asset.id === replacedAssetId);
+  const replacedBytes = replacedAsset ? normalizeDataUrl(replacedAsset.dataUrl, "Stored attachment").decodedBytes : 0;
+  if (currentAssetBytes(state) - replacedBytes + incomingBytes > ASSET_TOTAL_MAX_BYTES) {
     fail(`Attachments exceed the ${Math.floor(ASSET_TOTAL_MAX_BYTES / (1024 * 1024))} MiB total storage limit.`);
   }
+}
+
+function normalizedIssueEvidenceFile(value) {
+  const input = requireRecord(value, "Issue evidence file");
+  const mimeType = requireString(input.mimeType, "Issue evidence file type", { maxLength: 100 }).toLocaleLowerCase();
+  const category = input.category == null || String(input.category).trim() === ""
+    ? (IMAGE_MIME_TYPES.has(mimeType) ? "photo" : "file")
+    : requireString(input.category, "Issue evidence category", { maxLength: 20 });
+  if (!new Set(["photo", "file"]).has(category)) fail("Issue evidence category must be photo or file.");
+  const image = IMAGE_MIME_TYPES.has(mimeType);
+  if (category === "photo" && !image) fail("Issue photos must be PNG, JPEG, WebP, or GIF images.");
+  if (category === "file" && !DOCUMENT_MIME_TYPES.has(mimeType)) fail("Issue evidence must use a supported file type.");
+  const maxBytes = category === "photo" ? PHOTO_MAX_BYTES : DOCUMENT_MAX_BYTES;
+  const file = validateAssetPayload(input, category === "photo" ? PHOTO_MIME_TYPES : DOCUMENT_MIME_TYPES, maxBytes, "Issue evidence");
+  return { ...file, category };
+}
+
+export function prepareIssueEvidenceFiles(files) {
+  const list = requireArray(files, "Issue evidence files");
+  return list.map(normalizedIssueEvidenceFile);
+}
+
+export function appendIssueEvidence(state, issue, files, context) {
+  if (!files.length) return [];
+  requireTotalCapacity(state, files.reduce((total, file) => total + file.decodedBytes, 0));
+  issue.attachmentIds ??= [];
+  const ids = [];
+  for (const file of files) {
+    const id = makeId(context.idFactory);
+    const { decodedBytes, ...assetFile } = file;
+    state.assets.push({
+      id,
+      ...assetFile,
+      kind: "issueAttachment",
+      batchId: issue.batchId,
+      rowId: issue.rowId,
+      versionId: null,
+      issueId: issue.id,
+      createdAt: context.now(),
+    });
+    issue.attachmentIds.push(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+export function setRowAttachment(state, data, context) {
+  const input = requireRecord(data, "Inspection row attachment");
+  const batch = requireBatch(state, input.batchId);
+  requireEditableBatch(batch);
+  const rowId = requireString(input.rowId, "Inspection row ID", { maxLength: 120 });
+  const row = batch.rows.find((candidate) => candidate.id === rowId);
+  if (!row) fail("That inspection row is not part of this batch.");
+  const category = requireString(input.category, "Attachment category", { maxLength: 20 }).toLocaleLowerCase();
+  if (!ROW_ATTACHMENT_CATEGORIES.has(category)) fail("Choose Videos, Procedures, or Log as the attachment category.");
+  const allowedMimes = category === "videos"
+    ? VIDEO_MIME_TYPES
+    : new Set([...DOCUMENT_MIME_TYPES].filter((mimeType) => !VIDEO_MIME_TYPES.has(mimeType)));
+  const file = validateAssetPayload(requireRecord(input.file, "Inspection row attachment file"), allowedMimes, DOCUMENT_MAX_BYTES, "Inspection row attachment");
+  const currentId = row.attachmentIds?.[category] ?? null;
+  requireTotalCapacity(state, file.decodedBytes, currentId);
+
+  const id = makeId(context.idFactory);
+  const { decodedBytes, ...assetFile } = file;
+  state.assets.push({
+    id,
+    ...assetFile,
+    kind: "rowAttachment",
+    batchId: batch.id,
+    rowId: row.id,
+    versionId: null,
+    issueId: null,
+    category,
+    createdAt: context.now(),
+  });
+  row.attachmentIds ??= { videos: null, procedures: null, log: null };
+  const previousId = row.attachmentIds[category] ?? null;
+  row.attachmentIds[category] = id;
+  if (previousId) state.assets = state.assets.filter((asset) => asset.id !== previousId);
+  return { entityId: batch.id, action: "setRowAttachment", summary: `Attached ${file.name} to ${row.title} (${category}).`, assetIds: [id] };
+}
+
+export function removeRowAttachment(state, data) {
+  const input = requireRecord(data, "Inspection row attachment removal");
+  const batch = requireBatch(state, input.batchId);
+  requireEditableBatch(batch);
+  const rowId = requireString(input.rowId, "Inspection row ID", { maxLength: 120 });
+  const row = batch.rows.find((candidate) => candidate.id === rowId);
+  if (!row) fail("That inspection row is not part of this batch.");
+  const category = requireString(input.category, "Attachment category", { maxLength: 20 }).toLocaleLowerCase();
+  if (!ROW_ATTACHMENT_CATEGORIES.has(category)) fail("Choose Videos, Procedures, or Log as the attachment category.");
+  const assetId = row.attachmentIds?.[category] ?? null;
+  if (!assetId) fail("There is no attachment in that inspection row category.");
+  row.attachmentIds[category] = null;
+  state.assets = state.assets.filter((asset) => asset.id !== assetId);
+  return { entityId: batch.id, action: "removeRowAttachment", summary: `Removed the ${category} attachment from ${row.title}.` };
+}
+
+export function addIssueAttachments(state, data, context) {
+  const input = requireRecord(data, "Issue attachments");
+  const id = requireString(input.id, "Issue ID", { maxLength: 120 });
+  const issue = state.issues.find((candidate) => candidate.id === id);
+  if (!issue) fail("That issue is no longer available.");
+  if (issue.status === "closed") fail("Closed issues are read-only.");
+  if (issue.batchId !== null) {
+    const batch = requireBatch(state, issue.batchId);
+    if (batch.status === "released") fail("Released batch issues are read-only.");
+  }
+  const files = prepareIssueEvidenceFiles(input.files);
+  if (!files.length) fail("Choose at least one issue attachment to add.");
+  const assetIds = appendIssueEvidence(state, issue, files, context);
+  return { entityId: issue.id, action: "addIssueAttachments", summary: `Added ${assetIds.length} file${assetIds.length === 1 ? "" : "s"} to issue ${issue.number}.`, assetIds };
+}
+
+export function removeIssueAttachment(state, data) {
+  const input = requireRecord(data, "Issue attachment removal");
+  const id = requireString(input.id, "Issue ID", { maxLength: 120 });
+  const issue = state.issues.find((candidate) => candidate.id === id);
+  if (!issue) fail("That issue is no longer available.");
+  if (issue.status === "closed") fail("Closed issues are read-only.");
+  if (issue.batchId !== null) {
+    const batch = requireBatch(state, issue.batchId);
+    if (batch.status === "released") fail("Released batch issues are read-only.");
+  }
+  const assetId = requireString(input.assetId, "Issue attachment ID", { maxLength: 160 });
+  if (!(issue.attachmentIds ?? []).includes(assetId)) fail("That file is not attached to this issue.");
+  issue.attachmentIds = issue.attachmentIds.filter((candidate) => candidate !== assetId);
+  state.assets = state.assets.filter((asset) => asset.id !== assetId);
+  return { entityId: issue.id, action: "removeIssueAttachment", summary: `Removed a file from issue ${issue.number}.` };
+}
+
+export function resolveIssueAttachments(state, issue) {
+  return (issue.attachmentIds ?? [])
+    .map((assetId) => state.assets.find((asset) => asset.id === assetId))
+    .filter(Boolean)
+    .map((asset) => structuredClone(asset));
+}
+
+export function resolveRowAttachments(state, row) {
+  const attachmentIds = row.attachmentIds ?? {};
+  return Object.fromEntries(["videos", "procedures", "log"].map((category) => {
+    const assetId = attachmentIds[category] ?? null;
+    const asset = assetId ? state.assets.find((candidate) => candidate.id === assetId) : null;
+    return [category, asset ? structuredClone(asset) : null];
+  }));
 }
 
 export function addPhotos(state, data, context) {

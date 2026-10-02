@@ -8,6 +8,8 @@ import { validateQCState } from "../core/qc-validation.js";
 import { createMemoryQCAdapter } from "../storage/memory-qc-adapter.js";
 import { createSQLiteQCAdapter } from "../storage/sqlite-qc-adapter.mjs";
 
+const PNG_URL = "data:image/png;base64,iVBORw0KGgo=";
+
 function createService(adapter) {
   let id = 0;
   return createQCService(adapter, {
@@ -18,7 +20,10 @@ function createService(adapter) {
 
 async function createIssueWithDiscussion(service) {
   await service.initialize();
-  const issue = await service.command("createIssue", { title: "Review the replacement" }, 0);
+  const issue = await service.command("createIssue", {
+    title: "Review the replacement",
+    files: [{ name: "discussion-evidence.png", mimeType: "image/png", dataUrl: PNG_URL, category: "photo" }],
+  }, 0);
   await service.command("addDiscussion", {
     id: issue.entityId,
     text: "  The replacement passed.  ",
@@ -35,7 +40,10 @@ async function createIssueWithDiscussion(service) {
 test("discussion entries require a name and rejected names leave revision and audit unchanged", async () => {
   const service = createService(createMemoryQCAdapter());
   await service.initialize();
-  const issue = await service.command("createIssue", { title: "Review the replacement" }, 0);
+  const issue = await service.command("createIssue", {
+    title: "Review the replacement",
+    files: [{ name: "discussion-evidence.png", mimeType: "image/png", dataUrl: PNG_URL, category: "photo" }],
+  }, 0);
   const before = await service.getState();
 
   for (const payload of [

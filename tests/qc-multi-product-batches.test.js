@@ -409,7 +409,12 @@ test("release waits for every product row and closed issues, then counts each re
 
   await saveRow(harness, main.id, unsavedRow);
   const issueRow = (await harness.service.getBatchWorkspace(main.id)).rows.find((row) => row.productLineId !== line11.id);
-  const issue = await harness.command("createIssue", { title: "Mixed batch issue", batchId: main.id, rowId: issueRow.id });
+  const issue = await harness.command("createIssue", {
+    title: "Mixed batch issue",
+    batchId: main.id,
+    rowId: issueRow.id,
+    files: [{ name: "mixed-batch-issue.png", mimeType: "image/png", dataUrl: PNG_URL, category: "photo" }],
+  });
   beforeRelease = await harness.state();
   await assert.rejects(harness.command("releaseBatch", { id: main.id }), /close all linked issues/i);
   assert.deepEqual(await harness.state(), beforeRelease);
@@ -466,8 +471,17 @@ test("row photos and issue snapshots stay attached to the selected product in a 
     rowId: row12.id,
     files: [{ name: "s11-yellow-evidence.png", mimeType: "image/png", dataUrl: PNG_URL }],
   });
-  const rowIssue = await harness.command("createIssue", { title: "S11 Yellow air pump review", batchId: batch.id, rowId: row12.id });
-  const batchIssue = await harness.command("createIssue", { title: "Mixed batch review", batchId: batch.id });
+  const rowIssue = await harness.command("createIssue", {
+    title: "S11 Yellow air pump review",
+    batchId: batch.id,
+    rowId: row12.id,
+    files: [{ name: "s11-yellow-issue.png", mimeType: "image/png", dataUrl: PNG_URL, category: "photo" }],
+  });
+  const batchIssue = await harness.command("createIssue", {
+    title: "Mixed batch review",
+    batchId: batch.id,
+    files: [{ name: "mixed-batch-review.png", mimeType: "image/png", dataUrl: PNG_URL, category: "photo" }],
+  });
   const state = await harness.state();
   const storedBatch = state.batches.find((candidate) => candidate.id === batch.id);
   const s11PhotoId = storedBatch.rows.find((row) => row.id === row11.id).photoIds[0];

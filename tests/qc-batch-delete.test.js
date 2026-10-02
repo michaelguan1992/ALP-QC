@@ -124,6 +124,12 @@ test("deleteBatch is allowlisted, removes owned draft photos, and preserves batc
     rowId: row.id,
     files: [{ name: "owned-evidence.png", mimeType: "image/png", dataUrl: PNG_URL }],
   }, (await source.getState()).revision);
+  await source.command("setRowAttachment", {
+    batchId: batch.id,
+    rowId: row.id,
+    category: "procedures",
+    file: { name: "owned-procedure.pdf", mimeType: "application/pdf", dataUrl: PDF_URL },
+  }, (await source.getState()).revision);
   await source.command("addBatchAttachment", {
     batchId: batch.id,
     name: "batch-note.pdf",
@@ -146,7 +152,9 @@ test("deleteBatch is allowlisted, removes owned draft photos, and preserves batc
   await restored.importBackup(backup, 0);
   const beforeDelete = await restored.getState();
   const photo = beforeDelete.assets.find((asset) => asset.kind === "photo" && asset.batchId === batch.id);
+  const rowAttachment = beforeDelete.assets.find((asset) => asset.kind === "rowAttachment" && asset.batchId === batch.id);
   assert.ok(photo);
+  assert.ok(rowAttachment);
   assert.ok(beforeDelete.assets.some((asset) => asset.id === attachmentAssetId));
   assert.ok(beforeDelete.assets.some((asset) => asset.id === libraryResult.entityId));
 
@@ -155,6 +163,7 @@ test("deleteBatch is allowlisted, removes owned draft photos, and preserves batc
   assert.equal(deleted.entityId, batch.id);
   assert.equal(afterDelete.batches.some((candidate) => candidate.id === batch.id), false);
   assert.equal(afterDelete.assets.some((asset) => asset.id === photo.id), false);
+  assert.equal(afterDelete.assets.some((asset) => asset.id === rowAttachment.id), false);
   const attachedLibraryDocument = afterDelete.assets.find((asset) => asset.id === attachmentAssetId);
   const sharedVersionDocument = afterDelete.assets.find((asset) => asset.id === libraryResult.entityId);
   assert.ok(attachedLibraryDocument);
@@ -182,7 +191,17 @@ test("deleteBatch blocks linked issues, released batches, and historical source 
     remarks: "",
   }, issueState.revision);
   issueState = await issueService.getState();
-  await issueService.command("createIssue", { title: "Retained issue", batchId: batch.id, rowId: issueRow.id }, issueState.revision);
+  const issue = await issueService.command("createIssue", {
+    title: "Retained issue",
+    batchId: batch.id,
+    rowId: issueRow.id,
+    files: [{ name: "issue-dependency.png", mimeType: "image/png", dataUrl: PNG_URL, category: "photo" }],
+  }, issueState.revision);
+  issueState = await issueService.getState();
+  await issueService.command("addIssueAttachments", {
+    id: issue.entityId,
+    files: [{ name: "issue-dependency.log", mimeType: "text/plain", dataUrl: "data:text/plain;base64,ZGVwZW5kZW5jeQ==", category: "file" }],
+  }, issueState.revision);
   issueState = await issueService.getState();
   await assert.rejects(issueService.command("deleteBatch", { id: batch.id }, issueState.revision), /linked issue records/i);
   assert.deepEqual(await issueService.getState(), issueState);

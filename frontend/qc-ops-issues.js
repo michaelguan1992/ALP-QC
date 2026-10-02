@@ -14,7 +14,17 @@ import {
   timestampLabel
 } from "./qc-ops-common.js";
 import { closeDialog, showDialog } from "./qc-ui.js";
+import {
+  attachmentCanPreview,
+  attachmentDownload,
+  createAttachmentPreview,
+  issueAttachmentCategory,
+  MEBIBYTE,
+  normalizedMimeType,
+  readAttachmentFile,
+} from "./qc-attachments.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
+import { hasRequiredIssuePhoto, remainingIssueDraftAfterDiscussion, submitDiscussionEntry } from "./qc-issue-drafts.js";
 
 const issueDrafts = new Map();
 
@@ -106,6 +116,12 @@ function quantityOrDash(value) {
   return value === null || value === undefined || value === "" ? "—" : quantity(value);
 }
 
+function rowHasSavedIssueResult(row) {
+  const legacyTimeOmitted = row && !Object.hasOwn(row, "actualTimeSeconds");
+  return Boolean(row?.savedAt) && row.defectiveQty !== null && row.defectiveQty !== undefined &&
+    (row.actualTimeSeconds !== null && row.actualTimeSeconds !== undefined || legacyTimeOmitted);
+}
+
 function issueDraft(issue) {
   return issueDrafts.get(issue.id) || {
     owner: String(issue.owner || ""),
@@ -144,6 +160,128 @@ function sourcePhotos(issue, state) {
   const photoIds = list(row.photoIds || snapshot.photoIds);
   const assets = new Map(list(state.assets).map((asset) => [asset.id, asset]));
   return photoIds.map((id) => assets.get(id)).filter(Boolean);
+}
+
+function issueAttachments(issue, state) {
+  if (Array.isArray(issue.attachments)) return issue.attachments;
+  const assets = new Map(list(state.assets).map((asset) => [asset.id, asset]));
+  return list(issue.attachmentIds).map((id) => assets.get(id)).filter(Boolean);
+}
+
+function newRequestId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  return [...bytes].map((byte, index) => `${index === 4 || index === 6 || index === 8 || index === 10 ? "-" : ""}${byte.toString(16).padStart(2, "0")}`).join("");
+}
+
+function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreservation, onIssueUpdated = null) {
+  const host = el("section", { className: "qc-ops-issue-attachments" });
+  const previewHost = el("div", { className: "qc-ops-issue-attachment-preview-host" });
+  let previewCleanup = () => {};
+  const clearPreview = () => {
+    previewCleanup();
+    previewCleanup = () => {};
+    previewHost.replaceChildren();
+  };
+  const showInlinePreview = (asset) => {
+    clearPreview();
+    const preview = createAttachmentPreview(asset);
+    previewCleanup = preview.cleanup;
+    const closePreview = button("Close preview", clearPreview, "button-quiet qc-ops-small-button");
+    previewHost.replaceChildren(el("div", { className: "qc-ops-attachment-preview" },
+      el("strong", { className: "qc-ops-attachment-preview-name" }, text(asset.name, "Attachment")),
+      preview.element,
+      closePreview,
+    ));
+    if (preview.load) {
+      void preview.load(preview.element).catch((error) => {
+        preview.element.textContent = error instanceof Error ? error.message : "The file preview could not be loaded.";
+      });
+    }
+  };
+
+  const photoInput = el("input", { type: "file", accept: "image/*", multiple: true, className: "qc-ops-hidden-file", disabled: readOnly, "aria-label": "Choose issue photos" });
+  const fileInput = el("input", { type: "file", multiple: true, className: "qc-ops-hidden-file", disabled: readOnly, "aria-label": "Choose issue files" });
+  const photoButton = button("Add photos", () => photoInput.click(), "button-secondary qc-ops-small-button");
+  const fileButton = button("Add files", () => fileInput.click(), "button-secondary qc-ops-small-button");
+  photoButton.disabled = readOnly;
+  fileButton.disabled = readOnly;
+
+  const upload = async (input) => {
+    const selected = Array.from(input.files || []);
+    if (!selected.length) return;
+    markDraftForPreservation();
+    try {
+      const files = await Promise.all(selected.map(async (file) => {
+        const mimeType = normalizedMimeType(file.name, file.type);
+        const category = issueAttachmentCategory(mimeType);
+        const payload = await readAttachmentFile(file, {
+          maxBytes: category === "photo" ? 5 * MEBIBYTE : 10 * MEBIBYTE,
+          category: category === "photo" ? "photo" : null,
+        });
+        return { ...payload, category };
+      }));
+      const response = await runCommand(ctx, "addIssueAttachments", { id: issue.id, files }, { render: false });
+      if (!response.ok) return;
+      input.value = "";
+      const latestState = response.state || state;
+      const latestIssue = list(latestState.issues).find((entry) => entry.id === issue.id) || issue;
+      onIssueUpdated?.(latestIssue, latestState);
+      render(latestIssue, latestState);
+      markDraftForPreservation();
+    } catch (error) {
+      notify(errorText(error, "Could not read the selected file."), true);
+    }
+  };
+  photoInput.addEventListener("change", () => { void upload(photoInput); });
+  fileInput.addEventListener("change", () => { void upload(fileInput); });
+
+  const removeAttachment = async (asset) => {
+    if (!window.confirm(`Remove “${text(asset.name, "this file")}” from this issue?`)) return;
+    markDraftForPreservation();
+    const response = await runCommand(ctx, "removeIssueAttachment", { id: issue.id, assetId: asset.id }, { render: false });
+    if (!response.ok) return;
+    const latestState = response.state || state;
+    const latestIssue = list(latestState.issues).find((entry) => entry.id === issue.id) || issue;
+    onIssueUpdated?.(latestIssue, latestState);
+    render(latestIssue, latestState);
+    markDraftForPreservation();
+  };
+
+  const render = (currentIssue, currentState) => {
+    clearPreview();
+    const attachments = issueAttachments(currentIssue, currentState);
+    const listHost = attachments.length
+      ? el("ul", { className: "qc-ops-issue-attachment-list" }, ...attachments.map((asset) => {
+        const preview = attachmentCanPreview(asset)
+          ? button("Preview", () => showInlinePreview(asset), "button-quiet qc-ops-small-button")
+          : null;
+        const category = asset.category || issueAttachmentCategory(asset.mimeType);
+        const remove = button("Remove", () => { void removeAttachment(asset); }, "button-quiet qc-ops-attachment-remove");
+        remove.disabled = readOnly;
+        return el("li", {},
+          el("span", { className: "qc-ops-issue-attachment-name", title: text(asset.name) }, text(asset.name, "Attachment")),
+          el("small", {}, category === "photo" ? "Photo" : "File"),
+          preview,
+          attachmentDownload(asset),
+          remove,
+        );
+      }))
+      : el("p", { className: "qc-ops-empty-issue-attachments" }, "No evidence");
+    host.replaceChildren(
+      el("div", { className: "qc-ops-section-heading" }, el("h3", {}, "Evidence"),
+        el("div", { className: "qc-ops-issue-attachment-actions" }, photoButton, fileButton)),
+      listHost,
+      previewHost,
+      photoInput,
+      fileInput,
+    );
+  };
+  render(issue, state);
+  return { element: host, cleanup: clearPreview };
 }
 
 function sourceCard(issue, state) {
@@ -185,6 +323,8 @@ function sourceCard(issue, state) {
       el("div", {}, el("small", {}, "Immutable source snapshot"), el("h3", {}, sourceTitle), sourceTitleZh ? el("p", { lang: "zh" }, sourceTitleZh) : null),
       statusPill(issue.status)
     ),
+    String(issue.description || "").trim() ? el("div", { className: "qc-ops-issue-description" },
+      el("strong", {}, "Description"), el("p", {}, String(issue.description).trim())) : null,
     el("p", { className: "qc-ops-source-meta" }, metadata.join(" · ")),
     row ? el("div", { className: "qc-ops-source-standard" },
       el("strong", {}, "Inspection standard"),
@@ -208,8 +348,10 @@ function renderDiscussion(issue) {
 }
 
 function openIssueDialog(issue, state, ctx) {
-  const readOnly = issue.status === "closed";
-  const draft = issueDraft(issue);
+  let currentIssue = issue;
+  let currentState = state;
+  const readOnly = currentIssue.status === "closed";
+  const draft = issueDraft(currentIssue);
   const owner = el("input", { type: "text", maxLength: "100", value: draft.owner, disabled: readOnly, name: "owner" });
   const disposition = el("textarea", { rows: "3", maxLength: "1200", disabled: readOnly, name: "disposition" }, draft.disposition);
   const confirmationInputs = [0, 1, 2].map((index) => el("input", {
@@ -220,10 +362,10 @@ function openIssueDialog(issue, state, ctx) {
     name: "discussionAuthorName", "aria-required": "true"
   });
   const discussionText = el("textarea", { rows: "2", maxLength: "1200", disabled: readOnly, name: "discussionText", placeholder: "Add a separate discussion entry" }, draft.discussionText || "");
-  const discussionList = el("div", { className: "qc-ops-discussion-host" }, renderDiscussion(issue));
+  const discussionList = el("div", { className: "qc-ops-discussion-host" }, renderDiscussion(currentIssue));
   const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
-  const form = el("form", { className: "qc-ops-form qc-ops-issue-form", "data-preserve-drafts": "true", "data-issue-id": issue.id });
-  if (hasIssueDraft(issue, draft)) form.dataset.dirty = "true";
+  const form = el("form", { className: "qc-ops-form qc-ops-issue-form", "data-preserve-drafts": "true", "data-issue-id": currentIssue.id });
+  if (hasIssueDraft(currentIssue, draft)) form.dataset.dirty = "true";
   const captureDraft = () => ({
     owner: owner.value,
     disposition: disposition.value,
@@ -232,16 +374,20 @@ function openIssueDialog(issue, state, ctx) {
     discussionText: discussionText.value
   });
   const storeDraft = (current) => {
-    if (hasIssueDraft(issue, current)) issueDrafts.set(issue.id, current);
-    else issueDrafts.delete(issue.id);
+    if (hasIssueDraft(currentIssue, current)) issueDrafts.set(currentIssue.id, current);
+    else issueDrafts.delete(currentIssue.id);
   };
   const markDraftForPreservation = () => {
     const current = captureDraft();
     storeDraft(current);
-    if (hasIssueDraft(issue, current)) form.dataset.dirty = "true";
+    if (hasIssueDraft(currentIssue, current)) form.dataset.dirty = "true";
     else delete form.dataset.dirty;
     return current;
   };
+  const evidence = renderIssueAttachments(currentIssue, currentState, ctx, readOnly, markDraftForPreservation, (nextIssue, nextState) => {
+    currentIssue = nextIssue;
+    currentState = nextState;
+  });
   const saveButton = el("button", { type: "submit", className: "button button-primary", disabled: readOnly }, "Save disposition");
   const closeButton = button("Close issue", async () => {
     const current = markDraftForPreservation();
@@ -249,7 +395,7 @@ function openIssueDialog(issue, state, ctx) {
       notify("Add the discussion entry or clear it before closing this issue.", true);
       return;
     }
-    if (draftDiffers(issue, current)) {
+    if (draftDiffers(currentIssue, current)) {
       notify("Save the current disposition fields before closing this issue.", true);
       return;
     }
@@ -257,9 +403,9 @@ function openIssueDialog(issue, state, ctx) {
       notify("An owner, formal disposition, and all three confirmation names are required before closure.", true);
       return;
     }
-    const result = await runCommand(ctx, "closeIssue", { id: issue.id });
+    const result = await runCommand(ctx, "closeIssue", { id: currentIssue.id });
     if (result.ok) {
-      issueDrafts.delete(issue.id);
+      issueDrafts.delete(currentIssue.id);
       closeDialog(true);
     }
   }, "button button-danger");
@@ -278,28 +424,40 @@ function openIssueDialog(issue, state, ctx) {
       discussionText.focus();
       return;
     }
-    const response = await runCommand(ctx, "addDiscussion", { id: issue.id, text: entryText, authorName });
-    if (response.ok) {
-      const latestDraft = issueDrafts.get(issue.id) || current;
-      const remainingDraft = {
-        ...latestDraft,
-        discussionAuthorName: latestDraft.discussionAuthorName === current.discussionAuthorName ? "" : latestDraft.discussionAuthorName,
-        discussionText: latestDraft.discussionText === current.discussionText ? "" : latestDraft.discussionText
-      };
-      if (hasIssueDraft(issue, remainingDraft)) issueDrafts.set(issue.id, remainingDraft);
-      else issueDrafts.delete(issue.id);
-      closeDialog(true);
+    discussionButton.disabled = true;
+    try {
+      const response = await submitDiscussionEntry(ctx, currentIssue.id, entryText, authorName);
+      if (!response.ok) return;
+      const latestState = response.state || currentState;
+      const latestIssue = list(latestState.issues).find((entry) => entry.id === currentIssue.id);
+      if (!latestIssue) {
+        notify("The discussion entry was saved, but the updated Issue could not be reloaded.", true);
+        return;
+      }
+      currentIssue = latestIssue;
+      currentState = latestState;
+      discussionList.replaceChildren(renderDiscussion(currentIssue));
+      const latestDraft = issueDrafts.get(currentIssue.id) || current;
+      const remainingDraft = remainingIssueDraftAfterDiscussion(latestDraft, current);
+      if (remainingDraft.discussionAuthorName === "") discussionAuthorName.value = "";
+      if (remainingDraft.discussionText === "") discussionText.value = "";
+      if (hasIssueDraft(currentIssue, remainingDraft)) issueDrafts.set(currentIssue.id, remainingDraft);
+      else issueDrafts.delete(currentIssue.id);
+      if (hasIssueDraft(currentIssue, remainingDraft)) form.dataset.dirty = "true";
+      else delete form.dataset.dirty;
+    } finally {
+      discussionButton.disabled = readOnly;
     }
   }, "button button-secondary");
   discussionButton.disabled = readOnly;
   const updateDraft = () => {
     const next = captureDraft();
     storeDraft(next);
-    if (hasIssueDraft(issue, next)) form.dataset.dirty = "true";
+    if (hasIssueDraft(currentIssue, next)) form.dataset.dirty = "true";
     else delete form.dataset.dirty;
     queueMicrotask(() => {
-      const savedDraft = issueDrafts.get(issue.id);
-      if (!savedDraft || !hasIssueDraft(issue, savedDraft)) delete form.dataset.dirty;
+      const savedDraft = issueDrafts.get(currentIssue.id);
+      if (!savedDraft || !hasIssueDraft(currentIssue, savedDraft)) delete form.dataset.dirty;
     });
   };
   [owner, disposition, discussionAuthorName, discussionText, ...confirmationInputs].forEach((input) => input.addEventListener("input", updateDraft));
@@ -314,13 +472,13 @@ function openIssueDialog(issue, state, ctx) {
       discussionAuthorName: next.discussionAuthorName,
       discussionText: next.discussionText
     };
-    const response = await runCommand(ctx, "saveIssue", { id: issue.id, owner: normalized.owner, disposition: normalized.disposition, confirmations: normalized.confirmations });
+    const response = await runCommand(ctx, "saveIssue", { id: currentIssue.id, owner: normalized.owner, disposition: normalized.disposition, confirmations: normalized.confirmations });
     if (!response.ok) {
-      const failedDraft = issueDrafts.get(issue.id) || normalized;
-      if (hasIssueDraft(issue, failedDraft)) issueDrafts.set(issue.id, failedDraft);
+      const failedDraft = issueDrafts.get(currentIssue.id) || normalized;
+      if (hasIssueDraft(currentIssue, failedDraft)) issueDrafts.set(currentIssue.id, failedDraft);
     }
     if (response.ok) {
-      const latestDraft = issueDrafts.get(issue.id) || normalized;
+      const latestDraft = issueDrafts.get(currentIssue.id) || normalized;
       const savedDraft = {
         ...latestDraft,
         owner: latestDraft.owner === next.owner ? normalized.owner : latestDraft.owner,
@@ -329,13 +487,14 @@ function openIssueDialog(issue, state, ctx) {
       };
       const hasUnsavedDispositionDraft = savedDraft.owner !== normalized.owner || savedDraft.disposition !== normalized.disposition ||
         savedDraft.confirmations.some((name, index) => name !== normalized.confirmations[index]);
-      if (hasDiscussionDraft(savedDraft) || hasUnsavedDispositionDraft) issueDrafts.set(issue.id, savedDraft);
-      else issueDrafts.delete(issue.id);
+      if (hasDiscussionDraft(savedDraft) || hasUnsavedDispositionDraft) issueDrafts.set(currentIssue.id, savedDraft);
+      else issueDrafts.delete(currentIssue.id);
       closeDialog(true);
     }
   });
   form.append(
-    sourceCard(issue, state),
+    sourceCard(currentIssue, currentState),
+    evidence.element,
     el("div", { className: "qc-ops-form-grid" }, field("Disposition owner", owner), field("Formal disposition", disposition)),
     el("fieldset", { className: "qc-ops-confirmations" },
       el("legend", {}, "Manual confirmations · names entered by staff"),
@@ -354,13 +513,56 @@ function openIssueDialog(issue, state, ctx) {
       closeDialog(true);
     }, "button button-secondary"), saveButton, closeButton)
   );
-  const dialog = showDialog(`${text(issue.number, "Issue")} · ${text(issue.title)}`, form);
-  dialog.dataset.operationDraftId = issue.id;
-  dialog.dataset.issueId = issue.id;
+  const dialog = showDialog(`${text(currentIssue.number, "Issue")} · ${text(currentIssue.title)}`, form);
+  dialog.dataset.operationDraftId = currentIssue.id;
+  dialog.dataset.issueId = currentIssue.id;
+  dialog.addEventListener("close", evidence.cleanup, { once: true });
 }
 
-function openNewIssueDialog(state, ctx) {
-  const titleInput = el("input", { type: "text", required: true, maxLength: "180", name: "title", placeholder: "Describe the issue" });
+export function openNewIssueDialog(state, ctx, options = {}) {
+  const requestId = options.requestId || newRequestId();
+  const fixedBatch = options.batchId ? list(state.batches).find((batch) => batch.id === options.batchId) : null;
+  const fixedRow = fixedBatch ? list(fixedBatch.rows).find((row) => row.id === options.rowId) : null;
+  const titleInput = el("input", {
+    type: "text", required: true, maxLength: "180", name: "title", placeholder: "Describe the issue", value: options.title || "",
+  });
+  const descriptionInput = el("textarea", { rows: "3", maxLength: "2000", name: "description" }, options.description || "");
+  const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
+  const form = el("form", { className: "qc-ops-form qc-ops-new-issue-form", "data-preserve-drafts": "true" });
+  const selectedFiles = [];
+  const selectedFileHost = el("div", { className: "qc-ops-selected-issue-files" });
+  const photoInput = el("input", { type: "file", accept: "image/*", multiple: true, className: "qc-ops-hidden-file", "aria-label": "Choose issue photos" });
+  const fileInput = el("input", { type: "file", multiple: true, className: "qc-ops-hidden-file", "aria-label": "Choose issue files" });
+  const photosButton = button("Choose photos", () => photoInput.click(), "button-secondary");
+  const filesButton = button("Choose files", () => fileInput.click(), "button-secondary");
+  const renderSelectedFiles = () => {
+    selectedFileHost.replaceChildren(...(selectedFiles.length
+      ? [el("ul", { className: "qc-ops-selected-issue-file-list" }, ...selectedFiles.map((entry) => {
+        const remove = button("Remove", () => {
+          const index = selectedFiles.findIndex((candidate) => candidate.id === entry.id);
+          if (index >= 0) selectedFiles.splice(index, 1);
+          renderSelectedFiles();
+        }, "button-quiet qc-ops-small-button");
+        return el("li", {},
+          el("span", { title: entry.file.name }, text(entry.file.name, "Attachment")),
+          el("small", {}, entry.category === "photo" ? "Photo" : "File"),
+          remove,
+        );
+      }))]
+      : []));
+  };
+  const collectFiles = (input) => {
+    for (const file of Array.from(input.files || [])) {
+      const mimeType = normalizedMimeType(file.name, file.type);
+      selectedFiles.push({ id: newRequestId(), file, category: issueAttachmentCategory(mimeType) });
+    }
+    input.value = "";
+    renderSelectedFiles();
+    if (selectedFiles.some((entry) => entry.category === "photo")) formError.textContent = "";
+  };
+  photoInput.addEventListener("change", () => collectFiles(photoInput));
+  fileInput.addEventListener("change", () => collectFiles(fileInput));
+
   const editableBatches = list(state.batches).filter((batch) => batch.kind !== "historical" && batch.status !== "released");
   const batchSelect = el("select", { name: "batchId" }, el("option", { value: "" }, "No batch link"), ...editableBatches.map((batch) => {
     const products = getBatchProducts(batch).map((product) => ({ ...product, variant: variantById(state).get(product.variantId) }));
@@ -368,11 +570,9 @@ function openNewIssueDialog(state, ctx) {
     return el("option", { value: batch.id }, `${text(batch.number)} · ${summary} · ${text(batch.factory)} ${text(batch.stage)}`);
   }));
   const rowSelect = el("select", { name: "rowId", disabled: true }, el("option", { value: "" }, "No inspection row"));
-  const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
-  const form = el("form", { className: "qc-ops-form qc-ops-new-issue-form" });
   const updateRows = () => {
     const batch = list(state.batches).find((entry) => entry.id === batchSelect.value);
-    const rows = list(batch?.rows);
+    const rows = list(batch?.rows).filter(rowHasSavedIssueResult);
     rowSelect.disabled = !batch || !rows.length;
     rowSelect.replaceChildren(el("option", { value: "" }, "No inspection row"), ...rows.map((row) => {
       const product = getBatchRowProduct(batch, row) || {};
@@ -385,17 +585,51 @@ function openNewIssueDialog(state, ctx) {
     }));
   };
   batchSelect.addEventListener("change", updateRows);
+
+  const fixedContext = fixedBatch
+    ? el("p", { className: "qc-ops-fixed-issue-source" }, `${text(fixedBatch.number)} · ${text(fixedRow?.no)} · ${text(fixedRow?.title)}`)
+    : null;
+  const associationFields = fixedBatch
+    ? fixedContext
+    : el("div", { className: "qc-ops-form-grid" },
+      field("Related batch (optional)", batchSelect),
+      field("Inspection row (optional)", rowSelect),
+    );
   const submit = el("button", { type: "submit", className: "button button-primary" }, "Create issue");
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     formError.textContent = "";
     if (!form.reportValidity()) return;
-    const data = { title: titleInput.value.trim() };
-    if (batchSelect.value) data.batchId = batchSelect.value;
-    if (rowSelect.value) data.rowId = rowSelect.value;
+    if (!hasRequiredIssuePhoto(selectedFiles)) {
+      formError.textContent = "Choose at least one photo.";
+      photosButton.focus();
+      return;
+    }
+    submit.disabled = true;
+    const data = { title: titleInput.value.trim(), requestId, files: [] };
+    const description = descriptionInput.value.trim();
+    if (description) data.description = description;
+    const batchId = fixedBatch?.id || batchSelect.value;
+    const rowId = fixedRow?.id || rowSelect.value;
+    if (batchId) data.batchId = batchId;
+    if (rowId) data.rowId = rowId;
+    try {
+      data.files = await Promise.all(selectedFiles.map(async (entry) => {
+        const payload = await readAttachmentFile(entry.file, {
+          maxBytes: entry.category === "photo" ? 5 * MEBIBYTE : 10 * MEBIBYTE,
+          category: entry.category === "photo" ? "photo" : null,
+        });
+        return { ...payload, category: entry.category };
+      }));
+    } catch (error) {
+      formError.textContent = errorText(error, "Could not read the selected file.");
+      submit.disabled = false;
+      return;
+    }
     const result = await runCommand(ctx, "createIssue", data);
     if (!result.ok) {
       formError.textContent = errorText(result.error);
+      submit.disabled = false;
       return;
     }
     closeDialog(true);
@@ -405,8 +639,18 @@ function openNewIssueDialog(state, ctx) {
   });
   form.append(
     field("Issue title", titleInput),
-    field("Related batch (optional)", batchSelect),
-    field("Inspection row (optional)", rowSelect),
+    field("Description", descriptionInput),
+    associationFields,
+    el("div", { className: "qc-ops-new-issue-files" },
+      el("div", { className: "qc-ops-new-issue-file-actions" },
+        el("span", { className: "qc-ops-new-issue-photo-required" }, "Photos · required"),
+        photosButton,
+        filesButton,
+      ),
+      selectedFileHost,
+      photoInput,
+      fileInput,
+    ),
     formError,
     el("div", { className: "qc-ops-dialog-actions" }, button("Cancel", () => closeDialog(), "button button-secondary"), submit)
   );
