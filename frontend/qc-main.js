@@ -6,17 +6,6 @@ import { button, el, notify, showDialog, closeDialog } from "./qc-ui.js";
 const app = document.querySelector("#app");
 const routes = new Set(["batches", "batch-report", "issues", "catalog", "standards", "orders", "library", "settings", "backup"]);
 const operationRoutes = new Set(["batches", "batch-report", "issues"]);
-const routeNames = {
-  batches: "Batch inspection",
-  "batch-report": "Batch inspection",
-  issues: "Issues",
-  catalog: "Product catalog",
-  standards: "Standards",
-  orders: "Purchase orders",
-  library: "File library",
-  settings: "Backup and restore",
-  backup: "Backup and restore",
-};
 const demoMode = new URLSearchParams(location.search).get("workspace") === "demo";
 const service = demoMode ? await createDemoQCService() : qcService;
 let state = null;
@@ -124,11 +113,6 @@ function updateStaleWarning() {
   if (message) message.textContent = staleMessage;
 }
 
-function updateRevisionLabel() {
-  const label = document.querySelector(".revision-label");
-  if (label && state) label.textContent = `Revision ${state.revision}`;
-}
-
 function setStale(message) {
   staleMessage = message;
   updateStaleWarning();
@@ -193,6 +177,7 @@ async function navigate(route, id = null, force = false) {
 function navItem(route, label, group) {
   const isActive = currentRoute === route || (route === "batches" && currentRoute === "batch-report");
   const item = button(label, () => navigate(route), `nav-item${isActive ? " is-active" : ""}`);
+  item.classList.remove("button");
   item.setAttribute("aria-current", isActive ? "page" : "false");
   item.dataset.route = route;
   group.append(item);
@@ -238,10 +223,7 @@ function getContext() {
         staleMessage = "";
         channel?.postMessage({ revision: latest.revision });
         if (render) renderApp();
-        else {
-          updateStaleWarning();
-          updateRevisionLabel();
-        }
+        else updateStaleWarning();
         return { ok: true, state: latest };
       } catch (error) {
         commandInFlight -= 1;
@@ -288,10 +270,7 @@ function getContext() {
           staleMessage = "";
           channel?.postMessage({ revision: latest.revision });
           if (options.render !== false) renderApp();
-          else {
-            updateStaleWarning();
-            updateRevisionLabel();
-          }
+          else updateStaleWarning();
           return { ok: true, result, state: latest, revision: latest.revision, refreshed: true };
         } catch (readError) {
           commandInFlight -= 1;
@@ -335,33 +314,25 @@ function renderApp() {
   const sidebar = el("aside", { className: "app-sidebar", "aria-label": "Main navigation" },
     el("a", { className: "brand-lockup", href: homeUrl, "aria-label": "MasterQC home" },
       el("span", { className: "brand-mark", "aria-hidden": "true" }, "QC"),
-      el("span", {}, el("strong", {}, "MasterQC"), el("small", {}, "Local workspace")),
+      el("strong", {}, "MasterQC"),
     ),
     el("nav", { className: "primary-nav" },
-      el("p", { className: "nav-label" }, "Inspection"),
-      (() => { const group = el("div", { className: "nav-group" }); navItem("batches", "Batches", group); navItem("issues", "Issues", group); return group; })(),
-      el("p", { className: "nav-label nav-label-spaced" }, "Setup and records"),
-      (() => { const group = el("div", { className: "nav-group" }); navItem("standards", "Standards", group); navItem("orders", "Purchase orders", group); return group; })(),
+      (() => {
+        const group = el("div", { className: "nav-group" });
+        navItem("batches", "Batches", group);
+        navItem("issues", "Issues", group);
+        navItem("standards", "Standards", group);
+        navItem("orders", "Purchase orders", group);
+        return group;
+      })(),
     ),
-    el("div", { className: "sidebar-footer" },
+    el("div", { className: "sidebar-footer", role: "status", "aria-label": "Storage location" },
       el("span", { className: "local-dot" }),
-      el("span", {}, demoMode ? "Demo data on this computer" : "Shared on this computer"),
-      el("a", { href: "/frontend/initialization.html" }, "Initialization draft"),
-      el("a", { href: "/frontend/prototype.html" }, "AP table prototype"),
+      el("span", {}, "On this computer"),
     ),
     el("div", { className: "sidebar-settings" }, settingsNavItem()),
   );
-  const header = el("header", { className: "app-header" },
-    el("div", {},
-      el("p", { className: "eyebrow" }, "MasterQC Web"),
-      el("h1", {}, routeNames[currentRoute] ?? "MasterQC Web"),
-    ),
-    el("div", { className: "header-status" },
-      el("span", { className: "status-pill status-ready", role: "status" }, "Local server ready"),
-      el("span", { className: "revision-label" }, `Revision ${state.revision}`),
-    ),
-  );
-  const workspace = el("div", { className: "app-workspace" }, header);
+  const workspace = el("div", { className: "app-workspace" });
   if (demoMode) {
     const realUrl = new URL(location.href);
     realUrl.searchParams.delete("workspace");

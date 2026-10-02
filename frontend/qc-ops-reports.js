@@ -142,7 +142,7 @@ function legacyEvidence(row, state) {
   const remark = String(row.remarks || "").trim();
   if (!remark && !photos.length) return null;
   return h("details", { className: "qc-ops-report-legacy-evidence" },
-    h("summary", {}, `Legacy evidence${photos.length ? ` · ${photos.length} photo${photos.length === 1 ? "" : "s"}` : ""}`),
+    h("summary", {}, `Source evidence${photos.length ? ` · ${photos.length} photo${photos.length === 1 ? "" : "s"}` : ""}`),
     remark ? h("p", {}, remark) : null,
     photos.length ? h("div", { className: "qc-ops-report-photo-gallery qc-ops-report-legacy-photos" }, photos.map((photo) => h("figure", { className: "qc-ops-report-photo" },
       h("img", { src: photo.dataUrl, alt: text(photo.name, "Legacy photo") }),
@@ -179,12 +179,12 @@ function reportRowAttachmentCell(row, state) {
     ? populated.map(([label, asset]) => h("div", { className: "qc-ops-report-attachment" },
       h("strong", {}, `${label}:`), h("span", {}, text(asset.name, "Attachment")), attachmentActions(asset),
     ))
-    : h("span", { className: "qc-ops-empty-photo" }, "No attachments"));
+    : h("span", { className: "qc-ops-empty-photo" }, "—"));
 }
 
 function historicalPhotosCell(row, state) {
   const photos = legacyPhotoAssets(row, state);
-  if (!photos.length) return h("td", { className: "qc-ops-photos qc-ops-report-photos" }, h("span", { className: "qc-ops-empty-photo" }, "No photos"));
+  if (!photos.length) return h("td", { className: "qc-ops-photos qc-ops-report-photos" }, h("span", { className: "qc-ops-empty-photo" }, "—"));
   return h("td", { className: "qc-ops-photos qc-ops-report-photos" },
     h("div", { className: "qc-ops-report-photo-gallery" }, photos.map((photo) => h("figure", { className: "qc-ops-report-photo" },
       h("img", { src: photo.dataUrl, alt: photo.name || `Photo for ${text(row.title)}` }),
@@ -320,7 +320,6 @@ function reportMetadata(workspace, state) {
   const products = reportProducts(workspace, state);
   const openIssues = list(state.issues).filter((issue) => issue.batchId === batch.id && issue.status === "open").length;
   const fields = [
-    ["Batch number 批次编号", workspace.displayNumber ?? batch.number],
     ...(historical ? [["Product / model 产品型号", batchProductLabel(batch, variant)]] : []),
     ["Purchase order 采购订单", order?.number],
     ["Inspection stage 检验阶段", batchInspection(batch.stage, batch.factory)],
@@ -332,10 +331,10 @@ function reportMetadata(workspace, state) {
     ["Open linked issues 未关闭问题", openIssues],
   ];
   const productDetails = products.length ? h("dl", { className: "qc-ops-report-products" },
-    h("dt", {}, "Products and locked versions 产品及锁定版本"),
+    h("dt", {}, "Product versions and PO quantities 产品版本及采购数量"),
     h("dd", {}, h("ul", {}, products.map((product) => {
       const line = list(order?.lines).find((entry) => entry.id === product.lineId);
-      return h("li", {}, h("strong", {}, productLabel(product, state)), ` · ${quantity(product.quantity)} units · Version ${text(product.version?.label || product.versionLabel)}`, line ? ` · ${quantity(line.orderedQty)} ordered` : "");
+      return h("li", {}, h("strong", {}, productLabel(product, state)), ` · Version ${text(product.version?.label || product.versionLabel)}`, line ? ` · ${quantity(line.orderedQty)} ordered` : "");
     }))),
   ) : null;
   return h("div", { className: "qc-ops-report-metadata" },
@@ -412,12 +411,12 @@ function printReport() {
 }
 
 async function renderReportDetail(root, ctx) {
-  root.replaceChildren(pageHeading("Batch report", "Loading the selected batch report…"), h("section", { className: "card qc-ops-loading" }, "Loading saved batch records and photos…"));
+  root.replaceChildren(pageHeading("Batch report"), h("section", { className: "card qc-ops-loading" }, "Loading…"));
   let workspace;
   try {
     workspace = await ctx.service.getBatchWorkspace(ctx.selectedId);
   } catch (error) {
-    root.replaceChildren(pageHeading("Batch report", "The selected report could not be loaded.", [button("Back to batch", () => ctx.navigate("batches", ctx.selectedId, true), "button button-secondary")]),
+    root.replaceChildren(pageHeading("Batch report", "", [button("Back to batch", () => ctx.navigate("batches", ctx.selectedId, true), "button button-secondary")]),
       h("section", { className: "card qc-ops-error-card", role: "alert" }, text(error instanceof Error ? error.message : "The selected batch is unavailable.")));
     return;
   }
@@ -425,11 +424,7 @@ async function renderReportDetail(root, ctx) {
   const batch = workspace.batch;
   const state = ctx.state || {};
   const historical = isHistoricalBatch(batch);
-  const variant = workspace.variant || lookupVariant(state, batch);
-  const order = workspace.order || lookupOrder(state, batch);
-  const productNames = historical ? [batchProductLabel(batch, variant)] : reportProducts(workspace, state).map((product) => productLabel(product, state));
-  const productsTitle = productNames.join(", ");
-  const reportTitle = `${text(workspace.displayNumber ?? batch.number)} · ${text(productsTitle)}`;
+  const reportTitle = text(workspace.displayNumber ?? batch.number, "Batch");
   const incompleteRows = historical ? 0 : list(workspace.rows).filter((row) => !row.savedAt || row.defectiveQty === null || row.defectiveQty === undefined || row.actualTimeSeconds === null || row.actualTimeSeconds === undefined || row.actualTimeSeconds === "").length;
   const scope = h("article", { className: "print-scope qc-ops-report" },
     h("header", { className: "qc-ops-report-document-heading" },
@@ -445,7 +440,7 @@ async function renderReportDetail(root, ctx) {
       makeReadOnlyTable(workspace, state),
     ),
   );
-  const header = pageHeading("Batch report", historical ? "Read-only report of this batch and its source-recorded values." : "Read-only report of batch records and their row-specific evidence.", [
+  const header = pageHeading("Batch report", "", [
     button("Back to batch", () => ctx.navigate("batches", batch.id, true), "button button-secondary"),
     button("Download CSV", async () => {
       try {
@@ -464,7 +459,7 @@ async function renderReportDetail(root, ctx) {
 export async function renderBatchReportPage(root, ctx) {
   root.classList.add("qc-ops-root");
   if (!ctx.selectedId) {
-    root.replaceChildren(pageHeading("Batch report", "Open a report from a batch detail page.", [button("Open batches", () => ctx.navigate("batches"), "button button-secondary")]));
+    root.replaceChildren(pageHeading("Batch report", "", [button("Open batches", () => ctx.navigate("batches"), "button button-secondary")]));
     return;
   }
   return renderReportDetail(root, ctx);

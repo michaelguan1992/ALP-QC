@@ -11,28 +11,21 @@
   <body>
     <main class="page-shell">
       <header class="page-header">
-        <p class="eyebrow">MasterQC Web</p>
         <h1>本地初始化</h1>
-        <p class="lead">先验证页面和本机数据存储，再逐步接入正式质量流程。</p>
       </header>
 
       <section class="storage-card" aria-labelledby="storage-heading">
         <div class="card-heading">
           <div>
-            <p class="eyebrow">数据位置</p>
-            <h2 id="storage-heading">仅保存在当前浏览器</h2>
+            <h2 id="storage-heading">本地存储</h2>
           </div>
           <span id="storage-status" class="status-pill" role="status" aria-live="polite">正在检查本地存储…</span>
         </div>
-        <p class="storage-copy">
-          这条初始化草稿保存在此浏览器的 IndexedDB 中。它不会自动同步到其他设备；清除此浏览器的网站数据会删除这条草稿。
-        </p>
+        <p class="storage-copy">草稿保存在当前浏览器的 IndexedDB，不会同步到其他设备；清除网站数据会删除草稿。</p>
       </section>
 
       <section class="draft-card" aria-labelledby="draft-heading">
-        <p class="eyebrow">连通性验证</p>
         <h2 id="draft-heading">初始化草稿</h2>
-        <p id="draft-help" class="draft-help">输入一条草稿并点击保存，然后刷新页面，确认文字仍在。</p>
         <form id="draft-form">
           <label for="draft-note">草稿内容</label>
           <textarea
@@ -41,8 +34,7 @@
             rows="7"
             maxlength="4000"
             disabled
-            placeholder="例如：记录一个需要继续配置的初始化事项。"
-            aria-describedby="draft-help save-status"
+            aria-describedby="save-status"
           ></textarea>
           <div class="form-footer">
             <span id="save-status" class="save-status" role="status" aria-live="polite">正在读取草稿…</span>
@@ -51,7 +43,6 @@
         </form>
       </section>
 
-      <footer class="page-footer">初始脚手架 · 尚未接入批次、检测记录或问题流程</footer>
     </main>
   </body>
 </html>

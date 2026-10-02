@@ -187,3 +187,10 @@ See [Local App Contract](app-contract.md) for command interfaces, data shapes, m
 - Preserve the existing real data exactly when changing the location, including revision, audits, IDs, historical source facts, and attachments. Keep the previous database and validated backup as recovery copies.
 - Git shares committed snapshots, not real-time updates. Each computer writes its own checkout. Collaborators must coordinate changes to the binary database; it cannot be automatically merged. Back up local edits before applying another database snapshot.
 - The configured ALP-QC GitHub repository is public. Publishing the production database exposes its saved business records and attachments. Local preparation does not itself commit or push the data.
+
+## Shell and Sidebar Simplification (2026-10-01)
+
+- Keep one MasterQC brand in the sidebar. Page content owns route titles; the shell does not repeat the brand, title, server-ready status, or displayed revision. Preserve revision checks and stale-save protection.
+- Everyday sidebar navigation contains only Batches, Issues, Standards, and Purchase orders, without category labels. Show one storage indicator, `On this computer`; keep the demo workspace's separate banner. Put Backup and restore below the everyday links. Put initialization and prototype references in a secondary disclosure on that page.
+- Use restrained, neutral surfaces and borders, modest radii, and clear focus states. Keep the active route easy to recognize, preserve readable inputs and numeric affordances, and reserve green row emphasis for important checks.
+- Remove repeated explanatory copy and duplicate modal footer close actions when the modal header already provides a safe close control. Keep business data, validation messages, and consequential confirmations visible.

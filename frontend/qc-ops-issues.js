@@ -82,6 +82,10 @@ function issueProductLabel(product, state) {
   return text(product?.variantLabel || product?.productLabel || product?.label || variant?.label, product?.variantId || "Product");
 }
 
+function hasProductContext(product) {
+  return Boolean(product?.variantLabel || product?.productLabel || product?.label || product?.variant?.label || product?.variantId || product?.lineId || product?.productLineId);
+}
+
 function productSummary(products, state) {
   return products.map((product) => {
     const quantityLabel = product.quantity === null || product.quantity === undefined ? "quantity unknown" : `${quantity(product.quantity)} units`;
@@ -117,15 +121,29 @@ function sourceRow(issue) {
   return row.title || row.titleZh || row.no || row.id || issue.rowId ? row : null;
 }
 
+function otherBatchProducts(products, row, rowProduct, state) {
+  if (!rowProduct) return products;
+  const linkedKey = row?.productLineId || rowProduct.lineId || rowProduct.variantId || rowProduct.variant?.id || issueProductLabel(rowProduct, state);
+  return products.filter((product) => {
+    const key = product.lineId || product.variantId || product.variant?.id || issueProductLabel(product, state);
+    return key !== linkedKey;
+  });
+}
+
 function sourceText(issue, state) {
   const row = sourceRow(issue);
   const products = issueProducts(issue, state);
   const rowProduct = issueRowProduct(issue, state);
+  const linkedProduct = hasProductContext(rowProduct) ? rowProduct : null;
   const parts = [sourceBatch(issue, state)];
-  if (rowProduct?.variantLabel || rowProduct?.productLabel || rowProduct?.productLineId || rowProduct?.variantId) {
-    parts.push(`Inspection product: ${text(rowProduct.variantLabel || rowProduct.productLabel, issueProductLabel(rowProduct, state))}`);
+  const otherProducts = otherBatchProducts(products, row, linkedProduct, state);
+  if (linkedProduct) {
+    const productQuantity = row?.productQuantity ?? linkedProduct.productQuantity ?? linkedProduct.quantity;
+    const version = row?.versionLabel || linkedProduct.versionLabel || linkedProduct.version?.label;
+    parts.push(`${issueProductLabel(linkedProduct, state)}${productQuantity === null || productQuantity === undefined ? "" : ` · ${quantity(productQuantity)} units`}${version ? ` · Version ${version}` : ""}`);
   }
-  if (products.length) parts.push(productSummary(products, state));
+  if (!linkedProduct && products.length) parts.push(productSummary(products, state));
+  else if (otherProducts.length) parts.push(`Other products: ${productSummary(otherProducts, state)}`);
   if (row) parts.push(text(row.title || row.titleZh || row.no || row.id));
   return parts.join(" · ");
 }
@@ -357,7 +375,7 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
           remove,
         );
       }))
-      : el("p", { className: "qc-ops-empty-issue-attachments" }, "No evidence");
+      : null;
     host.replaceChildren(
       el("div", { className: "qc-ops-section-heading" }, el("h3", {}, "Evidence"),
         el("div", { className: "qc-ops-issue-attachment-actions" }, photoButton, fileButton)),
@@ -391,22 +409,34 @@ function sourceCard(issue, state) {
   const snapshot = sourceSnapshot(issue);
   const row = snapshot.row || null;
   const batch = snapshot.batch || {};
-  const sourceTitle = row?.title || snapshot.title || "Standalone issue";
-  const sourceTitleZh = row?.titleZh;
+  const sourceTitle = row?.title || snapshot.title || "";
+  const sourceTitleZh = row?.titleZh || snapshot.titleZh;
   const products = issueProducts(issue, state);
-  const rowProduct = issueRowProduct(issue, state);
+  const rowProductSnapshot = issueRowProduct(issue, state);
+  const rowProduct = hasProductContext(rowProductSnapshot) ? rowProductSnapshot : null;
   const rowProductName = rowProduct ? text(row?.variantLabel || row?.productLabel || rowProduct.variantLabel, issueProductLabel(rowProduct, state)) : "";
   const rowProductQuantity = row?.productQuantity ?? rowProduct?.productQuantity ?? rowProduct?.quantity;
   const rowVersion = row?.versionLabel || rowProduct?.versionLabel || rowProduct?.version?.label;
+  const otherProducts = otherBatchProducts(products, row, rowProduct, state);
+  const linkedBatchNumber = snapshot.batchNumber || batch.number || batch.batchNumber || batchById(state).get(issue.batchId || batch.id)?.number;
+  const factory = snapshot.factory || batch.factory;
+  const stage = snapshot.stage || batch.stage;
+  const batchDate = snapshot.date || batch.date;
+  const productLabel = snapshot.variantLabel || batch.variantLabel;
+  const versionLabel = snapshot.versionLabel || batch.versionLabel;
+  const sourceTitleIsIssueTitle = !sourceTitle || String(sourceTitle).trim() === String(issue.title || "").trim();
+  const standardText = String(row?.specification || row?.specificationZh || "").trim();
   const metadata = [
     Object.hasOwn(issue, "reportedBy") ? `Reported by: ${text(issue.reportedBy)}` : "",
-    `Batch: ${text(snapshot.batchNumber || batch.number || batch.batchNumber, "Standalone")}`,
+    linkedBatchNumber ? `Batch: ${text(linkedBatchNumber)}` : "",
     rowProduct ? `Inspection product: ${rowProductName} · ${rowProductQuantity === null || rowProductQuantity === undefined ? "quantity unknown" : `${quantity(rowProductQuantity)} units`}${rowVersion ? ` · Version ${rowVersion}` : ""}` : "",
-    products.length ? `Products in batch: ${productSummary(products, state)}` : `Product: ${text(snapshot.variantLabel || batch.variantLabel)}`,
-    `Factory / stage: ${text(snapshot.factory || batch.factory)} · ${text(snapshot.stage || batch.stage)}`,
-    `Batch date: ${dateLabel(snapshot.date || batch.date)}`,
-    products.length ? "" : `Version: ${text(snapshot.versionLabel || batch.versionLabel)}`,
-    row ? `Inspection row: ${text(row.no || row.id)}` : "No inspection row linked"
+    !rowProduct && products.length ? `Products in batch: ${productSummary(products, state)}` : "",
+    rowProduct && otherProducts.length ? `Other products: ${productSummary(otherProducts, state)}` : "",
+    !rowProduct && !products.length && productLabel ? `Product: ${text(productLabel)}` : "",
+    factory || stage ? `Factory / stage: ${[factory, stage].filter(Boolean).map((value) => text(value)).join(" · ")}` : "",
+    batchDate ? `Batch date: ${dateLabel(batchDate)}` : "",
+    products.length || !versionLabel ? "" : `Version: ${text(versionLabel)}`,
+    row ? `Inspection row: ${text(row.no || row.id)}` : ""
   ].filter(Boolean);
   const facts = [
     ["Inspection quantity", row?.inspectedQty],
@@ -416,6 +446,7 @@ function sourceCard(issue, state) {
   ];
   const sourceIds = sourcePhotoIds(issue);
   const evidence = sourcePhotos(issue, state);
+  const showSourceTitle = !sourceTitleIsIssueTitle;
   const evidenceBlock = sourceIds.length || evidence.length
     ? el("div", { className: "qc-ops-issue-evidence" },
       el("strong", {}, "Source photos"),
@@ -430,15 +461,15 @@ function sourceCard(issue, state) {
     : null;
   return el("section", { className: "qc-ops-source-card" },
     el("div", { className: "qc-ops-source-heading" },
-      el("div", {}, el("small", {}, "Immutable source snapshot"), el("h3", {}, sourceTitle), sourceTitleZh ? el("p", { lang: "zh" }, sourceTitleZh) : null),
+      el("div", {}, row ? el("small", {}, "Inspection") : null, showSourceTitle ? el("h3", {}, sourceTitle) : null, sourceTitleZh ? el("p", { lang: "zh" }, sourceTitleZh) : null),
       statusPill(issue.status)
     ),
     String(issue.description || "").trim() ? el("div", { className: "qc-ops-issue-description" },
       el("strong", {}, "Description"), el("p", {}, String(issue.description).trim())) : null,
-    el("p", { className: "qc-ops-source-meta" }, metadata.join(" · ")),
-    row ? el("div", { className: "qc-ops-source-standard" },
+    metadata.length ? el("p", { className: "qc-ops-source-meta" }, metadata.join(" · ")) : null,
+    row && (standardText || row.remarks) ? el("div", { className: "qc-ops-source-standard" },
       el("strong", {}, "Inspection standard"),
-      el("p", {}, text(row.specification || row.specificationZh, "No standard text in source snapshot")),
+      standardText ? el("p", {}, standardText) : null,
       row.remarks ? el("p", {}, el("strong", {}, "Recorded remarks: "), row.remarks) : null
     ) : null,
     row ? el("dl", { className: "qc-ops-source-facts" }, ...facts.map(([label, value]) => el("div", {}, el("dt", {}, label), el("dd", {}, label === "Inspection quantity" || label === "Defective quantity" ? quantityOrDash(value) : text(value))))) : null,
@@ -447,7 +478,7 @@ function sourceCard(issue, state) {
 }
 
 function renderDiscussion(issue) {
-  if (!list(issue.discussion).length) return el("p", { className: "qc-ops-empty-discussion" }, "No discussion entries yet.");
+  if (!list(issue.discussion).length) return document.createDocumentFragment();
   return el("ol", { className: "qc-ops-discussion-list" }, ...list(issue.discussion).map((entry) => {
     const authorName = String(entry.authorName || "").trim();
     return el("li", {},
@@ -471,7 +502,7 @@ function openIssueDialog(issue, state, ctx) {
     type: "text", maxLength: "200", value: draft.discussionAuthorName || "", disabled: readOnly,
     name: "discussionAuthorName", "aria-required": "true"
   });
-  const discussionText = el("textarea", { rows: "2", maxLength: "1200", disabled: readOnly, name: "discussionText", placeholder: "Add a separate discussion entry" }, draft.discussionText || "");
+  const discussionText = el("textarea", { rows: "2", maxLength: "1200", disabled: readOnly, name: "discussionText" }, draft.discussionText || "");
   const discussionList = el("div", { className: "qc-ops-discussion-host" }, renderDiscussion(currentIssue));
   const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
   const saveStatus = el("p", { className: "save-status qc-ops-issue-save-status", role: "status", "aria-live": "polite" });
@@ -526,7 +557,7 @@ function openIssueDialog(issue, state, ctx) {
   const dispositionInputs = [owner, disposition, ...confirmationInputs];
   const initialDisposition = dispositionValue(savedIssueDraft(currentIssue));
   const initialDispositionComplete = Boolean(initialDisposition.owner && initialDisposition.disposition && initialDisposition.confirmations.every(Boolean));
-  saveStatus.textContent = initialDispositionComplete ? "Saved" : "Saved · Incomplete";
+  saveStatus.textContent = initialDispositionComplete ? "Saved" : "Incomplete";
   const autosaveController = readOnly ? null : createInspectionAutosaveController();
   let closeSubmitting = false;
   let discussionSubmitting = false;
@@ -843,7 +874,7 @@ function openIssueDialog(issue, state, ctx) {
     evidence.element,
     el("div", { className: "qc-ops-form-grid" }, field("Disposition owner", owner), field("Formal disposition", disposition)),
     el("fieldset", { className: "qc-ops-confirmations" },
-      el("legend", {}, "Manual confirmations · names entered by staff"),
+      el("legend", {}, "Confirmations"),
       ...confirmationInputs.map((input, index) => field(`Confirmation ${index + 1}`, input))
     ),
     saveStatus,
@@ -1117,7 +1148,7 @@ function renderIssueListPage(root, ctx) {
     create
   ));
   else sections.push(el("section", { className: "card qc-ops-list-card" }, filters, el("div", { className: "qc-ops-table-scroll" }, table)));
-  root.replaceChildren(pageHeading("Issues", "Track source evidence, discussion, formal disposition, three manual confirmations, and explicit closure.", [create]), ...sections);
+  root.replaceChildren(pageHeading("Issues", "", [create]), ...sections);
   if (ctx.selectedId) {
     const issue = issues.find((item) => item.id === ctx.selectedId);
     if (issue) openIssueDialog(issue, state, ctx);

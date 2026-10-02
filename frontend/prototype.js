@@ -121,8 +121,8 @@
     elements.batchStatus.textContent = isReleased ? "Released · read-only" : "Draft · editable";
     elements.batchStatus.dataset.state = isReleased ? "released" : "draft";
     elements.tableHelp.textContent = isReleased
-      ? "Released batch · read-only. Calculated inspection quantities, locked standards, and defective rates are shown for reference; existing row photos remain viewable."
-      : "Enter defective quantities and remarks, save each row, and attach photos to that inspection row. Inspection quantity is calculated from batch quantity × the inspection percentage, rounded up; standards and computed rates are reference values.";
+      ? "Released batch. Results are read-only; row photos remain available."
+      : "Draft batch. Results can be edited; calculated inspection quantities are read-only.";
     elements.tableHelp.dataset.state = isReleased ? "read-only" : "editable";
 
     const detailDraft = detailDrafts.get(batch.id);
@@ -193,7 +193,7 @@
       row.querySelectorAll(".history-cell")[cellIndex].textContent = rate;
     }
     row.querySelector(".time-cell").textContent = String(item.timeSeconds);
-    row.querySelector(".procedure-cell").textContent = "Demo only · no source link";
+    row.querySelector(".procedure-cell").textContent = "—";
     const saveInspection = row.querySelector(".save-inspection");
     const issueButton = row.querySelector(".open-issue");
     saveInspection.disabled = isReleased;
@@ -211,12 +211,7 @@
     const photos = row.querySelector(".photo-list");
     if (item.photos.length) {
       for (const photo of item.photos) photos.append(makePhotoThumb(photo, item, isReleased));
-    } else {
-      const empty = document.createElement("span");
-      empty.className = "empty-photos";
-      empty.textContent = "No row photos";
-      photos.append(empty);
-    }
+    } else photos.replaceChildren();
     row.querySelector(".add-photos").disabled = isReleased;
     row.querySelector(".add-demo-photo").disabled = isReleased;
     row.querySelector(".photo-input").disabled = isReleased;
@@ -302,8 +297,8 @@
     elements.discussionEntry.disabled = issue.status === "closed";
     document.querySelector("#add-discussion").disabled = issue.status === "closed";
     elements.issueClosureHelp.textContent = issue.status === "closed"
-      ? `Issue closed ${issue.closedAt ? new Date(issue.closedAt).toLocaleString() : ""}. The linked issue remains in the batch record.`
-      : "An issue stays open until the required disposition and all three names are saved and staff explicitly close it.";
+      ? `Closed ${issue.closedAt ? new Date(issue.closedAt).toLocaleString() : ""}`
+      : "Open";
     setDialogError(elements.issueError, "");
     renderDiscussion(issue);
     if (!elements.issueDialog.open) elements.issueDialog.showModal();
@@ -419,7 +414,7 @@
         specialNotes: elements.newBatchNotes.value
       });
       elements.newBatchDialog.close();
-      showMessage("New AP OQC demo batch created.");
+      showMessage("Batch created.");
       renderAll();
     } catch (error) {
       setDialogError(elements.newBatchError, errorMessage(error));
@@ -510,7 +505,7 @@
       const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420"><rect width="640" height="420" fill="#eef2ed"/><path d="M74 300 210 150l90 94 74-78 192 134Z" fill="#bfd8bf" stroke="#4e6952" stroke-width="8"/><circle cx="454" cy="100" r="35" fill="#e4be55"/><text x="320" y="380" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" fill="#27372a">DEMO IMAGE · NOT QC EVIDENCE</text></svg>';
       try {
         service.addPhoto(batchId, rowId, { name: "DEMO diagram · not QC evidence.svg", dataUrl: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}` });
-        showMessage("Clearly labeled demo image added to this row only.");
+        showMessage("Demo image added to this row.");
         renderAll();
       } catch (error) {
         showMessage(errorMessage(error), "error");
@@ -587,7 +582,7 @@
       });
       renderAll();
       showCurrentIssue(issue);
-      setDialogError(elements.issueError, "Disposition fields saved. The issue remains open until explicitly closed.");
+      setDialogError(elements.issueError, "Disposition saved.");
     } catch (error) {
       setDialogError(elements.issueError, errorMessage(error));
     }
@@ -598,7 +593,7 @@
     try {
       const issue = service.addIssueDiscussion(activeIssueId, elements.discussionEntry.value);
       elements.discussionEntry.value = "";
-      setDialogError(elements.issueError, "Discussion entry added separately from formal disposition.");
+      setDialogError(elements.issueError, "Discussion entry added.");
       renderDiscussion(issue);
     } catch (error) {
       setDialogError(elements.issueError, errorMessage(error));
@@ -611,7 +606,7 @@
       const issue = service.closeIssue(activeIssueId);
       renderAll();
       showCurrentIssue(issue);
-      setDialogError(elements.issueError, "Issue closed by explicit action.");
+      setDialogError(elements.issueError, "Issue closed.");
     } catch (error) {
       setDialogError(elements.issueError, errorMessage(error));
     }

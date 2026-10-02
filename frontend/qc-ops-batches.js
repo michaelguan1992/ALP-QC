@@ -252,8 +252,11 @@ function operationalTaskTitle(row, workspace, state) {
   const family = list(state.families).find((entry) => entry.id === (product.familyId || product.variant?.familyId));
   const models = list(family?.models);
   if (!models.length || !workspace.batch.factory || !workspace.batch.stage) return title;
-  const suffix = `[${models.join("/")}·${workspace.batch.factory}·${workspace.batch.stage}]`;
-  return title.endsWith(suffix) ? title.slice(0, -suffix.length).trimEnd() : title;
+  const base = `${models.join("/")}·${workspace.batch.factory}·${workspace.batch.stage}`;
+  const version = String(row.versionLabel || product.version?.label || product.versionLabel || "").trim();
+  const suffixes = [version ? `[${base}·${version}]` : null, `[${base}]`].filter(Boolean);
+  const suffix = suffixes.find((candidate) => title.endsWith(candidate));
+  return suffix ? title.slice(0, -suffix.length).trimEnd() : title;
 }
 
 function operationalDetailFact(label, value) {
@@ -265,7 +268,7 @@ function legacyEvidenceDisclosure(row, workspace, state) {
   const photos = getRowPhotos(row, workspace, state);
   const photoCount = photos.length || list(row.photoIds).length;
   if (!remarks.trim() && !photoCount) return null;
-  const summaryParts = ["Legacy evidence"];
+  const summaryParts = ["Source evidence"];
   if (photoCount) summaryParts.push(`${photoCount} photo${photoCount === 1 ? "" : "s"}`);
   if (remarks.trim()) summaryParts.push("remarks");
   const photoList = photos.length
@@ -444,8 +447,8 @@ function renderInspectionRow(row, index, workspace, state, ctx, autosaveControll
   }, "button button-secondary qc-ops-small-button");
   createIssueButton.disabled = readOnly || !canCreateFromRow || !rowComplete;
   const rowForm = el("form", { id: rowFormId, className: "qc-ops-row-form", "data-autosave-form": "true" });
-  let rowState = el("span", { className: hasPersistedRowData ? "qc-ops-saved" : "qc-ops-incomplete" },
-    hasPersistedRowData ? (rowComplete ? "Saved" : "Saved · Incomplete") : "Incomplete");
+  let rowState = el("span", { className: rowComplete ? "qc-ops-saved" : "qc-ops-incomplete" },
+    rowComplete ? "Saved" : "Incomplete");
   rowForm.addEventListener("submit", (event) => event.preventDefault());
   const issueControls = linkedIssues.map((issue) => makeAction(
     `Open ${text(issue.number, "issue")} · ${text(issue.status)}`,
@@ -599,11 +602,12 @@ function renderHistoricalInspectionRow(row, index, workspace, state) {
     ));
   }
   const attachments = getRowAttachments(row, state);
-  const attachmentCell = el("td", { className: "qc-ops-row-attachments qc-ops-row-attachments-readonly" }, ...ROW_ATTACHMENT_CATEGORIES.map(([category, label]) => {
+  const attachmentSlots = ROW_ATTACHMENT_CATEGORIES.flatMap(([category, label]) => {
     const asset = attachments?.[category];
+    if (!asset) return [];
     const slot = el("div", { className: "qc-ops-row-attachment-slot" },
       el("strong", {}, label),
-      asset ? el("span", { className: "qc-ops-row-attachment-name", title: text(asset.name) }, text(asset.name, "Attachment")) : el("span", { className: "qc-ops-row-attachment-empty" }, "—"),
+      el("span", { className: "qc-ops-row-attachment-name", title: text(asset.name) }, text(asset.name, "Attachment")),
       asset?.dataUrl && attachmentCanPreview(asset)
         ? button("Preview", () => openAttachmentPreview(asset, `${text(row.title)} · ${label}`), "button-quiet qc-ops-small-button")
         : null,
@@ -611,8 +615,9 @@ function renderHistoricalInspectionRow(row, index, workspace, state) {
         void downloadFile(asset.name, asset.dataUrl, asset.mimeType).catch((error) => notify(errorText(error, "The file could not be downloaded."), true));
       }, "button-quiet qc-ops-small-button") : null,
     );
-    return slot;
-  }));
+    return [slot];
+  });
+  const attachmentCell = el("td", { className: "qc-ops-row-attachments qc-ops-row-attachments-readonly" }, ...attachmentSlots);
   tr.append(
     el("td", { className: "qc-ops-number" }, row.timeSeconds === null || row.timeSeconds === undefined ? "—" : `${row.timeSeconds}s`),
     procedure,
@@ -819,10 +824,10 @@ function renderBatchAttachments(workspace, state, ctx, { compact = false } = {})
       el("div", {}, el("strong", {}, text(asset.name, "Attachment"))),
       attachmentActions(asset, batch, ctx),
     ))
-    : [el("li", { className: "qc-ops-attachment-empty" }, "No attachments")];
+    : compact ? [] : [el("li", { className: "qc-ops-attachment-empty" }, "No attachments")];
   const section = el("section", { className: "card qc-ops-attachments-card" },
     el("div", { className: "qc-ops-section-heading" },
-      el("h2", {}, "Attachments"),
+      compact ? null : el("h2", {}, "Attachments"),
       add,
     ),
     el("ul", { className: "qc-ops-attachment-list" }, items),
@@ -955,7 +960,7 @@ function renderBatchDetail(root, ctx) {
     const detailComplete = (value) => validIsoDate(value.date) && Boolean(value.recorder.trim());
     let detailStatus = el("span", {
       className: detailComplete(savedDetails) ? "qc-ops-saved" : "qc-ops-incomplete",
-    }, detailComplete(savedDetails) ? "Saved" : "Saved · Incomplete");
+    }, detailComplete(savedDetails) ? "Saved" : "Incomplete");
     const detailSummary = el("summary", { className: "qc-ops-batch-details-summary" },
       el("strong", {}, "Batch details"), dateSummary, recorderSummary, notesSummary, detailStatus);
     const readDetailValue = () => ({
@@ -1053,14 +1058,18 @@ function renderBatchDetail(root, ctx) {
       : versionLabels.length === 1
         ? versionLabels[0]
         : versionFacts.map((entry) => `${entry.product} ${entry.version}`).join(" · ");
-    const productSummary = products.map((product) => `${productLabel(product, state)} ${quantity(product.quantity)} units`).join(" · ");
+    const productFact = products.length === 1
+      ? el("span", {}, el("strong", {}, "Product"), text(productLabel(products[0], state)))
+      : products.length === 0 && batch.variantId
+        ? el("span", {}, el("strong", {}, "Product"), productLabel({ variantId: batch.variantId }, state))
+        : null;
     const metadata = el("section", { className: "card qc-ops-batch-meta-card qc-ops-operational-summary-card" },
       el("div", { className: "qc-ops-batch-facts qc-ops-summary-facts" },
         el("span", {}, el("strong", {}, "PO"), text(order?.number, batch.orderId)),
         el("span", {}, el("strong", {}, "Version"), text(versionSummary)),
         el("span", {}, el("strong", {}, "Factory"), text(batch.factory)),
         el("span", {}, el("strong", {}, "Stage"), text(batch.stage)),
-        el("span", {}, el("strong", {}, "Products"), text(productSummary)),
+        productFact,
         el("span", {}, el("strong", {}, "Total"), `${quantity(totalProductQuantity(batch, state, workspace))} units`),
       ),
       el("details", { className: "qc-ops-batch-details" }, detailSummary, detailForm),
@@ -1467,7 +1476,7 @@ function renderBatchList(root, ctx) {
       createButton
     ));
   }
-  root.replaceChildren(pageHeading("Batches", "Browse batch records, open their inspection tables, and access batch attachments.", actions), ...sections);
+  root.replaceChildren(pageHeading("Batches", "", actions), ...sections);
 }
 
 export function clearBatchDrafts() {

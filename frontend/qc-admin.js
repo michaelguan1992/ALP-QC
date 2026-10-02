@@ -67,28 +67,27 @@ function renderRecordedVersion(ctx, version) {
   const rawDescription = source.rawRecord[LARK_VERSION_FIELDS.changeDescription];
   const changeDescription = typeof rawDescription === "string" && rawDescription.trim()
     ? formatNumberedDescription(rawDescription)
-    : "No change description";
+    : "";
   return h("article", { className: "version-card recorded-version-card" },
     h("header", { className: "version-card-header" }, h("div", {},
       h("div", { className: "button-row version-title-row" },
         h("h3", {}, version.label || "Version label not recorded"),
-        statusBadge(`Status: ${status}`),
+        statusBadge(status),
         renderVersionAttachmentControl(ctx, version),
       ),
       h("p", {}, `Effective ${effectiveAt}`),
     )),
-    h("details", {}, h("summary", {}, "Change description"),
+    changeDescription ? h("details", {}, h("summary", {}, "Change description"),
       h("div", { className: "lark-source-details" },
-        h("h4", {}, "Change description / 变更内容说明"),
         h("p", { className: "source-preserve-text" }, changeDescription),
       ),
-    ),
+    ) : null,
   );
 }
 
-function pageHeading(root, eyebrow, title, _description, actions = []) {
+function pageHeading(root, title, actions = []) {
   root.append(h("header", { className: "page-heading" },
-    h("div", {}, h("p", { className: "eyebrow" }, eyebrow), h("h2", {}, title)),
+    h("div", {}, h("h1", {}, title)),
     actions.length ? h("div", { className: "page-heading-actions" }, actions) : null,
   ));
 }
@@ -135,14 +134,12 @@ function itemTable(items) {
 }
 
 function renderCatalog(root, ctx) {
-  const activeCount = ctx.state.variants.filter((variant) => variant.active).length;
-  pageHeading(root, "Products", "Catalog", "Keep inspection families, product models, and orderable variants distinct. Inactive variants remain available in historical records.", [
+  pageHeading(root, "Catalog", [
     button("Add variant", () => openVariantEditor(ctx), "button-primary"),
   ]);
   const familyGrid = h("div", { className: "admin-grid" }, ctx.state.families.map((family) => h("section", { className: "admin-card family-card card" },
     h("div", { className: "section-heading" },
       h("h3", {}, family.name),
-      statusBadge(`${family.models.length} models`),
     ),
     h("div", { className: "family-models" }, family.models.map((model) => statusBadge(model))),
   )));
@@ -160,11 +157,11 @@ function renderCatalog(root, ctx) {
   )) : emptyState("No product variants yet", "");
   root.append(h("div", { className: "admin-grid" },
     h("section", { className: "admin-card admin-card-wide card" },
-      h("div", { className: "section-heading" }, h("h3", {}, "Inspection families"), statusBadge(`${ctx.state.families.length} families`)),
+      h("div", { className: "section-heading" }, h("h3", {}, "Inspection families")),
       familyGrid,
     ),
     h("section", { className: "admin-card admin-card-wide card" },
-      h("div", { className: "section-heading" }, h("h3", {}, "Product variants"), statusBadge(`${activeCount} active`, "green")),
+      h("div", { className: "section-heading" }, h("h3", {}, "Product variants")),
       variantTable,
     ),
   ));
@@ -185,10 +182,7 @@ function openVariantEditor(ctx) {
       field("Color", input("color", "", "text", { required: true, maxLength: 80, placeholder: "For example: Blue" })),
       field("Displayed product name", input("label", "", "text", { required: true, maxLength: 160, placeholder: "For example: S15 Blue" })),
     ),
-    h("div", { className: "form-actions" },
-      button("Cancel", () => closeDialog(), "button-secondary"),
-      h("button", { type: "submit", className: "button button-primary" }, "Create active variant"),
-    ),
+    h("div", { className: "form-actions" }, h("button", { type: "submit", className: "button button-primary" }, "Create active variant")),
   );
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -262,7 +256,7 @@ function renderVersionEditor(ctx, version, initialFamilyId) {
       field("Version name", input("label", formSnapshot?.label ?? version?.label ?? `Version ${next}`, "text", { required: true, maxLength: 160 })),
       field("Sequence", input("sequence", formSnapshot?.sequence ?? version?.sequence ?? next, "number", { required: true, min: 1, step: 1 })),
       field("Effective date", input("effectiveDate", formSnapshot?.effectiveDate ?? version?.effectiveDate ?? today(), "date", { required: true })),
-      field("Notes and source", input("notes", formSnapshot?.notes ?? version?.notes ?? "", "text", { maxLength: 5000, className: "form-control" })),
+      field("Notes", input("notes", formSnapshot?.notes ?? version?.notes ?? "", "text", { maxLength: 5000, className: "form-control" })),
     );
     const editorRows = itemsToDraw.map((item, index) => {
       const allModels = item.models?.length === 0;
@@ -304,7 +298,7 @@ function renderVersionEditor(ctx, version, initialFamilyId) {
     const form = h("form", { className: "stack version-editor-form" },
       metadata,
       h("section", { className: "stack" },
-        h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Inspection standards"), h("p", {}, `${itemsToDraw.length} item${itemsToDraw.length === 1 ? "" : "s"} in this version.`)),
+        h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Inspection standards")),
           button("Add standard item", () => {
             const current = readVersionForm(form, itemDrafts, family.id);
             const nextNo = Math.max(0, ...current.items.map((item) => Number(item.no) || 0)) + 1;
@@ -315,7 +309,7 @@ function renderVersionEditor(ctx, version, initialFamilyId) {
         ),
         editorRows.length ? h("div", { className: "item-editor-list" }, editorRows) : emptyState("No inspection items yet", ""),
       ),
-      h("div", { className: "form-actions" }, button("Cancel", () => closeDialog(), "button-secondary"), h("button", { type: "submit", className: "button button-primary" }, version ? "Save draft" : "Create draft")),
+      h("div", { className: "form-actions" }, h("button", { type: "submit", className: "button button-primary" }, version ? "Save draft" : "Create draft")),
     );
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -341,7 +335,7 @@ function openCloneDialog(ctx, version) {
       field("Sequence", input("sequence", familySequence, "number", { required: true, min: 1, step: 1 })),
       field("Effective date", input("effectiveDate", today(), "date", { required: true })),
     ),
-    h("div", { className: "form-actions" }, button("Cancel", () => closeDialog(), "button-secondary"), h("button", { type: "submit", className: "button button-primary" }, "Create draft copy")),
+    h("div", { className: "form-actions" }, h("button", { type: "submit", className: "button button-primary" }, "Create draft copy")),
   );
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -356,7 +350,6 @@ function confirmPublish(ctx, version) {
   showDialog("Publish immutable standards", h("div", { className: "stack" },
     h("p", {}, `Publish ${version.label} for ${familyName(ctx, version.familyId)}? Published versions cannot be edited. Future changes require a new draft copy.`),
     h("div", { className: "button-row" },
-      button("Keep as draft", () => closeDialog(true), "button-secondary"),
       button("Publish version", async () => {
         const result = await ctx.run("publishVersion", { id: version.id });
         if (result.ok) closeDialog(true);
@@ -405,12 +398,11 @@ function renderOperationalVersion(ctx, version) {
 }
 
 function renderStandards(root, ctx) {
-  const actions = [
-    ...ctx.state.families.map((family) => button(`New ${family.name} version`, () => openNewVersion(ctx, family.id), "button-primary")),
-  ];
-  pageHeading(root, "Standards", "Design versions and inspection standards", "Published versions are available for new batches. Archived versions remain available for reference.", actions);
+  pageHeading(root, "Standards");
   if (!ctx.state.versions.length) {
-    root.append(emptyState("No design versions yet", ""));
+    root.append(emptyState("No versions yet", "", h("div", { className: "button-row" }, ctx.state.families.map((family) =>
+      button(`Create ${family.name} draft`, () => openNewVersion(ctx, family.id), "button-secondary"),
+    ))));
     return;
   }
   const sections = ctx.state.families.map((family) => {
@@ -420,13 +412,13 @@ function renderStandards(root, ctx) {
     const recordedVersions = allRecordedVersions
       .filter((version) => String(version.label ?? "").trim().toLocaleLowerCase() !== "ventus")
       .sort(sortSourceVersions);
-    const visibleVersionCount = familyVersions.length + recordedVersions.length;
     const visibleVersions = recordedVersions.map((version) => renderRecordedVersion(ctx, version))
       .concat(familyVersions.map((version) => renderOperationalVersion(ctx, version)));
     return h("section", { className: "admin-card admin-card-wide card" },
-      h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, family.name), h("p", {}, family.models.join(", "))), statusBadge(`${visibleVersionCount} visible version${visibleVersionCount === 1 ? "" : "s"}`)),
-      button(`Create ${family.name} draft`, () => openNewVersion(ctx, family.id), "button-secondary"),
-      h("h4", { className: "version-group-heading" }, "Versions"),
+      h("div", { className: "section-heading" },
+        h("h3", {}, family.name),
+        button(`Create ${family.name} draft`, () => openNewVersion(ctx, family.id), "button-secondary"),
+      ),
       h("div", { className: "version-list" }, visibleVersions),
     );
   });
@@ -494,7 +486,7 @@ function openOrderEditor(ctx, order = null) {
         }, "button-secondary")),
         linesUi.length ? linesUi : emptyState("No lines", ""),
       ),
-      h("div", { className: "form-actions" }, button("Cancel", () => closeDialog(), "button-secondary"), h("button", { type: "submit", className: "button button-primary" }, order ? "Save purchase order" : "Create purchase order")),
+      h("div", { className: "form-actions" }, h("button", { type: "submit", className: "button button-primary" }, order ? "Save purchase order" : "Create purchase order")),
     );
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -517,16 +509,14 @@ function stat(label, value) {
 }
 
 async function renderOrders(root, ctx) {
-  pageHeading(root, "Purchasing", "Purchase orders", "Track ordered quantities by product variant. Only quantities from explicitly released, counting batches contribute to progress.", [
+  pageHeading(root, "Purchase orders", [
     button("New purchase order", () => openOrderEditor(ctx), "button-primary"),
   ]);
   if (!ctx.state.orders.length) {
-    root.append(emptyState("No purchase orders yet", "", [
-      button("Create purchase order", () => openOrderEditor(ctx), "button-primary"),
-    ]));
+    root.append(emptyState("No purchase orders yet", ""));
     return;
   }
-  const loading = h("section", { className: "admin-card card" }, h("p", { className: "muted" }, "Loading released quantity progress…"));
+  const loading = h("section", { className: "admin-card card" }, h("p", { className: "muted" }, "Loading…"));
   root.append(loading);
   const results = await Promise.all(ctx.state.orders.map(async (order) => {
     try { return { order, progress: await ctx.service.getPurchaseOrderProgress(order.id), error: null }; }
@@ -534,14 +524,13 @@ async function renderOrders(root, ctx) {
   }));
   if (!root.isConnected) return;
   root.replaceChildren();
-  pageHeading(root, "Purchasing", "Purchase orders", "Track ordered quantities by product variant. Only quantities from explicitly released, counting batches contribute to progress.", [
+  pageHeading(root, "Purchase orders", [
     button("New purchase order", () => openOrderEditor(ctx), "button-primary"),
   ]);
   root.append(h("div", { className: "admin-grid" }, results.map(({ order, progress, error }) => h("details", { className: "admin-card admin-card-wide card purchase-order-card" },
     h("summary", { className: "purchase-order-summary" },
       h("span", { className: "purchase-order-summary-title" },
         h("strong", { className: "purchase-order-number" }, order.number),
-        statusBadge(`${order.lines.length} line${order.lines.length === 1 ? "" : "s"}`),
         button("Edit order", (event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -558,7 +547,7 @@ async function renderOrders(root, ctx) {
           h("tbody", {}, (progress?.lines ?? []).map((line) => h("tr", {},
             h("td", {}, h("strong", {}, line.variant?.label ?? variantName(ctx, line.variantId))),
             h("td", {}, text(line.orderedQty, "0")), h("td", {}, text(line.releasedQty, "0")), h("td", {}, text(line.remainingQty, "0")), h("td", {}, text(line.excessQty, "0")),
-            h("td", {}, (line.batches ?? []).length ? h("div", { className: "stack" }, line.batches.map((batch) => h("span", { className: "readonly-label" }, `${batch.number}: ${batch.quantity} released`))) : "No released batches"),
+            h("td", {}, (line.batches ?? []).length ? h("div", { className: "stack" }, line.batches.map((batch) => h("span", { className: "readonly-label" }, `${batch.number}: ${batch.quantity} released`))) : "—"),
           ))),
         )),
     ),
@@ -602,12 +591,11 @@ function openVersionAttachmentDialog(ctx, version) {
   const limitNote = h("p", { className: "file-size" },
     `Maximum per document: ${formatBytes(DOCUMENT_MAX_BYTES)}. All stored attachment payloads together: ${formatBytes(totalBytes)} of ${formatBytes(ASSET_TOTAL_MAX_BYTES)}.`);
   const submitButton = h("button", { type: "submit", className: "button button-primary" }, "Upload attachment");
-  const cancelButton = button("Close", () => closeDialog(true), "button-secondary");
   const form = h("form", { className: "stack version-attachment-form" },
     field("Choose one document", filePicker),
     limitNote,
     feedback,
-    h("div", { className: "form-actions" }, cancelButton, submitButton),
+    h("div", { className: "form-actions" }, submitButton),
   );
 
   form.addEventListener("submit", async (event) => {
@@ -632,7 +620,6 @@ function openVersionAttachmentDialog(ctx, version) {
     submitting = true;
     submitButton.disabled = true;
     filePicker.disabled = true;
-    cancelButton.disabled = true;
     submitButton.textContent = "Uploading…";
     setUploadFeedback(feedback, "Uploading document…");
     try {
@@ -651,7 +638,6 @@ function openVersionAttachmentDialog(ctx, version) {
       submitting = false;
       submitButton.disabled = false;
       filePicker.disabled = false;
-      cancelButton.disabled = false;
       submitButton.textContent = "Upload attachment";
     }
   });
@@ -736,7 +722,6 @@ function openVersionAttachmentViewer(ctx, version, asset) {
     const actions = h("div", { className: "version-attachment-dialog-actions" },
       downloadButton,
       deleteButton,
-      button("Done", () => closeDialog(true), "button-primary"),
     );
     const dialog = showDialog("Version attachment", h("div", { className: "version-attachment-viewer" },
       h("h3", { className: "version-attachment-viewer-title" }, asset.name),
@@ -772,7 +757,7 @@ function renderVersionAttachmentControl(ctx, version) {
 
 function renderLibrary(root, ctx) {
   const totalBytes = ctx.state.assets.reduce((sum, asset) => sum + bytesInDataUrl(asset.dataUrl), 0);
-  pageHeading(root, "Reference files", "File library", "Keep original standards, work instructions, and other source files together. Files are downloadable; the library does not execute or preview HTML or SVG.");
+  pageHeading(root, "File library");
   const versionOptions = [{ value: "", label: "No version link" }, ...ctx.state.versions.map((version) => ({
     value: version.id,
     label: `${familyName(ctx, version.familyId)} · ${version.label || "Version label not recorded"} (${version.status === "recorded" ? "Archived" : version.status})`,
@@ -780,7 +765,7 @@ function renderLibrary(root, ctx) {
   const form = h("form", { className: "backup-panel" },
     h("div", { className: "file-choice" },
       field("Choose a source file", input("file", "", "file", { accept: ".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.log,.csv,.md,.markdown", required: true })),
-      h("p", { className: "file-size" }, `Maximum per library file: ${formatBytes(DOCUMENT_MAX_BYTES)}. All stored file payloads together: ${formatBytes(ASSET_TOTAL_MAX_BYTES)}.`),
+      h("p", { className: "file-size" }, `Per-file limit: ${formatBytes(DOCUMENT_MAX_BYTES)} · stored: ${formatBytes(totalBytes)} / ${formatBytes(ASSET_TOTAL_MAX_BYTES)}.`),
     ),
     field("Link to design version", select("versionId", versionOptions, "")),
     h("div", { className: "form-actions" }, h("button", { type: "submit", className: "button button-primary" }, "Save file to library")),
@@ -817,15 +802,15 @@ function renderLibrary(root, ctx) {
         catch (error) { notify(error instanceof Error ? error.message : "The file could not be downloaded.", true); }
       }, "button-secondary"),
     );
-  })) : emptyState("No library files yet", "");
+  })) : emptyState("No files yet", "");
   root.append(h("div", { className: "admin-grid" },
-    h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Add a reference file"), h("p", {}, `Stored payload: ${formatBytes(totalBytes)} of ${formatBytes(ASSET_TOTAL_MAX_BYTES)}.`))), form),
-    h("section", { className: "admin-card admin-card-wide card" }, h("div", { className: "section-heading" }, h("div", {}, h("h3", {}, "Library files"), h("p", {}, `${assets.length} file${assets.length === 1 ? "" : "s"} · download-only access`)), statusBadge(`${formatBytes(totalBytes)} stored`)), files),
+    h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("h3", {}, "Add a file")), form),
+    h("section", { className: "admin-card admin-card-wide card" }, h("div", { className: "section-heading" }, h("h3", {}, "Library files")), files),
   ));
 }
 
 function renderBackup(root, ctx) {
-  pageHeading(root, "Local data", "Backup and restore", "Export a JSON snapshot with records and attachments. Restore adds valid records to this local workspace and stops on conflicts without changing it.");
+  pageHeading(root, "Backup and restore");
   const exportButton = button("Download full backup", async () => {
     try {
       const backup = await ctx.service.exportBackup();
@@ -893,15 +878,24 @@ function renderBackup(root, ctx) {
     h("div", { className: "progress-stat" }, h("span", {}, "Batches"), h("strong", {}, String(ctx.state.batches.length))),
     h("div", { className: "progress-stat" }, h("span", {}, "Attachment payload"), h("strong", {}, `${formatBytes(assetBytes)} / ${formatBytes(ASSET_TOTAL_MAX_BYTES)}`)),
   );
-  root.append(h("div", { className: "admin-grid" },
-    h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("h3", {}, "Export current workspace")), exportButton,
-      h("p", { className: "file-size" }, `Serialized backup limit: ${formatBytes(BACKUP_MAX_BYTES)}.`)),
-    h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("h3", {}, "Restore into this workspace")), form),
-    !ctx.isDemo ? h("section", { className: "admin-card card" },
-      h("div", { className: "section-heading" }, h("h3", {}, "Move existing browser data")),
+  root.append(h("div", { className: "admin-grid backup-grid" },
+    h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("h3", {}, "Export")), exportButton),
+    h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("h3", {}, "Restore")), form),
+    !ctx.isDemo ? h("details", { className: "admin-card admin-card-wide card backup-disclosure" },
+      h("summary", {}, "Browser migration"),
       migrationButton,
     ) : null,
-    h("section", { className: "admin-card admin-card-wide card" }, h("div", { className: "section-heading" }, h("h3", {}, ctx.isDemo ? "Current demo workspace" : "Current shared workspace")), metrics),
+    h("details", { className: "admin-card admin-card-wide card backup-disclosure" },
+      h("summary", {}, ctx.isDemo ? "Demo workspace details" : "Shared workspace details"),
+      metrics,
+    ),
+    h("details", { className: "admin-card admin-card-wide card backup-disclosure" },
+      h("summary", {}, "Reference pages"),
+      h("div", { className: "stack" },
+        h("a", { href: "/frontend/initialization.html" }, "Initialization draft"),
+        h("a", { href: "/frontend/prototype.html" }, "AP table prototype"),
+      ),
+    ),
   ));
 }
 

@@ -1,4 +1,4 @@
-import { button, closeDialog, downloadFile, el, notify, readFileAsDataURL, showDialog } from "./qc-ui.js";
+import { button, downloadFile, el, notify, readFileAsDataURL, showDialog } from "./qc-ui.js";
 
 export const MEBIBYTE = 1024 * 1024;
 
@@ -150,7 +150,6 @@ export function openAttachmentPreview(asset, title = null) {
       button("Download", () => {
         void downloadFile(name, asset.dataUrl, asset.mimeType).catch((error) => notify(error instanceof Error ? error.message : "The file could not be downloaded.", true));
       }, "button-secondary"),
-      button("Done", () => closeDialog(true), "button-primary"),
     ),
   ));
   activeDialogPreviewCleanup = preview.cleanup;

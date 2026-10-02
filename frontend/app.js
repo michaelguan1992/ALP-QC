@@ -21,7 +21,7 @@ async function loadDraft() {
     await dataService.initialize();
     showStorageStatus("IndexedDB 可用", "ready");
     noteField.value = await dataService.loadInitializationDraft();
-    saveStatus.textContent = "草稿已从当前浏览器读取；保存后刷新页面可验证。";
+    saveStatus.textContent = "草稿已读取。";
     noteField.disabled = false;
     saveButton.disabled = false;
   } catch (error) {
@@ -40,7 +40,7 @@ form.addEventListener("submit", async (event) => {
   saveStatus.textContent = "正在保存…";
   try {
     await dataService.saveInitializationDraft(noteField.value);
-    saveStatus.textContent = "已保存到当前浏览器。刷新页面后，草稿应仍然显示。";
+    saveStatus.textContent = "草稿已保存。";
     showStorageStatus("IndexedDB 可用", "ready");
   } catch (error) {
     saveStatus.textContent = displayError(error);
