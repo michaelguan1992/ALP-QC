@@ -434,7 +434,7 @@ test("purchase order progress keeps variants separate and reports shortage and o
   assert.equal(yellowLine.excessQty, 0);
 });
 
-test("row photos stay isolated by row and batch, and history uses only saved earlier matching results", async () => {
+test("row photos stay isolated by row and batch, and history uses saved earlier comparable results", async () => {
   const harness = makeHarness();
   await harness.service.initialize();
   await publishAPReferences(harness);
@@ -457,10 +457,11 @@ test("row photos stay isolated by row and batch, and history uses only saved ear
   const current = await createBatch(harness, { variant: red, number: "B-HISTORY-CURRENT", quantity: 100, lotNumber: "LOT-CURRENT", date: "2026-09-28" });
   workspace = await harness.service.getBatchWorkspace(current.id);
   const matchingHistory = workspace.rows[0].history;
-  assert.equal(matchingHistory.length, 1);
-  assert.equal(matchingHistory[0].batchId, older.id);
-  assert.equal(matchingHistory[0].rate, 10);
-  assert.notEqual(matchingHistory[0].batchId, unsaved.id);
+  assert.equal(matchingHistory.length, 2);
+  assert.ok(matchingHistory.some((entry) => entry.batchId === older.id));
+  assert.equal(matchingHistory.find((entry) => entry.batchId === older.id).rate, 10);
+  assert.ok(matchingHistory.some((entry) => entry.batchId === otherVariant.id && entry.color === yellow.color));
+  assert.ok(matchingHistory.every((entry) => entry.batchId !== unsaved.id));
 
   const rowA = workspace.rows[0];
   const rowB = workspace.rows[1];

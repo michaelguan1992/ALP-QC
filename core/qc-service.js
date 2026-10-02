@@ -23,7 +23,7 @@ import {
   removeVersionAttachment,
   setRowAttachment,
 } from "./qc-assets.js";
-import { addDiscussion, closeIssue, createIssue, deleteIssue, saveIssue } from "./qc-issues.js";
+import { addActionLog, addDiscussion, closeIssue, createIssue, deleteIssue, saveIssue } from "./qc-issues.js";
 import { autosaveInspection, createBatch, deleteBatch, getBatchWorkspace as readBatchWorkspace, releaseBatch, saveBatchChanges, saveBatchDetails, saveInspection } from "./qc-inspections.js";
 import { createOrder, getPurchaseOrderProgress, saveOrder } from "./qc-purchasing.js";
 import { createVersion, cloneVersion, installAPReferences, publishVersion, saveVersion, supersedeOutdatedAPVersions } from "./qc-standards.js";
@@ -82,6 +82,7 @@ const COMMANDS = new Map([
   ["removeIssueAttachment", removeIssueAttachment],
   ["saveIssue", saveIssue],
   ["addDiscussion", addDiscussion],
+  ["addActionLog", addActionLog],
   ["closeIssue", closeIssue],
   ["releaseBatch", releaseBatch],
   ["addDocument", addDocument],
@@ -111,7 +112,7 @@ function requireAdapter(adapter) {
 }
 
 const ASSET_METADATA_FIELDS = [
-  "id", "name", "mimeType", "kind", "batchId", "rowId", "versionId", "createdAt", "issueId", "category",
+  "id", "name", "mimeType", "kind", "batchId", "rowId", "versionId", "createdAt", "issueId", "actionLogId", "category",
 ];
 
 function isLightweightMode(options) {
@@ -120,17 +121,19 @@ function isLightweightMode(options) {
 
 function projectLightweightState(state, trustedAssetValidation) {
   const projected = clone(state);
-  projected.assets = state.assets.map((asset) => {
-    const metadata = Object.fromEntries(
-      ASSET_METADATA_FIELDS.filter((field) => Object.hasOwn(asset, field)).map((field) => [field, asset[field]]),
-    );
-    const trusted = trustedAssetValidation?.get?.(asset.id);
-    if (Number.isSafeInteger(trusted?.decodedBytes)) metadata.decodedBytes = trusted.decodedBytes;
-    else if (typeof asset.dataUrl === "string") metadata.decodedBytes = normalizeDataUrl(asset.dataUrl, "Stored attachment").decodedBytes;
-    if (Number.isSafeInteger(trusted?.contentRevision)) metadata.contentRevision = trusted.contentRevision;
-    return metadata;
-  });
+  projected.assets = state.assets.map((asset) => projectAssetMetadata(asset, trustedAssetValidation));
   return projected;
+}
+
+function projectAssetMetadata(asset, trustedAssetValidation) {
+  const metadata = Object.fromEntries(
+    ASSET_METADATA_FIELDS.filter((field) => Object.hasOwn(asset, field)).map((field) => [field, asset[field]]),
+  );
+  const trusted = trustedAssetValidation?.get?.(asset.id);
+  if (Number.isSafeInteger(trusted?.decodedBytes)) metadata.decodedBytes = trusted.decodedBytes;
+  else if (typeof asset.dataUrl === "string") metadata.decodedBytes = normalizeDataUrl(asset.dataUrl, "Stored attachment").decodedBytes;
+  if (Number.isSafeInteger(trusted?.contentRevision)) metadata.contentRevision = trusted.contentRevision;
+  return metadata;
 }
 
 function projectFullAsset(asset) {
@@ -142,7 +145,7 @@ function projectFullAsset(asset) {
   return projected;
 }
 
-function projectCommandChanges(type, state, entityId, auditStart) {
+function projectCommandChanges(type, state, entityId, auditStart, outcome = {}, trustedAssetValidation = undefined) {
   const changes = {
     batches: [],
     issues: [],
@@ -155,6 +158,13 @@ function projectCommandChanges(type, state, entityId, auditStart) {
   } else if (type === "saveIssue") {
     const issue = state.issues.find((candidate) => candidate.id === entityId);
     if (issue) changes.issues.push(clone(issue));
+  } else if (type === "addActionLog") {
+    const issue = state.issues.find((candidate) => candidate.id === entityId);
+    if (issue) changes.issues.push(clone(issue));
+    const assetIds = new Set(outcome.assetIds ?? []);
+    changes.assets = state.assets
+      .filter((asset) => assetIds.has(asset.id))
+      .map((asset) => projectAssetMetadata(asset, trustedAssetValidation));
   } else if (type === "createOrder" || type === "saveOrder") {
     changes.orders = state.orders.filter((order) => order.id === entityId).map(clone);
   }
@@ -329,9 +339,12 @@ export function createQCService(adapter, options = {}) {
           result: {
             entityId: outcome.entityId,
             revision: state.revision,
-            ...(type === "autosaveInspection" || type === "saveBatchChanges" ? { changed: false } : {}),
+            ...(type === "autosaveInspection" || type === "saveBatchChanges" || type === "addActionLog" ? { changed: false } : {}),
+            ...(outcome.actionLogId ? { actionLogId: outcome.actionLogId, assetIds: [...(outcome.assetIds ?? [])] } : {}),
             ...(outcome.counts ? { counts: outcome.counts } : {}),
-            ...(type === "saveBatchChanges" ? { changes: projectCommandChanges(type, state, outcome.entityId, auditStart) } : {}),
+            ...(type === "saveBatchChanges" || type === "addActionLog"
+              ? { changes: projectCommandChanges(type, state, outcome.entityId, auditStart, outcome, currentValidation.trustedAssetValidation) }
+              : {}),
           },
         };
       }
@@ -343,9 +356,10 @@ export function createQCService(adapter, options = {}) {
         result: {
           entityId: outcome.entityId,
           revision: state.revision,
+          ...(outcome.actionLogId ? { actionLogId: outcome.actionLogId, assetIds: [...(outcome.assetIds ?? [])] } : {}),
           ...(outcome.counts ? { counts: outcome.counts } : {}),
-          ...(["saveBatchChanges", "saveIssue", "createOrder", "saveOrder"].includes(type)
-            ? { changes: projectCommandChanges(type, state, outcome.entityId, auditStart) }
+          ...(["saveBatchChanges", "saveIssue", "addActionLog", "createOrder", "saveOrder"].includes(type)
+            ? { changes: projectCommandChanges(type, state, outcome.entityId, auditStart, outcome, currentValidation.trustedAssetValidation) }
             : {}),
         },
       };

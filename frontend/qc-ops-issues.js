@@ -9,6 +9,7 @@ import {
   pageHeading,
   quantity,
   runCommand,
+  setOptions,
   statusPill,
   text,
   timestampLabel
@@ -27,7 +28,13 @@ import {
   readAttachmentFile,
 } from "./qc-attachments.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
-import { hasRequiredIssuePhoto, remainingIssueDraftAfterDiscussion, submitDiscussionEntry } from "./qc-issue-drafts.js";
+import {
+  hasActionLogDraft,
+  hasRequiredIssuePhoto,
+  remainingIssueDraftAfterActionLog,
+  remainingIssueDraftAfterDiscussion,
+  submitDiscussionEntry,
+} from "./qc-issue-drafts.js";
 
 const issueDrafts = new Map();
 let activeIssueDialogRuntime = null;
@@ -166,7 +173,13 @@ function issueDraft(issue) {
     disposition: String(issue.disposition || ""),
     confirmations: [0, 1, 2].map((index) => String(issue.confirmations?.[index] || "")),
     discussionAuthorName: "",
-    discussionText: ""
+    discussionText: "",
+    actionSubmitterName: "",
+    actionType: "",
+    actionSummary: "",
+    actionResult: "",
+    actionFiles: [],
+    actionRequestId: "",
   };
 }
 
@@ -202,7 +215,7 @@ function hasDiscussionDraft(draft) {
 }
 
 function hasIssueDraft(issue, draft) {
-  return draftDiffers(issue, draft) || hasDiscussionDraft(draft);
+  return draftDiffers(issue, draft) || hasDiscussionDraft(draft) || hasActionLogDraft(draft);
 }
 
 function sourcePhotos(issue, state) {
@@ -218,9 +231,12 @@ function sourcePhotoIds(issue) {
 }
 
 function issueAttachments(issue, state) {
-  if (Array.isArray(issue.attachments)) return issue.attachments;
   const assets = new Map(list(state.assets).map((asset) => [asset.id, asset]));
-  return list(issue.attachmentIds).map((id) => assets.get(id)).filter(Boolean);
+  const actionLogAssetIds = new Set(list(issue.actionLogs).flatMap((entry) => list(entry.attachmentIds)));
+  const attached = Array.isArray(issue.attachments)
+    ? issue.attachments
+    : list(issue.attachmentIds).map((id) => assets.get(id)).filter(Boolean);
+  return attached.filter((asset) => !asset.actionLogId && !actionLogAssetIds.has(asset.id));
 }
 
 function newRequestId() {
@@ -506,10 +522,121 @@ function renderDiscussion(issue) {
   }));
 }
 
+const ACTION_TYPE_LABELS = new Map([
+  ["isolation", "Isolation"],
+  ["rework", "Rework"],
+  ["scrap", "Scrap"],
+  ["return", "Return"],
+  ["design", "Design"],
+  ["process", "Process"],
+  ["other", "Other"],
+]);
+
+function actionLogAttachments(log, state) {
+  const assets = new Map(list(state.assets).map((asset) => [asset.id, asset]));
+  return list(log.attachmentIds).map((id) => assets.get(id)).filter(Boolean);
+}
+
+function renderActionLogHistory(issue, state, ctx) {
+  const cleanups = [];
+  const pendingImages = [];
+  const logs = list(issue.actionLogs);
+  const element = logs.length
+    ? el("ol", { className: "qc-ops-action-log-list" }, ...logs.map((log) => {
+      let previewCleanup = () => {};
+      let previewRequest = 0;
+      const previewHost = el("div", { className: "qc-ops-action-log-preview-host" });
+      const clearPreview = () => {
+        previewRequest += 1;
+        previewCleanup();
+        previewCleanup = () => {};
+        previewHost.replaceChildren();
+      };
+      const showPreview = async (asset) => {
+        clearPreview();
+        const request = previewRequest;
+        let fullAsset;
+        try { fullAsset = await loadAssetContent(asset, ctx.service); }
+        catch (error) {
+          if (request === previewRequest) notify(errorText(error, "The file preview could not be opened."), true);
+          return;
+        }
+        if (request !== previewRequest) return;
+        const preview = createAttachmentPreview(fullAsset);
+        previewCleanup = preview.cleanup;
+        const closePreview = button("Close preview", clearPreview, "button-quiet qc-ops-small-button");
+        previewHost.replaceChildren(el("div", { className: "qc-ops-attachment-preview" },
+          el("strong", { className: "qc-ops-attachment-preview-name" }, text(fullAsset.name, "Attachment")),
+          preview.element,
+          closePreview,
+        ));
+        if (preview.load) {
+          void preview.load(preview.element).catch((error) => {
+            preview.element.textContent = error instanceof Error ? error.message : "The file preview could not be loaded.";
+          });
+        }
+      };
+      cleanups.push(() => { clearPreview(); });
+      const attachments = actionLogAttachments(log, state);
+      const attachmentItems = attachments.length
+        ? el("ul", { className: "qc-ops-action-log-evidence" }, ...attachments.map((asset) => {
+          const category = asset.category || issueAttachmentCategory(asset.mimeType);
+          const name = text(asset.name, "Attachment");
+          const thumbnail = category === "photo"
+            ? el("img", {
+              className: "qc-ops-issue-attachment-thumbnail",
+              ...(asset.dataUrl ? { src: asset.dataUrl } : {}),
+              alt: name,
+              title: name,
+              loading: "lazy",
+            })
+            : null;
+          if (thumbnail && !asset.dataUrl) pendingImages.push([thumbnail, asset]);
+          const preview = attachmentCanPreview(asset)
+            ? button("Preview", () => { void showPreview(asset); }, "button-quiet qc-ops-small-button")
+            : null;
+          if (preview) preview.setAttribute("aria-label", `Preview ${name}`);
+          const download = attachmentDownload(asset, "Attachment", ctx.service);
+          download.setAttribute("aria-label", `Download ${name}`);
+          return el("li", {}, thumbnail,
+            el("span", { className: "qc-ops-issue-attachment-name", title: name }, name),
+            el("small", {}, category === "photo" ? "Photo" : "File"),
+            preview,
+            download,
+          );
+        }))
+        : null;
+      const actionType = ACTION_TYPE_LABELS.get(log.actionType) || text(log.actionType);
+      return el("li", { className: "qc-ops-action-log-entry" },
+        el("header", { className: "qc-ops-action-log-header" },
+          el("strong", {}, actionType),
+          el("span", { className: "qc-ops-action-log-submitter" }, text(log.submitterName)),
+          el("time", {}, timestampLabel(log.submittedAt)),
+        ),
+        el("div", { className: "qc-ops-action-log-copy" },
+          el("strong", {}, "Summary"), el("p", {}, text(log.summary)),
+          el("strong", {}, "Result"), el("p", {}, text(log.result)),
+        ),
+        attachmentItems,
+        previewHost,
+      );
+    }))
+    : el("p", { className: "qc-ops-action-log-empty" }, "No formal action records.");
+  return {
+    element,
+    mount() { for (const [image, asset] of pendingImages) void loadAssetImage(image, asset, ctx.service); },
+    cleanup() { for (const cleanup of cleanups) cleanup(); },
+  };
+}
+
 function openIssueDialog(issue, state, ctx) {
   let currentIssue = issue;
   let currentState = state;
   const readOnly = currentIssue.status === "closed";
+  const linkedBatch = list(state.batches).find((batch) => batch.id === currentIssue.batchId);
+  const protectedBatchIssue = Boolean(linkedBatch &&
+    (linkedBatch.kind === "historical" || linkedBatch.status === "historical" || linkedBatch.status === "released"));
+  const actionReadOnly = readOnly || protectedBatchIssue;
   const draft = issueDraft(currentIssue);
   const owner = el("input", { type: "text", maxLength: "200", value: draft.owner, disabled: readOnly, name: "owner" });
   const disposition = el("textarea", { rows: "3", maxLength: "1200", disabled: readOnly, name: "disposition" }, draft.disposition);
@@ -523,15 +650,56 @@ function openIssueDialog(issue, state, ctx) {
   const discussionText = el("textarea", { rows: "2", maxLength: "1200", disabled: readOnly, name: "discussionText" }, draft.discussionText || "");
   const discussionList = el("div", { className: "qc-ops-discussion-host" }, renderDiscussion(currentIssue));
   const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
+  const actionError = el("p", { className: "qc-ops-form-error qc-ops-action-log-error", role: "alert" });
   const saveStatus = el("p", { className: "save-status qc-ops-issue-save-status", role: "status", "aria-live": "polite" });
   const form = el("form", { className: "qc-ops-form qc-ops-issue-form", "data-preserve-drafts": "true", "data-issue-id": currentIssue.id });
+  const actionSubmitterName = el("input", {
+    type: "text", maxLength: "200", value: draft.actionSubmitterName || "", disabled: actionReadOnly,
+    name: "actionSubmitterName", "aria-required": "true"
+  });
+  const actionType = el("select", { disabled: actionReadOnly, name: "actionType", "aria-required": "true" });
+  setOptions(actionType, [
+    { value: "", label: "Select action type" },
+    ...[...ACTION_TYPE_LABELS].map(([value, label]) => ({ value, label })),
+  ], draft.actionType || "");
+  const actionSummary = el("textarea", { rows: "2", maxLength: "1200", disabled: actionReadOnly, name: "actionSummary" }, draft.actionSummary || "");
+  const actionResult = el("textarea", { rows: "2", maxLength: "1200", disabled: actionReadOnly, name: "actionResult" }, draft.actionResult || "");
+  const actionFileInput = el("input", {
+    type: "file", multiple: true, className: "qc-ops-hidden-file", disabled: actionReadOnly,
+    accept: "image/*,.pdf,.txt,.csv,.md,.markdown,.log,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.mp4,.mov,.webm",
+    ariaLabel: "Choose action evidence",
+  });
+  let pendingActionFiles = Array.isArray(draft.actionFiles) ? [...draft.actionFiles] : [];
+  let actionRequestId = String(draft.actionRequestId || "");
+  let actionControlsTemporarilyDisabled = false;
+  const actionFileList = el("ul", { className: "qc-ops-action-log-draft-files" });
+  const actionFileButton = button("Add evidence", () => actionFileInput.click(), "button-secondary qc-ops-small-button");
+  actionFileButton.disabled = actionReadOnly;
+  const actionSubmitButton = button("Submit action record", () => {}, "button-primary qc-ops-action-log-submit");
+  actionSubmitButton.disabled = actionReadOnly;
+  const actionLogList = el("div", { className: "qc-ops-action-log-host" });
+  let actionLogCleanup = () => {};
+  const renderActionLogList = () => {
+    actionLogCleanup();
+    const rendered = renderActionLogHistory(currentIssue, currentState, ctx);
+    actionLogCleanup = rendered.cleanup;
+    actionLogList.replaceChildren(rendered.element);
+    rendered.mount();
+  };
+  renderActionLogList();
 
   const captureDraft = () => ({
     owner: owner.value,
     disposition: disposition.value,
     confirmations: confirmationInputs.map((input) => input.value),
     discussionAuthorName: discussionAuthorName.value,
-    discussionText: discussionText.value
+    discussionText: discussionText.value,
+    actionSubmitterName: actionSubmitterName.value,
+    actionType: actionType.value,
+    actionSummary: actionSummary.value,
+    actionResult: actionResult.value,
+    actionFiles: [...pendingActionFiles],
+    actionRequestId,
   });
   const updateIssueListProjection = () => {
     const row = [...document.querySelectorAll("tr[data-issue-id]")].find((item) => item.dataset.issueId === currentIssue.id);
@@ -547,6 +715,7 @@ function openIssueDialog(issue, state, ctx) {
     currentIssue = latestIssue;
     currentState = latestState || currentState;
     Object.assign(issue, latestIssue);
+    renderActionLogList();
     updateIssueListProjection();
     return true;
   };
@@ -558,6 +727,37 @@ function openIssueDialog(issue, state, ctx) {
     const current = captureDraft();
     storeDraft(current);
     return current;
+  };
+  const updateActionFormDirty = (current = captureDraft()) => {
+    if (hasActionLogDraft(current)) form.dataset.dirty = "true";
+    else delete form.dataset.dirty;
+  };
+  const renderPendingActionFiles = () => {
+    actionFileList.replaceChildren(...pendingActionFiles.map((file, index) => {
+      const remove = button("Remove", () => {
+        if (actionReadOnly) return;
+        pendingActionFiles = pendingActionFiles.filter((_, fileIndex) => fileIndex !== index);
+        actionRequestId = "";
+        updateDraft();
+        renderPendingActionFiles();
+      }, "button-quiet qc-ops-attachment-remove");
+      remove.disabled = actionReadOnly || actionControlsTemporarilyDisabled;
+      remove.setAttribute("aria-label", `Remove ${text(file.name, "evidence")} from the action draft`);
+      const size = Number(file.size);
+      return el("li", {},
+        el("span", {}, text(file.name, "Attachment")),
+        Number.isFinite(size) ? el("small", {}, `${(size / MEBIBYTE).toFixed(size >= MEBIBYTE ? 1 : 2)} MiB`) : null,
+        remove,
+      );
+    }));
+  };
+  renderPendingActionFiles();
+  const setActionControlsDisabled = (value) => {
+    actionControlsTemporarilyDisabled = Boolean(value);
+    const disabled = actionReadOnly || actionControlsTemporarilyDisabled;
+    [actionSubmitterName, actionType, actionSummary, actionResult, actionFileInput, actionFileButton, actionSubmitButton]
+      .forEach((control) => { control.disabled = disabled; });
+    actionFileList.querySelectorAll("button").forEach((control) => { control.disabled = disabled; });
   };
 
   const runEvidenceCommand = async (type, data, options = {}) => {
@@ -571,6 +771,7 @@ function openIssueDialog(issue, state, ctx) {
   let manualSaveController = null;
   let closeSubmitting = false;
   let discussionSubmitting = false;
+  let actionSubmitting = false;
   let deleteSubmitting = false;
   let runtime = null;
   let dialog = null;
@@ -582,9 +783,115 @@ function openIssueDialog(issue, state, ctx) {
   let deleteConfirmation;
   let cancelDeleteButton;
   let confirmDeleteButton;
+  const setDeleteControlsDisabled = (value) => {
+    if (deleteButton) deleteButton.disabled = protectedBatchIssue || Boolean(value);
+    if (cancelDeleteButton) cancelDeleteButton.disabled = Boolean(value);
+    if (confirmDeleteButton) confirmDeleteButton.disabled = Boolean(value);
+  };
+
+  const submitActionLog = async () => {
+    if (actionReadOnly || actionSubmitting || closeSubmitting || runtime?.busy) return;
+    const current = markDraftForPreservation();
+    const submitterName = String(current.actionSubmitterName || "").trim();
+    if (!submitterName) {
+      actionError.textContent = "Enter the submitter name.";
+      actionSubmitterName.focus();
+      return;
+    }
+    if (!ACTION_TYPE_LABELS.has(current.actionType)) {
+      actionError.textContent = "Select an action type.";
+      actionType.focus();
+      return;
+    }
+    if (!String(current.actionSummary || "").trim()) {
+      actionError.textContent = "Enter a summary.";
+      actionSummary.focus();
+      return;
+    }
+    if (!String(current.actionResult || "").trim()) {
+      actionError.textContent = "Enter the result.";
+      actionResult.focus();
+      return;
+    }
+    const requestId = current.actionRequestId || newRequestId();
+    actionRequestId = requestId;
+    const submitted = { ...current, actionRequestId: requestId, actionFiles: [...current.actionFiles] };
+    storeDraft(submitted);
+    actionSubmitting = true;
+    form.dataset.actionLogSubmitting = "true";
+    actionSubmitButton.disabled = true;
+    if (runtime) runtime.busy = true;
+    actionError.textContent = "";
+    try {
+      const files = await Promise.all(submitted.actionFiles.map(async (file) => {
+        const mimeType = normalizedMimeType(file.name, file.type);
+        const category = issueAttachmentCategory(mimeType);
+        const payload = await readAttachmentFile(file, {
+          maxBytes: category === "photo" ? 5 * MEBIBYTE : 10 * MEBIBYTE,
+          category: category === "photo" ? "photo" : null,
+        });
+        return { ...payload, category };
+      }));
+      const response = await runCommand(ctx, "addActionLog", {
+        id: currentIssue.id,
+        submitterName,
+        actionType: current.actionType,
+        summary: String(current.actionSummary || "").trim(),
+        result: String(current.actionResult || "").trim(),
+        requestId,
+        files,
+      }, { render: false });
+      if (!response.ok) {
+        actionError.textContent = errorText(response.error, "The action record could not be submitted.");
+        return;
+      }
+      const latestState = response.state || currentState;
+      const latestIssue = list(latestState.issues).find((entry) => entry.id === currentIssue.id);
+      if (!latestIssue) {
+        actionError.textContent = "The action record was submitted, but the updated Issue could not be reloaded.";
+        return;
+      }
+      adoptLatestIssue(latestIssue, latestState);
+      const latestDraft = issueDrafts.get(currentIssue.id) || captureDraft();
+      const remainingDraft = remainingIssueDraftAfterActionLog(latestDraft, submitted);
+      if (actionSubmitterName.value === submitted.actionSubmitterName) actionSubmitterName.value = remainingDraft.actionSubmitterName;
+      if (actionType.value === submitted.actionType) actionType.value = remainingDraft.actionType;
+      if (actionSummary.value === submitted.actionSummary) actionSummary.value = remainingDraft.actionSummary;
+      if (actionResult.value === submitted.actionResult) actionResult.value = remainingDraft.actionResult;
+      pendingActionFiles = remainingDraft.actionFiles;
+      actionRequestId = remainingDraft.actionRequestId || "";
+      renderPendingActionFiles();
+      storeDraft(remainingDraft);
+      updateActionFormDirty(remainingDraft);
+      actionError.textContent = "";
+    } catch (error) {
+      actionError.textContent = errorText(error, "The action record could not be submitted.");
+    } finally {
+      actionSubmitting = false;
+      delete form.dataset.actionLogSubmitting;
+      actionSubmitButton.disabled = actionReadOnly;
+      if (runtime) runtime.busy = false;
+    }
+  };
+  actionSubmitButton.addEventListener("click", () => { void submitActionLog(); });
+  actionFileInput.addEventListener("change", () => {
+    const files = Array.from(actionFileInput.files || []);
+    if (!files.length) return;
+    pendingActionFiles = [...pendingActionFiles, ...files];
+    actionFileInput.value = "";
+    actionRequestId = "";
+    updateDraft();
+    renderPendingActionFiles();
+  });
+  updateActionFormDirty(draft);
 
   const reloadLatestButton = button("Reload latest data", async () => {
     if (runtime?.busy) return;
+    if (hasActionLogDraft(markDraftForPreservation())) {
+      notify("Submit or clear the action record draft before reloading the latest data.", true);
+      actionSubmitterName.focus();
+      return;
+    }
     const reload = async () => {
       if (!(await evidence.flushPending())) {
         formError.textContent = "Issue evidence changes could not be saved. Try again before reloading.";
@@ -636,23 +943,26 @@ function openIssueDialog(issue, state, ctx) {
   });
 
   closeButton = button("Close issue", async () => {
-    if (closeSubmitting || discussionSubmitting) return;
+    if (closeSubmitting || discussionSubmitting || actionSubmitting || deleteSubmitting || runtime?.busy) return;
     closeSubmitting = true;
     closeButton.disabled = true;
+    setDeleteControlsDisabled(true);
     if (runtime) runtime.busy = true;
     try {
       const closeSavedIssue = async () => {
         const current = markDraftForPreservation();
+        if (hasActionLogDraft(current)) {
+          notify("Submit or clear the action record draft before closing this issue.", true);
+          actionSubmitterName.focus();
+          return;
+        }
         if (current.discussionText.trim() || current.discussionAuthorName.trim()) {
           notify("Add or clear the discussion draft before closing this issue.", true);
           return;
         }
-        if (!currentIssue.owner?.trim() || !currentIssue.disposition?.trim() || currentIssue.confirmations?.some((name) => !String(name || "").trim())) {
-          notify("An owner, formal disposition, and all three confirmation names are required before closure.", true);
-          return;
-        }
-        if (!(await evidence.flushPending())) {
-          formError.textContent = "Issue evidence changes could not be saved. Try again before closing this issue.";
+        const hasFormalAction = Boolean(String(currentIssue.disposition || "").trim() || list(currentIssue.actionLogs).length);
+        if (!currentIssue.owner?.trim() || !hasFormalAction || currentIssue.confirmations?.some((name) => !String(name || "").trim())) {
+          notify("An owner, a formal disposition or action record, and all three confirmation names are required before closure.", true);
           return;
         }
         const controls = [...dispositionInputs, discussionAuthorName, discussionText];
@@ -661,9 +971,21 @@ function openIssueDialog(issue, state, ctx) {
         evidence.setDisabled(true);
         discussionButton.disabled = true;
         closeButton.disabled = true;
-        const result = await runCommand(ctx, "closeIssue", { id: currentIssue.id }, { render: false });
-        controls.forEach((input, index) => { input.disabled = wasDisabled[index]; });
-        evidence.setDisabled(false);
+        setActionControlsDisabled(true);
+        setDeleteControlsDisabled(true);
+        let result;
+        try {
+          if (!(await evidence.flushPending())) {
+            formError.textContent = "Issue evidence changes could not be saved. Try again before closing this issue.";
+            return;
+          }
+          result = await runCommand(ctx, "closeIssue", { id: currentIssue.id }, { render: false });
+        } finally {
+          controls.forEach((input, index) => { input.disabled = wasDisabled[index]; });
+          evidence.setDisabled(false);
+          setActionControlsDisabled(false);
+          setDeleteControlsDisabled(false);
+        }
         if (!result.ok) return;
         const latestIssue = list(result.state?.issues).find((item) => item.id === currentIssue.id);
         if (latestIssue) adoptLatestIssue(latestIssue, result.state);
@@ -679,41 +1001,61 @@ function openIssueDialog(issue, state, ctx) {
       evidence.setDisabled(false);
       if (discussionButton) discussionButton.disabled = readOnly;
       if (closeButton) closeButton.disabled = readOnly;
+      setDeleteControlsDisabled(false);
       if (runtime) runtime.busy = false;
     }
   }, "button button-danger");
   closeButton.disabled = readOnly;
 
-  const linkedBatch = list(currentState.batches).find((batch) => batch.id === currentIssue.batchId);
-  const protectedBatchIssue = Boolean(linkedBatch &&
-    (linkedBatch.kind === "historical" || linkedBatch.status === "historical" || linkedBatch.status === "released"));
   const runIssueDeletion = async () => {
-    if (deleteSubmitting || closeSubmitting || discussionSubmitting || runtime?.busy || protectedBatchIssue) return;
+    if (deleteSubmitting || closeSubmitting || discussionSubmitting || actionSubmitting || runtime?.busy || protectedBatchIssue) return;
     deleteSubmitting = true;
     if (runtime) runtime.busy = true;
+    if (closeButton) closeButton.disabled = true;
+    if (discussionButton) discussionButton.disabled = true;
+    setDeleteControlsDisabled(true);
     let deleted = false;
     try {
       const deleteSavedIssue = async () => {
-        if (!(await evidence.flushPending())) {
-          formError.textContent = "Issue evidence changes could not be saved. Try again before deleting this issue.";
+        if (hasActionLogDraft(markDraftForPreservation())) {
+          notify("Submit or clear the action record draft before deleting this issue.", true);
+          actionSubmitterName.focus();
           return;
         }
-        markDraftForPreservation();
-        const response = await runCommand(ctx, "deleteIssue", { id: currentIssue.id }, { render: false });
-        if (!response.ok && !response.committed) {
-          formError.textContent = errorText(response.error, "The issue could not be deleted.");
-          return;
+        const controls = [...dispositionInputs, discussionAuthorName, discussionText];
+        const wasDisabled = controls.map((input) => input.disabled);
+        controls.forEach((input) => { input.disabled = true; });
+        setActionControlsDisabled(true);
+        evidence.setDisabled(true);
+        discussionButton.disabled = true;
+        closeButton.disabled = true;
+        setDeleteControlsDisabled(true);
+        try {
+          if (!(await evidence.flushPending())) {
+            formError.textContent = "Issue evidence changes could not be saved. Try again before deleting this issue.";
+            return;
+          }
+          markDraftForPreservation();
+          const response = await runCommand(ctx, "deleteIssue", { id: currentIssue.id }, { render: false });
+          if (!response.ok && !response.committed) {
+            formError.textContent = errorText(response.error, "The issue could not be deleted.");
+            return;
+          }
+          if (response.committed && !response.ok && typeof ctx.refreshState === "function") {
+            const refresh = await ctx.refreshState({ render: false });
+            if (!refresh?.ok) notify("The issue was deleted, but the latest issue list could not be loaded. Reload before continuing.", true);
+            else currentState = refresh.state;
+          }
+          deleted = true;
+          issueDrafts.delete(currentIssue.id);
+          runtime?.dispose();
+          closeDialog(true);
+          await ctx.navigate("issues", null, true);
+        } finally {
+          controls.forEach((input, index) => { input.disabled = wasDisabled[index]; });
+          setActionControlsDisabled(false);
+          evidence.setDisabled(false);
         }
-        if (response.committed && !response.ok && typeof ctx.refreshState === "function") {
-          const refresh = await ctx.refreshState({ render: false });
-          if (!refresh?.ok) notify("The issue was deleted, but the latest issue list could not be loaded. Reload before continuing.", true);
-          else currentState = refresh.state;
-        }
-        deleted = true;
-        issueDrafts.delete(currentIssue.id);
-        runtime?.dispose();
-        closeDialog(true);
-        await ctx.navigate("issues", null, true);
       };
       if (manualSaveController?.hasPending()) await ctx.resolveManualChanges?.("delete this issue", deleteSavedIssue);
       else await deleteSavedIssue();
@@ -721,6 +1063,8 @@ function openIssueDialog(issue, state, ctx) {
       deleteSubmitting = false;
       if (runtime) runtime.busy = false;
       evidence.setDisabled(false);
+      setActionControlsDisabled(false);
+      setDeleteControlsDisabled(false);
       if (!deleted) {
         if (discussionButton) discussionButton.disabled = readOnly;
         if (closeButton) closeButton.disabled = readOnly;
@@ -756,7 +1100,7 @@ function openIssueDialog(issue, state, ctx) {
   if (protectedBatchIssue) deleteButton.title = "Issues linked to released or historical batches cannot be deleted.";
 
   discussionButton = button("Add discussion entry", async () => {
-    if (discussionSubmitting || closeSubmitting) return;
+    if (discussionSubmitting || closeSubmitting || actionSubmitting || deleteSubmitting || runtime?.busy) return;
     discussionSubmitting = true;
     discussionButton.disabled = true;
     closeButton.disabled = true;
@@ -802,10 +1146,13 @@ function openIssueDialog(issue, state, ctx) {
   }, "button button-secondary");
   discussionButton.disabled = readOnly;
 
-  const updateDraft = () => {
+  const updateDraft = (actionChanged = false) => {
+    if (actionChanged) actionRequestId = "";
     const next = captureDraft();
     storeDraft(next);
+    updateActionFormDirty(next);
     formError.textContent = "";
+    actionError.textContent = "";
     manualSaveController?.noteChanges();
   };
   dispositionInputs.forEach((input) => {
@@ -815,6 +1162,10 @@ function openIssueDialog(issue, state, ctx) {
   [discussionAuthorName, discussionText].forEach((input) => {
     input.addEventListener("input", updateDraft);
     input.addEventListener("change", updateDraft);
+  });
+  [actionSubmitterName, actionType, actionSummary, actionResult].forEach((input) => {
+    input.addEventListener("input", () => updateDraft(true));
+    input.addEventListener("change", () => updateDraft(true));
   });
   form.addEventListener("submit", (event) => event.preventDefault());
   form.append(
@@ -826,6 +1177,25 @@ function openIssueDialog(issue, state, ctx) {
       ...confirmationInputs.map((input, index) => field(`Confirmation ${index + 1}`, input))
     ),
     el("div", { className: "qc-ops-manual-save-actions" }, saveButton, saveStatus),
+    el("section", { className: "qc-ops-action-logs" },
+      el("div", { className: "qc-ops-section-heading" }, el("h3", {}, "Formal action records")),
+      actionLogList,
+      actionReadOnly ? null : el("div", { className: "qc-ops-action-log-form" },
+        el("div", { className: "qc-ops-form-grid" },
+          field("Submitter name", actionSubmitterName),
+          field("Action type", actionType),
+        ),
+        field("Summary", actionSummary),
+        field("Result", actionResult),
+        el("div", { className: "qc-ops-action-log-file-field" },
+          el("span", { className: "field-label" }, "Evidence"),
+          el("div", { className: "qc-ops-action-log-file-actions" }, actionFileButton, actionFileInput),
+          actionFileList,
+        ),
+        actionError,
+        actionSubmitButton,
+      ),
+    ),
     el("section", { className: "qc-ops-discussion" },
       el("h3", {}, "Discussion"),
       discussionList,
@@ -860,6 +1230,10 @@ function openIssueDialog(issue, state, ctx) {
         markDraftForPreservation();
         await ctx.resolveManualChanges?.("close this Issue", async () => {
           if (activeIssueDialogRuntime !== this || !dialog.open) return;
+          if (hasActionLogDraft(captureDraft())) {
+            closeDialog();
+            return;
+          }
           closeDialog(true);
           this.dispose();
         });
@@ -873,6 +1247,7 @@ function openIssueDialog(issue, state, ctx) {
       if (unregisterManualSave) unregisterManualSave();
       else manualSaveController?.dispose();
       evidence.cleanup();
+      actionLogCleanup();
       if (activeIssueDialogRuntime === this) activeIssueDialogRuntime = null;
     },
     busy: false,

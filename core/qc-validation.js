@@ -643,6 +643,15 @@ function validateAssets(state, batches, versions, issues, options) {
       assert(asset.batchId === issue.batchId && asset.rowId === issue.rowId,
         `Issue attachment ${asset.name} does not match its issue batch and row scope.`);
       assert(asset.versionId === null, `Issue attachment ${asset.name} cannot be attached to a version.`);
+      if (Object.hasOwn(asset, "actionLogId")) {
+        assertText(asset.actionLogId, "Action record ID", { maxLength: 120 });
+        const owners = (issue.actionLogs ?? []).filter((entry) => entry.id === asset.actionLogId);
+        assert(owners.length === 1 && (owners[0].attachmentIds ?? []).includes(asset.id),
+          `Issue attachment ${asset.name} does not belong to its submitted action record.`);
+      } else {
+        assert(!(issue.actionLogs ?? []).some((entry) => (entry.attachmentIds ?? []).includes(asset.id)),
+          `Issue attachment ${asset.name} is missing its action record ownership metadata.`);
+      }
       if (asset.mimeType === "text/plain") assert(TEXT_EXTENSIONS.has(ext), "Plain-text issue files must use .txt, .csv, .md, .markdown, or .log filenames.");
       if (MIME_EXTENSIONS.has(asset.mimeType)) assert(MIME_EXTENSIONS.get(asset.mimeType).has(ext), `Issue attachment ${asset.name} extension does not match its MIME type.`);
     } else {
@@ -687,6 +696,42 @@ function validateIssues(state, batches, variants, assets) {
         `Issue ${issue.number} contains a missing or out-of-scope attachment.`);
       }
     }
+    const actionLogs = Object.hasOwn(issue, "actionLogs") ? issue.actionLogs : [];
+    if (Object.hasOwn(issue, "actionLogs")) {
+      assert(Array.isArray(actionLogs), `Issue ${issue.number} action records must be a list.`);
+      assertUniqueIds(actionLogs, `Action record on ${issue.number}`);
+    }
+    const actionRequestIds = [];
+    for (const entry of actionLogs) {
+      assertText(entry.submitterName, "Action submitter name", { maxLength: 200 });
+      assert(entry.submitterName === entry.submitterName.trim(), `Action submitter name on ${issue.number} must be trimmed.`);
+      assert(["isolation", "rework", "scrap", "return", "design", "process", "other"].includes(entry.actionType),
+        `Action record on ${issue.number} has an invalid action type.`);
+      assertText(entry.summary, "Action summary", { maxLength: 1200 });
+      assert(entry.summary === entry.summary.trim(), `Action summary on ${issue.number} must be trimmed.`);
+      assertText(entry.result, "Action result", { maxLength: 1200 });
+      assert(entry.result === entry.result.trim(), `Action result on ${issue.number} must be trimmed.`);
+      requireTimestamp(entry.submittedAt, "Action submission time");
+      if (Object.hasOwn(entry, "requestId")) {
+        assertText(entry.requestId, "Action request ID", { maxLength: 120 });
+        actionRequestIds.push(entry.requestId);
+        assert(typeof entry.requestFingerprint === "string" && /^[0-9a-f]{16}$/.test(entry.requestFingerprint),
+          `Action record on ${issue.number} has an invalid request fingerprint.`);
+      } else {
+        assert(!Object.hasOwn(entry, "requestFingerprint"), `Action record on ${issue.number} cannot have a request fingerprint without a request ID.`);
+      }
+      const attachmentIds = Object.hasOwn(entry, "attachmentIds") ? entry.attachmentIds : [];
+      assert(Array.isArray(attachmentIds), `Action record on ${issue.number} attachment IDs must be a list.`);
+      ensureUnique(attachmentIds, `Attachments on action record ${entry.id}`);
+      for (const assetId of attachmentIds) {
+        const asset = assets.get(assetId);
+        assert((issue.attachmentIds ?? []).includes(assetId) && asset?.kind === "issueAttachment" &&
+          asset.issueId === issue.id && asset.actionLogId === entry.id &&
+          asset.batchId === issue.batchId && asset.rowId === issue.rowId,
+        `Action record on ${issue.number} contains missing or out-of-scope evidence.`);
+      }
+    }
+    ensureUnique(actionRequestIds, `Action request ID on ${issue.number}`);
     assert(["open", "closed"].includes(issue.status), `Issue ${issue.number} has an invalid status.`);
     assertText(issue.owner, "Disposition owner", { maxLength: 200, allowBlank: true });
     assertText(issue.disposition, "Formal disposition", { maxLength: 10000, allowBlank: true });
@@ -695,7 +740,7 @@ function validateIssues(state, batches, variants, assets) {
     if (issue.status === "open") assert(issue.closedAt === null, `Open issue ${issue.number} cannot have a close time.`);
     else {
       requireTimestamp(issue.closedAt, "Issue close time");
-      assert(issue.owner.trim() && issue.disposition.trim() && issue.confirmations.every((name) => name.trim()), `Closed issue ${issue.number} is missing disposition or confirmations.`);
+      assert(issue.owner.trim() && (issue.disposition.trim() || actionLogs.length > 0) && issue.confirmations.every((name) => name.trim()), `Closed issue ${issue.number} is missing disposition or confirmations.`);
     }
     assert(Array.isArray(issue.discussion), `Issue ${issue.number} discussion must be a list.`);
     assertUniqueIds(issue.discussion, `Discussion entry on ${issue.number}`);

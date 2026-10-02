@@ -18,6 +18,7 @@ import { getBatchVersionItems, getBatchVersionReadiness, getBatchVersions, getSh
 import { getBatchProducts, getBatchRowProduct } from "./qc-batch-products.js";
 import { resolveBatchDisplayNumbers } from "./qc-batch-display.js";
 import { resolveInspectionImportance } from "./qc-inspection-importance.js";
+import { averageTimePerUnitSeconds, createInspectionHistoryContext, resolveInspectionHistory } from "./qc-inspection-history.js";
 
 export function requireBatch(state, batchId) {
   const id = requireString(batchId, "Batch ID", { maxLength: 160 });
@@ -32,7 +33,7 @@ export function requireEditableBatch(batch) {
 }
 
 const ASSET_METADATA_FIELDS = [
-  "id", "name", "mimeType", "kind", "batchId", "rowId", "versionId", "createdAt", "issueId", "category",
+  "id", "name", "mimeType", "kind", "batchId", "rowId", "versionId", "createdAt", "issueId", "actionLogId", "category",
 ];
 
 function assetMetadata(asset, includeAssetContent) {
@@ -472,6 +473,8 @@ export function getBatchWorkspace(state, batchId, { includeAssetContent = true }
   const version = state.versions.find((candidate) => candidate.id === batch.versionId);
   const order = state.orders.find((candidate) => candidate.id === batch.orderId);
   const historical = batch.kind === "historical";
+  const displayNumbers = resolveBatchDisplayNumbers(state);
+  const historyContext = historical ? null : createInspectionHistoryContext(state, batch, displayNumbers);
   const products = getBatchProducts(batch).map((product) => ({
     ...product,
     variant: state.variants.some((candidate) => candidate.id === product.variantId)
@@ -510,37 +513,14 @@ export function getBatchWorkspace(state, batchId, { includeAssetContent = true }
         .filter(Boolean)
         .map((asset) => assetMetadata(asset, includeAssetContent)),
     }));
-    const history = state.batches
-      .filter((candidate) => candidate.id !== batch.id && candidate.kind !== "historical" &&
-        factoryKey(candidate.factory) === factoryKey(batch.factory) && candidate.stage === batch.stage &&
-        (candidate.date < batch.date || (candidate.date === batch.date && candidate.createdAt < batch.createdAt)))
-      .flatMap((candidate) => {
-        const historicalRow = candidate.rows.find((candidateRow) => {
-          const candidateProduct = getBatchRowProduct(candidate, candidateRow);
-          return candidateProduct?.variantId === product?.variantId && candidateRow.key === row.key &&
-            candidateRow.savedAt !== null && candidateRow.defectiveQty !== null;
-        });
-        if (!historicalRow) return [];
-        const rate = historicalRow.inspectedQty === 0
-          ? null
-          : Number(((historicalRow.defectiveQty / historicalRow.inspectedQty) * 100).toFixed(2));
-        const historicalProduct = getBatchRowProduct(candidate, historicalRow);
-        return [{
-          batchId: candidate.id,
-          batchNumber: candidate.number,
-          date: candidate.date,
-          versionLabel: historicalProduct?.versionLabel ?? null,
-          inspectedQty: historicalRow.inspectedQty,
-          defectiveQty: historicalRow.defectiveQty,
-          rate,
-          savedAt: historicalRow.savedAt,
-        }];
-      })
-      .sort((left, right) => right.date.localeCompare(left.date) || right.savedAt.localeCompare(left.savedAt))
-      .slice(0, 4);
+    const historyProduct = product && rowVariant
+      ? { ...product, familyId: product.familyId ?? rowVariant.familyId, variant: rowVariant }
+      : null;
+    const history = resolveInspectionHistory(historyContext, historyProduct, row);
     return {
       ...structuredClone(row),
       ...resolveInspectionImportance(state, batch, row),
+      averageTimePerUnitSeconds: averageTimePerUnitSeconds(row),
       productLineId: product?.lineId ?? row.productLineId ?? null,
       variantId: product?.variantId ?? null,
       productLabel: rowVariant?.label ?? null,
@@ -567,7 +547,7 @@ export function getBatchWorkspace(state, batchId, { includeAssetContent = true }
     .map((asset) => ({ ...assetMetadata(asset, includeAssetContent), sourcePdf: asset.id === sourceAssetId }));
   return {
     batch: structuredClone(batch),
-    displayNumber: resolveBatchDisplayNumbers(state).get(batch.id),
+    displayNumber: displayNumbers.get(batch.id),
     variant: variant ? structuredClone(variant) : null,
     version: version ? structuredClone(version) : null,
     order: order ? structuredClone(order) : null,

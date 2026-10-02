@@ -83,7 +83,7 @@ export function prepareIssueEvidenceFiles(files) {
   return list.map(normalizedIssueEvidenceFile);
 }
 
-export function appendIssueEvidence(state, issue, files, context) {
+export function appendIssueEvidence(state, issue, files, context, actionLogId = null) {
   if (!files.length) return [];
   requireTotalCapacity(state, files.reduce((total, file) => total + file.decodedBytes, 0), null, context.trustedAssetValidation);
   issue.attachmentIds ??= [];
@@ -99,6 +99,7 @@ export function appendIssueEvidence(state, issue, files, context) {
       rowId: issue.rowId,
       versionId: null,
       issueId: issue.id,
+      ...(actionLogId ? { actionLogId } : {}),
       createdAt: context.now(),
     });
     issue.attachmentIds.push(id);
@@ -187,6 +188,9 @@ export function removeIssueAttachment(state, data) {
   }
   const assetId = requireString(input.assetId, "Issue attachment ID", { maxLength: 160 });
   if (!(issue.attachmentIds ?? []).includes(assetId)) fail("That file is not attached to this issue.");
+  if ((issue.actionLogs ?? []).some((entry) => (entry.attachmentIds ?? []).includes(assetId))) {
+    fail("Evidence attached to a submitted action record cannot be removed.");
+  }
   issue.attachmentIds = issue.attachmentIds.filter((candidate) => candidate !== assetId);
   state.assets = state.assets.filter((asset) => asset.id !== assetId);
   return { entityId: issue.id, action: "removeIssueAttachment", summary: `Removed a file from issue ${issue.number}.` };

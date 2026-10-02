@@ -1,6 +1,15 @@
 # Web Edition Requirements and Decisions
 
-Status: 2026-10-01, manual batch and Issue saves and separated attachment storage approved. This manual-save decision supersedes the earlier batch-inspection and Issue-disposition autosave requirements. Other business decisions remain in effect; these are not a fresh check of the live Lark system.
+Status: 2026-10-02, multiple formal action records, calculated average inspection time, and eight comparable prior results approved. Manual batch and Issue saves remain required. Other business decisions remain in effect.
+
+## Action Records and Inspection Comparisons (2026-10-02)
+
+- An Issue supports multiple explicitly submitted formal action records, separate from discussion. Each record retains its manually entered submitter name, action type, summary, result, submission time, and optional owned evidence. Submitted records and their evidence are immutable; a subsequent action is a new record. Retries must not create duplicate submissions. Existing formal disposition text remains available without invented authors or timestamps.
+- Closure remains explicit and requires an owner and three manually entered confirmation names. Either existing nonblank formal disposition text or a submitted formal action record satisfies the disposition requirement. This change does not introduce authenticated signatures, notifications, or automatic closure.
+- Action-record submission and its evidence commit together. It does not save unrelated Issue drafts. Invalid or stale submissions retain their draft; unsaved action drafts participate in exit protection. Existing backups without action records remain valid, and full backups include submitted records and their evidence.
+- Calculate average inspection time as measured actual inspection seconds divided by the locked inspected quantity. Blank or absent measured time and nonpositive inspected quantity produce no average; zero and decimal measured times are valid. Display a read-only draft calculation beside Time, and use saved results in reports and CSV. Do not treat an original PDF's standard/reference time as a measured total, or persist derived averages into historical facts.
+- Show up to eight comparable prior inspection results in entry, report, and CSV views. Exclude the current batch, future results, incomplete results, invalid quantities, and ambiguous matches. Preserve genuine zero defects. Use the same factory, stage, and family, a stable item identity, and agreeing criteria, methods, sampling, and recording rules. Sharing history across product models or colors requires evidence of compatible applicability and standards; a family name or similar task title alone is insufficient.
+- Include original-PDF historical results only where source identity and standards match unambiguously and recorded sample and defect quantities are valid. Use the original inspected quantity rather than a recalculation. Conflicting rates, relevant source anomalies, missing identity, and ambiguous rows are excluded. Read projections must not change source records or infer new production, release, or PO facts.
 
 ## Goals and Presentation
 

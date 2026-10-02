@@ -31,6 +31,10 @@ New Issue creation validates and persists the manually entered `reportedBy` name
 
 New Issue creation may initialize the existing `owner` field from an optional disposition owner; it does not add a separate attribution field. Issue photo thumbnails resolve Issue-owned evidence independently from immutable source-row photo references. These display and command changes preserve existing assets and snapshots without a migration.
 
+Formal action records are optional nested Issue data. An explicit business command appends one immutable submission and its owned evidence in a single revision transaction. Existing disposition text and discussion remain separate. Validation accepts older Issues without action records; backup and SQLite persistence retain submissions without synthetic migration entries. The frontend must preserve unrelated manual drafts and protect unsubmitted action forms when leaving the Issue.
+
+Average inspection time and comparable prior results are query projections. The average uses measured seconds and the locked sample quantity. Comparison uses saved standard snapshots and verified original-PDF quantities; it does not revise source evidence, samples, release status, or purchase-order progress. Entry may preview the average of local edits, while reports use saved measurements only.
+
 ## Current Storage
 
 The main app and demo use separate SQLite workspaces managed by the local application service. All browsers using the same `http://127.0.0.1:4173` service read the same selected workspace. The browser HTTP facade preserves the asynchronous core-service interface; the server's `createQCService` validates business commands and expected revisions inside atomic SQLite transactions. The API accepts only explicit application operations, never arbitrary SQL, caller functions, or unrestricted state replacement.

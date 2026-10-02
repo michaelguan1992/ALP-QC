@@ -40,7 +40,9 @@ See [User Guide](docs/user-guide.md) for the complete workflow and [Local App Ac
 
 - Batches lock applicable standards and calculate inspection quantities automatically. Choose **Save changes** to save all modified results and batch details together; field editing does not autosave. Issue disposition also uses **Save changes**. Unsaved exits offer Save, Discard, or Cancel.
 - Each inspection row can own one video, procedure file, and log file. Rows list every linked Issue; Issues preserve a source snapshot and support multiple photo and general-file attachments. Discussion stays separate from formal disposition.
-- Manual issue closure requires an owner, disposition, and three entered confirmation names. These names are not authenticated signatures.
+- Issues support separately submitted formal action records with a submitter, action type, summary, result, timestamp, and optional evidence. Submitted records retain their own evidence and stay separate from discussion and the existing disposition summary.
+- Manual issue closure requires an owner, a formal action record or existing disposition text, and three entered confirmation names. These names are not authenticated signatures.
+- Inspection Results calculates average seconds per inspected unit and shows up to eight comparable prior results. Reports and CSV use saved results; historical comparisons retain original sample quantities and exclude ambiguous or incompatible checks.
 - Every new OQC batch counts each product's full quantity toward its PO line after explicit release; IQC and historical records do not contribute.
 - Backup exports contain records and attachments. Restore validates the entire backup and rejects conflicting records without partial import.
 - Batches includes imported historical inspections and newly entered batches. Optional batch attachments retain original PDFs; historical quantities, printed versions, and missing-check provenance stay intact without inventing release or PO accounting. See [Original PDF Import](docs/pdf-import.md).

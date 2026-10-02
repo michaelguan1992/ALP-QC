@@ -531,7 +531,7 @@ test("row photos and issue snapshots stay attached to the selected product in a 
   assert.deepEqual(workspace.rows.find((row) => row.id === row12.id).photos.map((photo) => photo.id), [s12PhotoId]);
 });
 
-test("inspection history links legacy and multi-product batches by variant and keeps colors separate", async () => {
+test("inspection history prefers the same variant and preserves comparable cross-color results", async () => {
   const harness = makeHarness();
   const { variants, versions } = await prepare(harness);
   const { order } = await createOrder(harness, [variants.s15Red, variants.s15Yellow]);
@@ -565,8 +565,9 @@ test("inspection history links legacy and multi-product batches by variant and k
     await saveRow(harness, mixed.id, row);
     const refreshed = await harness.service.getBatchWorkspace(mixed.id);
     const history = refreshed.rows.find((candidate) => candidate.id === row.id).history;
-    if (variant.id === variants.s15Red.id) assert.deepEqual(history.map((item) => item.batchId), [oldS15Red.id]);
-    else assert.deepEqual(history.map((item) => item.batchId), [oldS15Yellow.id]);
+    assert.deepEqual(new Set(history.map((item) => item.batchId)), new Set([oldS15Red.id, oldS15Yellow.id]));
+    const sameVariantHistory = history.find((item) => item.productVariantId === variant.id);
+    assert.ok(sameVariantHistory, "the prior result for the current color remains available");
   }
 
   const newestS15Red = await createLegacyBatch(harness, {
@@ -575,9 +576,11 @@ test("inspection history links legacy and multi-product batches by variant and k
   });
   const newestS11Workspace = await harness.service.getBatchWorkspace(newestS15Red.id);
   const newestHistory = newestS11Workspace.rows.find((row) => row.key === "air-pump").history;
-  assert.deepEqual(newestHistory.map((item) => item.batchId), [mixed.id, oldS15Red.id]);
+  assert.equal(newestHistory[0].batchId, mixed.id);
+  assert.deepEqual(new Set(newestHistory.slice(1).map((item) => item.batchId)), new Set([oldS15Red.id, oldS15Yellow.id]));
   assert.equal(newestHistory[0].inspectedQty, 8);
-  assert.equal(newestHistory[1].inspectedQty, 10);
+  assert.equal(newestHistory.find((item) => item.batchId === oldS15Red.id).inspectedQty, 10);
+  assert.equal(newestHistory.find((item) => item.batchId === oldS15Yellow.id).color, variants.s15Yellow.color);
 });
 
 test("purchase order lines used by a multi-product batch keep their variant identity and cannot be removed", async () => {

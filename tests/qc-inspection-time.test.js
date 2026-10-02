@@ -20,6 +20,45 @@ function makeService(adapter = createMemoryQCAdapter()) {
   });
 }
 
+test("average per-unit time is a saved-query projection and does not enter persisted rows", async () => {
+  const service = makeService();
+  const { batch } = await prepareBatch(service, { batchNumber: "B-AVERAGE-TIME", orderNumber: "PO-AVERAGE-TIME" });
+  const initial = await service.getBatchWorkspace(batch.id);
+  const initialRow = initial.rows[0];
+  assert.equal(initialRow.averageTimePerUnitSeconds, null);
+  assert.ok(initialRow.inspectedQty > 0);
+
+  let state = await service.getState();
+  await service.command("saveInspection", {
+    batchId: batch.id,
+    rowId: initialRow.id,
+    actualTimeSeconds: 0,
+    defectiveQty: 0,
+    remarks: "",
+  }, state.revision);
+  let workspace = await service.getBatchWorkspace(batch.id);
+  let row = workspace.rows.find((candidate) => candidate.id === initialRow.id);
+  assert.equal(row.averageTimePerUnitSeconds, 0);
+  state = await service.getState();
+  let persisted = state.batches.find((candidate) => candidate.id === batch.id).rows.find((candidate) => candidate.id === initialRow.id);
+  assert.equal(Object.hasOwn(persisted, "averageTimePerUnitSeconds"), false);
+
+  await service.command("saveInspection", {
+    batchId: batch.id,
+    rowId: initialRow.id,
+    actualTimeSeconds: 1.75,
+    defectiveQty: 0,
+    remarks: "",
+  }, state.revision);
+  workspace = await service.getBatchWorkspace(batch.id);
+  row = workspace.rows.find((candidate) => candidate.id === initialRow.id);
+  assert.equal(row.averageTimePerUnitSeconds, 1.75 / row.inspectedQty);
+  assert.equal(row.timeSeconds, initialRow.timeSeconds, "the locked standard time stays independent");
+  state = await service.getState();
+  persisted = state.batches.find((candidate) => candidate.id === batch.id).rows.find((candidate) => candidate.id === initialRow.id);
+  assert.equal(Object.hasOwn(persisted, "averageTimePerUnitSeconds"), false);
+});
+
 async function prepareBatch(service, { batchNumber = "B-ACTUAL-TIME", orderNumber = "PO-ACTUAL-TIME", date = DATE } = {}) {
   let state = await service.initialize();
   await service.command("installAPReferences", {}, state.revision);

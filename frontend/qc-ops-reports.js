@@ -44,6 +44,28 @@ function reportTimeLabel(row, historical) {
   return value === null || value === undefined || value === "" ? historical ? "—" : "Incomplete" : `${value}s`;
 }
 
+function reportAverageTimeValue(row) {
+  const value = row.averageTimePerUnitSeconds;
+  return value === null || value === undefined || value === "" ? null : value;
+}
+
+function averageTimeLabel(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "number" && Number.isFinite(value)) return Number(value.toFixed(4)).toString();
+  return String(value);
+}
+
+function historyProductContext(entry) {
+  const parts = [];
+  const label = typeof entry.productLabel === "string" ? entry.productLabel.trim() : "";
+  const model = typeof entry.model === "string" ? entry.model.trim() : "";
+  const color = typeof entry.color === "string" ? entry.color.trim() : "";
+  if (label) parts.push(label);
+  if (model && !label.toLocaleUpperCase().includes(model.toLocaleUpperCase())) parts.push(model);
+  if (color && !parts.join(" ").toLocaleLowerCase().includes(color.toLocaleLowerCase())) parts.push(color);
+  return parts.join(" · ");
+}
+
 function sourceInspection(batch, state) {
   const inspection = list(state.history?.inspections).find((entry) => entry.id === batch.historyInspectionId) ?? null;
   return inspection;
@@ -204,7 +226,7 @@ function makeReadOnlyTable(workspace, state, ctx) {
   const historical = isHistoricalBatch(workspace.batch);
   const multipleProducts = !historical && reportProducts(workspace, state).length > 1;
   const table = h("table", { className: `qc-ops-inspection-table qc-ops-report-table${multipleProducts ? " qc-ops-mixed-product-table" : ""}` });
-  const widths = ["34px", ...(multipleProducts ? ["118px"] : []), "100px", "185px", "80px", "60px", "76px", "55px", "55px", "52px", "52px", "52px", "52px", "52px", "44px", "64px", "165px", "154px"];
+  const widths = ["34px", ...(multipleProducts ? ["118px"] : []), "100px", "185px", "80px", "60px", "76px", "55px", "55px", "52px", ...Array(8).fill("52px"), "44px", "68px", "64px", "165px", "154px"];
   const colgroup = h("colgroup", {}, widths.map((width) => h("col", { style: { width } })));
   const thead = h("thead", {},
     h("tr", { className: "qc-ops-group-head" },
@@ -216,8 +238,9 @@ function makeReadOnlyTable(workspace, state, ctx) {
       h("th", { rowSpan: "2", scope: "col" }, "Inspection frequency", h("br"), h("span", { lang: "zh" }, "检验频率")),
       h("th", { rowSpan: "2", scope: "col" }, "Recording frequency", h("br"), h("span", { lang: "zh" }, "记录频率")),
       h("th", { colSpan: "3", scope: "colgroup" }, "Quality control points", h("br"), h("span", { lang: "zh" }, "品质管制点")),
-      h("th", { colSpan: "4", scope: "colgroup" }, "Defective rate history · saved batches only", h("br"), h("span", { lang: "zh" }, "不良率历史记录 · 已保存批次")),
+      h("th", { colSpan: "8", scope: "colgroup" }, "Defective rate history · saved batches only", h("br"), h("span", { lang: "zh" }, "不良率历史记录 · 已保存批次")),
       h("th", { rowSpan: "2", scope: "col" }, "Time", h("br"), h("span", { lang: "zh" }, "时数 (sec)")),
+      h("th", { rowSpan: "2", scope: "col" }, "Avg time / unit (sec)", h("br"), h("span", { lang: "zh" }, "平均时间 (sec)")),
       h("th", { rowSpan: "2", scope: "col" }, "Procedure / link", h("br"), h("span", { lang: "zh" }, "视频 / 程序 / 报告")),
       h("th", { rowSpan: "2", scope: "col" }, "Remarks / issues", h("br"), h("span", { lang: "zh" }, "备注 / 问题")),
       h("th", { rowSpan: "2", scope: "col" }, historical ? "Photos" : "Attachments", h("br"), h("span", { lang: "zh" }, historical ? "照片" : "附件")),
@@ -226,7 +249,7 @@ function makeReadOnlyTable(workspace, state, ctx) {
       h("th", { scope: "col" }, "Inspection qty", h("br"), h("span", { lang: "zh" }, "检验数量")),
       h("th", { scope: "col" }, "Defective qty", h("br"), h("span", { lang: "zh" }, "不良数")),
       h("th", { scope: "col" }, "Defective rate", h("br"), h("span", { lang: "zh" }, "不良率")),
-      ...[1, 2, 3, 4].map((index) => h("th", { scope: "col" }, `Prior ${index}`, h("br"), h("span", { lang: "zh" }, `历史 ${index}`))),
+      ...Array.from({ length: 8 }, (_, index) => h("th", { scope: "col" }, `Prior ${index + 1}`, h("br"), h("span", { lang: "zh" }, `历史 ${index + 1}`))),
     ),
   );
   const body = h("tbody", { className: "qc-ops-table-body" }, list(workspace.rows).map((row, index) => {
@@ -268,14 +291,22 @@ function makeReadOnlyTable(workspace, state, ctx) {
         row.defectiveQty === null || row.defectiveQty === undefined ? "Incomplete" : percent(row.defectiveRate)),
     );
     const history = list(row.history);
-    for (let historyIndex = 0; historyIndex < 4; historyIndex += 1) {
+    for (let historyIndex = 0; historyIndex < 8; historyIndex += 1) {
       const entry = history[historyIndex];
       const cell = h("td", { className: "qc-ops-history" });
-      if (entry) cell.append(h("strong", {}, percent(entry.rate)), h("small", {}, text(entry.batchNumber, entry.batchId)), h("small", {}, dateLabel(entry.date)));
+      if (entry) cell.append(
+        h("strong", {}, percent(entry.rate)),
+        h("small", {}, text(entry.batchNumber, entry.batchId)),
+        h("small", {}, historyProductContext(entry)),
+        h("small", {}, [entry.versionLabel ? `v${entry.versionLabel}` : "", dateLabel(entry.date)].filter(Boolean).join(" · ")),
+      );
       else cell.append(h("span", { className: "qc-ops-empty-history" }, "—"));
       tr.append(cell);
     }
-    tr.append(h("td", { className: "qc-ops-number" }, reportTimeLabel(row, historical)));
+    tr.append(
+      h("td", { className: "qc-ops-number" }, reportTimeLabel(row, historical)),
+      h("td", { className: "qc-ops-number qc-ops-average-time" }, averageTimeLabel(reportAverageTimeValue(row))),
+    );
     const procedureCell = h("td", { className: "qc-ops-link" });
     const procedureUrl = safeProcedureUrl(row.procedureUrl);
     procedureCell.append(procedureUrl ? h("a", { href: procedureUrl, target: "_blank", rel: "noopener noreferrer" }, "Open procedure") : text(row.procedureUrl, "—"));
@@ -339,15 +370,17 @@ function exportRows(workspace, state) {
     "Batch number", "Batch date", "Status", "Batch products summary", "Purchase order", "Factory", "Stage", "Total batch quantity", "PO progress",
     "No.", "Product", "Product quantity", "PO line ordered quantity", "Design version",
     "Inspection title", "检验项目", "Specification", "检验标准", "Devices", "Sampling percent", "Recording rule", "Inspected quantity", "Defective quantity", "Defective rate",
-    "Prior 1", "Prior 2", "Prior 3", "Prior 4", "Time seconds", "Procedure URL", "Remarks", "Linked issues", "Issue descriptions", "Issue evidence file names", "Row attachment file names", "Photo file names",
+    ...Array.from({ length: 8 }, (_, index) => `Prior ${index + 1}`), "Time seconds", "Average time per unit seconds", "Procedure URL", "Remarks", "Linked issues", "Issue descriptions", "Issue evidence file names", "Row attachment file names", "Photo file names",
   ];
   const rows = [csvRow(headers.map((value) => ({ value, textField: false })))];
   for (const row of list(workspace.rows)) {
     const histories = list(row.history);
-    const priorValues = [0, 1, 2, 3].map((index) => {
+    const priorValues = Array.from({ length: 8 }, (_, index) => {
       const entry = histories[index];
       const priorBatchNumber = entry ? displayNumbers.get(entry.batchId) ?? entry.batchNumber ?? entry.batchId : "";
-      return entry ? `${text(priorBatchNumber, entry.batchId)} · ${dateLabel(entry.date)} · ${percent(entry.rate)}` : "";
+      const productContext = entry ? historyProductContext(entry) : "";
+      const version = entry?.versionLabel ? `v${entry.versionLabel}` : "";
+      return entry ? [text(priorBatchNumber, entry.batchId), productContext, version, dateLabel(entry.date), percent(entry.rate)].filter(Boolean).join(" · ") : "";
     });
     const issueRows = list(row.issues);
     const issues = issueRows.map((issue) => `${text(issue.number, "Issue")} (${text(issue.status)})`).join("; ");
@@ -367,13 +400,14 @@ function exportRows(workspace, state) {
     const reportDefectiveQty = row.defectiveQty;
     const reportDefectiveRate = historical ? row.sourceDefectiveRate : row.defectiveRate === null || row.defectiveRate === undefined ? "" : percent(row.defectiveRate);
     const reportActualTime = reportTimeSeconds(row, historical) ?? "";
+    const reportAverageTime = reportAverageTimeValue(row) ?? "";
     const values = [
       [displayNumber, true], [batch.date, false], [historical ? "" : batch.status, false], [productsSummary, true], [order?.number, true], [batch.factory, true], [batch.stage, true],
       [historical ? batch.quantity : totalBatchQuantity(workspace, state), false], [historical ? "Excluded · historical record" : batch.countForPO ? "Counts after release" : "Not counted", true],
       [row.no, true], [ownerLabel, true], [ownerQuantity, false], [orderLine?.orderedQty, false], [ownerVersion, true], [row.title, true], [row.titleZh, true],
       [row.specification, true], [row.specificationZh, true], [row.devices, true], [row.samplingPercent, false], [row.recordingRule, true],
       [historical ? row.sourceInspectedQty : row.inspectedQty, false], [reportDefectiveQty, false], [reportDefectiveRate, false],
-      ...priorValues.map((value) => [value, true]), [reportActualTime, false], [row.procedureUrl, true], [row.remarks, true], [issues, true], [issueDescriptions, true], [issueEvidenceNames, true], [rowAttachmentNames, true], [photos, true],
+      ...priorValues.map((value) => [value, true]), [reportActualTime, false], [reportAverageTime, false], [row.procedureUrl, true], [row.remarks, true], [issues, true], [issueDescriptions, true], [issueEvidenceNames, true], [rowAttachmentNames, true], [photos, true],
     ];
     rows.push(csvRow(values.map(([value, textField]) => ({ value, textField }))));
   }

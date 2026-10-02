@@ -20,6 +20,10 @@ let commandQueue = Promise.resolve();
 let needsAuthoritativeRefresh = false;
 let commandInFlight = 0;
 
+function hasPendingActionLogSubmission() {
+  return Boolean(document.querySelector('#qc-dialog form[data-issue-id][data-action-log-submitting="true"]'));
+}
+
 function readRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
   const legacyHistory = parts[0] === "history";
@@ -213,6 +217,10 @@ async function refreshLatest() {
 
 async function navigate(route, id = null, force = false) {
   if (!routes.has(route)) return false;
+  if (hasPendingActionLogSubmission()) {
+    notify("Wait for the action record to finish submitting before leaving this Issue.", true);
+    return false;
+  }
   if (!force && activeManualSaveController?.hasPending?.()) {
     await resolveManualChanges(`leave for ${route === "batch-report" ? "the report" : route}`, () => navigate(route, id, true));
     return false;
@@ -252,7 +260,7 @@ function applyCommandProjection(commandResult) {
   const changes = commandResult?.changes;
   if (!changes || !state) return false;
   const next = { ...state };
-  for (const collection of ["batches", "issues", "audit", "orders"]) {
+  for (const collection of ["batches", "issues", "audit", "orders", "assets"]) {
     const updates = changes[collection];
     if (!Array.isArray(updates) || !updates.length) continue;
     const values = [...(Array.isArray(next[collection]) ? next[collection] : [])];
@@ -260,7 +268,14 @@ function applyCommandProjection(commandResult) {
       if (!update?.id) continue;
       const index = values.findIndex((value) => value?.id === update.id);
       if (index < 0) values.push(update);
-      else values[index] = { ...values[index], ...update };
+      else {
+        const current = values[index];
+        const merged = { ...current, ...update };
+        if (collection === "assets" && Object.hasOwn(current, "dataUrl") && !Object.hasOwn(update, "dataUrl")) {
+          merged.dataUrl = current.dataUrl;
+        }
+        values[index] = merged;
+      }
     }
     next[collection] = values;
   }
@@ -464,8 +479,13 @@ function renderApp() {
 
 document.addEventListener("click", (event) => {
   const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
-  if (!anchor || !app.contains(anchor) || anchor.target === "_blank" ||
-      (!activeManualSaveController?.hasPending?.() && !hasUnsavedForm())) return;
+  if (!anchor || !app.contains(anchor) || anchor.target === "_blank") return;
+  if (hasPendingActionLogSubmission()) {
+    event.preventDefault();
+    notify("Wait for the action record to finish submitting before opening this link.", true);
+    return;
+  }
+  if (!activeManualSaveController?.hasPending?.() && !hasUnsavedForm()) return;
   const target = new URL(anchor.href, location.href);
   event.preventDefault();
   const openTarget = () => { location.href = target.href; };
@@ -483,6 +503,11 @@ window.addEventListener("popstate", () => {
       history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
       renderApp();
     };
+    if (hasPendingActionLogSubmission()) {
+      restoreCurrentUrl();
+      notify("Wait for the action record to finish submitting before leaving this Issue.", true);
+      return;
+    }
     if (activeManualSaveController?.hasPending?.()) {
       restoreCurrentUrl();
       await resolveManualChanges("leave this page", openNextRoute);

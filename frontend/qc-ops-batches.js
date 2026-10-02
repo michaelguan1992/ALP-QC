@@ -23,6 +23,7 @@ import { historicalBatchImportControl } from "./qc-history.js";
 import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { getBatchVersionItems, getBatchVersions, getBatchVersionReadiness, getSharedBatchVersionChoices } from "../core/qc-batch-versions.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
+import { averageTimePerUnitSeconds } from "../core/qc-inspection-history.js";
 import { createManualSaveController } from "./qc-manual-save.js";
 import { batchReleaseBlockers } from "../core/qc-inspections.js";
 
@@ -203,6 +204,22 @@ function rateLabel(value) {
   return `${rate.toFixed(2)}%`;
 }
 
+function averageTimeLabel(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "—";
+  return Number(value.toFixed(4)).toString();
+}
+
+function historyProductContext(entry) {
+  const parts = [];
+  const label = typeof entry.productLabel === "string" ? entry.productLabel.trim() : "";
+  const model = typeof entry.model === "string" ? entry.model.trim() : "";
+  const color = typeof entry.color === "string" ? entry.color.trim() : "";
+  if (label) parts.push(label);
+  if (model && !label.toLocaleUpperCase().includes(model.toLocaleUpperCase())) parts.push(model);
+  if (color && !parts.join(" ").toLocaleLowerCase().includes(color.toLocaleLowerCase())) parts.push(color);
+  return parts.join(" · ");
+}
+
 function currentRate(row, draft) {
   if (draft.defectiveQty === "") return "—";
   const inspected = Number(row.inspectedQty);
@@ -381,11 +398,18 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
   defectiveInput.setAttribute("form", rowFormId);
   actualTimeInput.setAttribute("form", rowFormId);
   const liveRate = el("strong", { className: "qc-ops-live-rate" }, currentRate(row, draft));
+  const initialActualTime = nullableNumberFromInput(actualTimeInput);
+  const initialAverageRow = legacyTimeOmitted && !actualTimeTouched
+    ? row
+    : { ...row, actualTimeSeconds: initialActualTime.value };
+  const liveAverageTime = el("strong", { className: "qc-ops-average-time-value" }, averageTimeLabel(
+    initialActualTime.invalid ? null : averageTimePerUnitSeconds(initialAverageRow),
+  ));
   const history = list(row.history);
   const historyValue = history.length
-    ? el("ul", { className: "qc-ops-result-history-list" }, ...history.slice(0, 4).map((entry, historyIndex) => el("li", {},
+    ? el("ul", { className: "qc-ops-result-history-list" }, ...history.slice(0, 8).map((entry, historyIndex) => el("li", {},
       el("strong", {}, `Prior ${historyIndex + 1}: ${rateLabel(entry.rate ?? entry.defectiveRate)}`),
-      el("small", {}, text(entry.batchNumber || entry.number || entry.batchId)),
+      el("small", {}, [text(entry.batchNumber || entry.number || entry.batchId), historyProductContext(entry), entry.versionLabel ? `v${entry.versionLabel}` : ""].filter(Boolean).join(" · ")),
       el("small", {}, dateLabel(entry.date)),
     )))
     : el("span", { className: "qc-ops-empty-history" }, "—");
@@ -395,6 +419,7 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
       el("label", { className: "qc-ops-result-field" }, el("span", {}, "Defective qty"), defectiveInput),
       el("div", { className: "qc-ops-result-field qc-ops-rate-field" }, el("span", {}, "Rate"), liveRate),
       el("label", { className: "qc-ops-result-field" }, el("span", {}, "Time (seconds)"), actualTimeInput),
+      el("div", { className: "qc-ops-result-field qc-ops-average-time-field" }, el("span", {}, "Avg time / unit (s)"), liveAverageTime),
       el("div", { className: "qc-ops-result-history" }, el("span", {}, "History"), historyValue),
     )
   );
@@ -454,6 +479,12 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
     ...(value.actualTimeSeconds === undefined ? {} : { actualTimeSeconds: value.actualTimeSeconds }),
     remarks: value.remarks,
   });
+  const updateAveragePreview = () => {
+    const actualTime = nullableNumberFromInput(actualTimeInput);
+    liveAverageTime.textContent = averageTimeLabel(actualTime.invalid
+      ? null
+      : averageTimePerUnitSeconds({ ...row, actualTimeSeconds: actualTime.value }));
+  };
   const updateRowStatus = (status = null) => {
     if (status) {
       rowState.textContent = status;
@@ -483,6 +514,7 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
         actualTimeSeconds: actualTimeInput.value,
         remarks: savedRow?.remarks ?? "",
       });
+      liveAverageTime.textContent = averageTimeLabel(averageTimePerUnitSeconds(savedRow || row));
       createIssueButton.disabled = readOnly || !rowCanCreateIssue(savedRow);
     },
   };
@@ -502,6 +534,7 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
       rowDrafts.set(key, nextDraft);
     }
     liveRate.textContent = currentRate(row, rowDrafts.get(key) || nextDraft);
+    updateAveragePreview();
     updateRowStatus();
     createIssueButton.disabled = readOnly || !rowCanCreateIssue(row) || rowDrafts.has(key);
     manualSaveController?.noteChanges();
@@ -555,7 +588,7 @@ function renderHistoricalInspectionRow(row, index, workspace, state, ctx) {
     el("td", { className: "qc-ops-number" }, defective),
     el("td", { className: "qc-ops-number qc-ops-rate" }, sourcePercent(row.sourceDefectiveRate)),
   );
-  for (let historyIndex = 0; historyIndex < 4; historyIndex += 1) {
+  for (let historyIndex = 0; historyIndex < 8; historyIndex += 1) {
     tr.append(el("td", { className: "qc-ops-history" }, el("span", { className: "qc-ops-empty-history" }, "—")));
   }
 
@@ -607,7 +640,7 @@ function makeInspectionTable(workspace, state, ctx, onDraftChange) {
   const multipleProducts = !isHistoricalBatch(workspace.batch) && batchProducts(workspace.batch, state, workspace).length > 1;
   const table = el("table", { className: `qc-ops-inspection-table${multipleProducts ? " qc-ops-mixed-product-table" : ""}` });
   const colgroup = el("colgroup");
-  const widths = ["34px", ...(multipleProducts ? ["118px"] : []), "100px", "185px", "80px", "60px", "76px", "55px", "55px", "52px", "52px", "52px", "52px", "52px", "44px", "64px", "165px", "128px"];
+  const widths = ["34px", ...(multipleProducts ? ["118px"] : []), "100px", "185px", "80px", "60px", "76px", "55px", "55px", "52px", ...Array(8).fill("52px"), "44px", "64px", "165px", "128px"];
   for (const width of widths) {
     colgroup.append(el("col", { style: { width } }));
   }
@@ -621,7 +654,7 @@ function makeInspectionTable(workspace, state, ctx, onDraftChange) {
       el("th", { rowSpan: "2", scope: "col" }, "Inspection frequency", el("br"), el("span", { lang: "zh" }, "检验频率")),
       el("th", { rowSpan: "2", scope: "col" }, "Recording frequency", el("br"), el("span", { lang: "zh" }, "记录频率")),
       el("th", { colSpan: "3", scope: "colgroup" }, "Quality control points", el("br"), el("span", { lang: "zh" }, "品质管制点")),
-      el("th", { colSpan: "4", scope: "colgroup" }, "Defective rate history · saved batches only", el("br"), el("span", { lang: "zh" }, "不良率历史记录 · 已保存批次")),
+      el("th", { colSpan: "8", scope: "colgroup" }, "Defective rate history · saved batches only", el("br"), el("span", { lang: "zh" }, "不良率历史记录 · 已保存批次")),
       el("th", { rowSpan: "2", scope: "col" }, "Time", el("br"), el("span", { lang: "zh" }, "时数 (sec)")),
       el("th", { rowSpan: "2", scope: "col" }, "Procedure / link", el("br"), el("span", { lang: "zh" }, "视频 / 程序 / 报告")),
       el("th", { rowSpan: "2", scope: "col" }, "Remarks", el("br"), el("span", { lang: "zh" }, "备注")),
@@ -631,7 +664,7 @@ function makeInspectionTable(workspace, state, ctx, onDraftChange) {
       el("th", { scope: "col" }, "Inspection qty", el("br"), el("span", { lang: "zh" }, "检验数量")),
       el("th", { scope: "col" }, "Defective qty", el("br"), el("span", { lang: "zh" }, "不良数")),
       el("th", { scope: "col" }, "Defective rate", el("br"), el("span", { lang: "zh" }, "不良率")),
-      ...[1, 2, 3, 4].map((index) => el("th", { scope: "col" }, `Prior ${index}`, el("br"), el("span", { lang: "zh" }, `历史 ${index}`)))
+      ...Array.from({ length: 8 }, (_, index) => index + 1).map((index) => el("th", { scope: "col" }, `Prior ${index}`, el("br"), el("span", { lang: "zh" }, `历史 ${index}`)))
     )
   );
   table.append(colgroup, thead, renderRows(workspace, state, ctx, onDraftChange));

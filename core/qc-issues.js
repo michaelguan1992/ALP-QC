@@ -9,6 +9,8 @@ import { appendIssueEvidence, prepareIssueEvidenceFiles } from "./qc-assets.js";
 import { getBatchProducts, getBatchRowProduct } from "./qc-batch-products.js";
 import { requireBatch, requireEditableBatch } from "./qc-inspections.js";
 
+const ACTION_TYPES = new Set(["isolation", "rework", "scrap", "return", "design", "process", "other"]);
+
 function makeIssueNumber(id) {
   const suffix = id.replace(/[^a-z0-9]/gi, "").slice(-8).toUpperCase();
   return `ISS-${suffix || "LOCAL"}`;
@@ -99,6 +101,44 @@ function issueRequestFingerprint({ title, description, reportedBy, initialOwner,
     for (const value of [file.category, file.name, file.mimeType, file.dataUrl]) update(value);
   }
   return `${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function actionLogRequestFingerprint({ submitterName, actionType, summary, result, files }) {
+  let first = 2166136261;
+  let second = 0x9e3779b9;
+  const update = (value) => {
+    const text = String(value);
+    for (let index = 0; index < text.length; index += 1) {
+      const code = text.charCodeAt(index);
+      first = Math.imul(first ^ code, 16777619);
+      second = Math.imul(second ^ (code + index), 0x85ebca6b);
+    }
+    first = Math.imul(first ^ 0, 16777619);
+    second = Math.imul(second ^ 0, 0x85ebca6b);
+  };
+  for (const value of [submitterName, actionType, summary, result]) update(value);
+  for (const file of files) {
+    for (const value of [file.category, file.name, file.mimeType, file.dataUrl]) update(value);
+  }
+  return `${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function requireWritableActionIssue(state, issue) {
+  if (issue.status === "closed") fail("Closed issues are read-only.");
+  if (issue.batchId === null) return;
+  const batch = requireBatch(state, issue.batchId);
+  if (batch.kind === "historical" || batch.status === "historical") fail("Historical batch issues are read-only.");
+  if (batch.status === "released") fail("Released batch issues are read-only.");
+}
+
+function hasValidActionLog(issue) {
+  return (issue.actionLogs ?? []).some((entry) =>
+    typeof entry.submitterName === "string" && entry.submitterName.trim() &&
+    typeof entry.actionType === "string" && ACTION_TYPES.has(entry.actionType) &&
+    typeof entry.summary === "string" && entry.summary.trim() &&
+    typeof entry.result === "string" && entry.result.trim() &&
+    typeof entry.submittedAt === "string" && entry.submittedAt.trim(),
+  );
 }
 
 export function createIssue(state, data, context) {
@@ -234,6 +274,67 @@ export function saveIssue(state, data) {
   return { entityId: issue.id, action: "saveIssue", summary: `Saved disposition details for ${issue.number}.` };
 }
 
+export function addActionLog(state, data, context) {
+  const input = requireRecord(data, "Issue action record");
+  const id = requireString(input.id, "Issue ID", { maxLength: 120 });
+  const issue = state.issues.find((candidate) => candidate.id === id);
+  if (!issue) fail("That issue is no longer available.");
+
+  const submitterName = requireString(input.submitterName, "Action submitter name", { maxLength: 200 });
+  const actionType = requireString(input.actionType, "Action type", { maxLength: 20 });
+  if (!ACTION_TYPES.has(actionType)) fail("Choose a supported action type.");
+  const summary = requireString(input.summary, "Action summary", { maxLength: 1200 });
+  const result = requireString(input.result, "Action result", { maxLength: 1200 });
+  const requestId = input.requestId == null ? null : requireString(input.requestId, "Action request ID", { maxLength: 120 });
+  const files = prepareIssueEvidenceFiles(input.files ?? []);
+  const requestFingerprint = requestId === null
+    ? null
+    : actionLogRequestFingerprint({ submitterName, actionType, summary, result, files });
+  const actionLogs = issue.actionLogs ?? [];
+
+  if (requestId !== null) {
+    const existing = actionLogs.find((entry) => entry.requestId === requestId);
+    if (existing) {
+      if (existing.requestFingerprint !== requestFingerprint) {
+        fail("That action request ID was already used for different action details or evidence.");
+      }
+      return {
+        entityId: issue.id,
+        actionLogId: existing.id,
+        assetIds: [...(existing.attachmentIds ?? [])],
+        changed: false,
+        action: "addActionLog",
+        summary: `Action record for issue ${issue.number} was already submitted for this request.`,
+      };
+    }
+  }
+
+  requireWritableActionIssue(state, issue);
+
+  const actionLogId = makeId(context.idFactory);
+  if (actionLogs.some((entry) => entry.id === actionLogId)) fail("The generated action record ID already exists. Retry the action.");
+  const actionLog = {
+    id: actionLogId,
+    ...(requestId !== null ? { requestId, requestFingerprint } : {}),
+    submitterName,
+    actionType,
+    summary,
+    result,
+    submittedAt: context.now(),
+    attachmentIds: [],
+  };
+  issue.actionLogs = actionLogs;
+  actionLog.attachmentIds = appendIssueEvidence(state, issue, files, context, actionLogId);
+  issue.actionLogs.push(actionLog);
+  return {
+    entityId: issue.id,
+    actionLogId,
+    assetIds: [...actionLog.attachmentIds],
+    action: "addActionLog",
+    summary: `Submitted a ${actionType} action record for issue ${issue.number}.`,
+  };
+}
+
 export function addDiscussion(state, data, context) {
   const id = requireString(data.id, "Issue ID", { maxLength: 120 });
   const issue = state.issues.find((candidate) => candidate.id === id);
@@ -253,8 +354,9 @@ export function closeIssue(state, data, context) {
   const issue = state.issues.find((candidate) => candidate.id === id);
   if (!issue) fail("That issue is no longer available.");
   if (issue.status === "closed") return { entityId: id, changed: false, action: "closeIssue", summary: `Issue ${issue.number} is already closed.` };
+  requireWritableActionIssue(state, issue);
   if (!issue.owner.trim()) fail("Enter the disposition owner before closing this issue.");
-  if (!issue.disposition.trim()) fail("Enter the formal disposition before closing this issue.");
+  if (!issue.disposition.trim() && !hasValidActionLog(issue)) fail("Enter a formal disposition or submit an action record before closing this issue.");
   if (issue.confirmations.length !== 3 || issue.confirmations.some((name) => !name.trim())) {
     fail("Enter all three confirmation names before explicitly closing this issue.");
   }

@@ -1,5 +1,21 @@
 # Local App Acceptance
 
+## Action records and inspection comparisons (2026-10-02)
+
+- Acceptance uses the implementation worktree and a consistent SQLite copy under `/private/tmp/masterqc-high-priority-acceptance`, served at `http://127.0.0.1:4174/?workspace=demo`. The existing service at port 4173 and its production database are separate.
+- The Mac in-app browser submitted two formal action records on one copied Issue, including a text evidence file. Both records remained after refresh, and the evidence preview read the original file contents.
+- Submitting an action record retained unsaved disposition-owner, disposition-text, and discussion edits. An unfinished action draft triggered the navigation/header-close guard; choosing Keep editing retained the draft.
+- Explicitly saving an owner and three confirmation names allowed manual closure with the submitted action records and blank legacy disposition. Closed records remained readable, with action submission unavailable.
+- Current 26.08.19 AP OQC standards differ from older source PDFs, including 20 PSI versus 12 PSI leak testing and added reverse-polarity requirements. Those incompatible prior results must remain excluded; a populated history is not expected simply because an earlier PDF exists.
+- The measured-time preview showed `130 / 66 = 1.9697`; zero displayed `0`, and a cleared input displayed no average. Discarding the draft before opening the report retained the saved `32 / 66 = 0.4848` value.
+- The actual downloaded CSV contained eight inspection rows and 41 columns on every row, including Prior 1 through Prior 8 and Average time per unit seconds. The first average was the unrounded saved `32 / 66`, while an unmeasured row's average remained blank. The browser download observer timed out; the newly written CSV itself was located and parsed successfully.
+- After restarting the isolated service, both action records and their evidence content remained readable from the browser.
+- Created the explicitly labelled, uninspected 100-unit `S15-20261002-AP-OQC` test batch in the isolated copy using the existing recorded 25.10.29 version. All four AP OQC items displayed eight compatible original-PDF results, newest first from 2026-09-03 through 2026-07-07. Unknown source colors stayed absent; the final-packaging history retained genuine zero results and positive rates including 1.67%, 2.50%, 10.00%, and 5.00%.
+- The S15 report displayed eight populated comparison cells per item. Its actual CSV contained four rows with 41 columns, retaining the final-packaging Prior 8 result at 5.00% and the source date. No result was entered and no batch was released during this history check.
+- The production checkout's database and the implementation worktree's database matched their pre-acceptance SHA-256 checksums. Source originals and the live Lark system were not modified.
+- Final `npm test`: **181 tests passed, 0 failed**, including real-bundle history ordering, source immutability, quantity anomalies, duplicate-source exclusion, model-dependent ranges, same-variant preference, optional action-log validation, stale/duplicate submission behavior, and SQLite restart/backup compatibility. `git diff --check` passed.
+- Windows runtime and browser behavior remain untested.
+
 ## Original PDF ingestion verification (2026-09-29)
 
 - Source inventory: 30 original PDFs across S1 and S15, 147 total pages, 22,394,625 original bytes, and 30 distinct SHA-256 identities. Source baseline: `tmp/pdf-import/source-baseline.json`.
