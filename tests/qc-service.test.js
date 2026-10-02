@@ -253,6 +253,14 @@ test("saved row photos remain in an issue snapshot, open issues block release, a
   assert.equal(workspace.rows[0].photos.length, 0);
   assert.equal(workspace.rows[0].issues[0].sourceSnapshot.row.photoIds.length, 1);
 
+  await harness.command("saveIssue", { id: issue.entityId, owner: "Lead", disposition: "Replace the seal", confirmations: ["One", "Two", "Three"] });
+  await harness.command("saveIssue", { id: issue.entityId, owner: "", disposition: "", confirmations: ["", "", ""] });
+  const clearedIssue = (await harness.state()).issues.find((item) => item.id === issue.entityId);
+  assert.equal(clearedIssue.owner, "");
+  assert.equal(clearedIssue.disposition, "");
+  assert.deepEqual(clearedIssue.confirmations, ["", "", ""]);
+  assert.equal(clearedIssue.status, "open", "clearing the disposition does not close the issue");
+
   await assert.rejects(harness.command("releaseBatch", { id: created.id }), /Close all linked issues/i);
   await harness.command("saveIssue", { id: issue.entityId, owner: "Lead", disposition: "Replace the seal", confirmations: ["One", "", "Three"] });
   await assert.rejects(harness.command("closeIssue", { id: issue.entityId }), /all three confirmation names/i);

@@ -73,7 +73,7 @@ function disposeAutosaveController() {
 async function flushAutosaves() {
   if (!activeAutosaveController) return true;
   const saved = await activeAutosaveController.flushAll();
-  if (!saved) notify("Resolve pending inspection edits before continuing.", true);
+  if (!saved) notify("Resolve pending edits before continuing.", true);
   return saved;
 }
 
@@ -144,8 +144,8 @@ async function readLatestState() {
 
 async function requestRefresh() {
   if (!(await flushAutosaves())) {
-    showDialog("Unsaved inspection edits", el("div", { className: "discard-prompt" },
-      el("p", {}, "Some inspection edits could not be confirmed. Reloading will discard this tab’s drafts."),
+    showDialog("Unsaved edits", el("div", { className: "discard-prompt" },
+      el("p", {}, "Some edits could not be confirmed. Reloading will discard this tab’s drafts."),
       el("div", { className: "button-row" },
         button("Stay on this page", () => closeDialog(true), "button-secondary"),
         button("Discard edits and reload", () => {
@@ -178,6 +178,7 @@ async function refreshLatest() {
 async function navigate(route, id = null, force = false) {
   if (!routes.has(route)) return false;
   if (!(await flushAutosaves())) return false;
+  if (!closeDialog()) return false;
   if (!force && hasUnsavedForm()) {
     promptToDiscard("continue", () => navigate(route, id, true));
     return false;
@@ -424,6 +425,10 @@ window.addEventListener("popstate", () => {
   const next = readRoute();
   void (async () => {
     if (!(await flushAutosaves())) {
+      history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
+      return;
+    }
+    if (!closeDialog()) {
       history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
       return;
     }

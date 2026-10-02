@@ -193,6 +193,7 @@
 .qc-ops-confirmations { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; border: 1px solid var(--line, #d1d8d2); border-radius: 9px; padding: 10px; }
 .qc-ops-confirmations legend { padding: 0 5px; color: #49584e; font-size: 11px; font-weight: 700; }
 .qc-ops-confirmations .field { min-width: 0; }
+.qc-ops-issue-form .button[hidden] { display: none; }
 .qc-ops-discussion { display: grid; gap: 9px; border-top: 1px solid var(--line, #d1d8d2); padding-top: 10px; }
 .qc-ops-discussion h3 { margin-bottom: 3px; }
 .qc-ops-discussion p, .qc-ops-empty-discussion { margin: 0; color: var(--muted, #626a64); font-size: 11px; }
