@@ -5,6 +5,7 @@ import {
   requireRecord,
   requireString,
 } from "./qc-domain.js";
+import { appendIssueEvidence, prepareIssueEvidenceFiles } from "./qc-assets.js";
 import { getBatchProducts, getBatchRowProduct } from "./qc-batch-products.js";
 import { requireBatch, requireEditableBatch } from "./qc-inspections.js";
 
@@ -75,9 +76,52 @@ function makeSourceSnapshot(state, batch, row = null, rowProduct = null) {
   };
 }
 
+function issueRequestFingerprint({ title, description, batchId, rowId, files }) {
+  let first = 2166136261;
+  let second = 0x9e3779b9;
+  const update = (value) => {
+    const text = String(value);
+    for (let index = 0; index < text.length; index += 1) {
+      const code = text.charCodeAt(index);
+      first = Math.imul(first ^ code, 16777619);
+      second = Math.imul(second ^ (code + index), 0x85ebca6b);
+    }
+    first = Math.imul(first ^ 0, 16777619);
+    second = Math.imul(second ^ 0, 0x85ebca6b);
+  };
+  for (const value of [title, description, batchId ?? "", rowId ?? ""]) update(value);
+  for (const file of files) {
+    for (const value of [file.category, file.name, file.mimeType, file.dataUrl]) update(value);
+  }
+  return `${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
+}
+
 export function createIssue(state, data, context) {
   const input = requireRecord(data, "Issue");
   const title = requireString(input.title, "Issue title", { maxLength: 300 });
+  const description = requireString(input.description ?? "", "Issue description", { maxLength: 10000, allowBlank: true });
+  const requestId = input.requestId == null ? null : requireString(input.requestId, "Issue request ID", { maxLength: 120 });
+  const files = prepareIssueEvidenceFiles(input.files ?? []);
+  const batchIdInput = input.batchId == null || String(input.batchId).trim() === ""
+    ? null
+    : requireString(input.batchId, "Batch ID", { maxLength: 120 });
+  const rowIdInput = input.rowId == null || String(input.rowId).trim() === ""
+    ? null
+    : requireString(input.rowId, "Inspection row ID", { maxLength: 120 });
+
+  if (requestId !== null) {
+    const requestFingerprint = issueRequestFingerprint({ title, description, batchId: batchIdInput, rowId: rowIdInput, files });
+    const existingByRequest = state.issues.find((issue) => issue.requestId === requestId);
+    if (existingByRequest) {
+      if (existingByRequest.batchId !== batchIdInput || existingByRequest.rowId !== rowIdInput ||
+          existingByRequest.title !== title ||
+          existingByRequest.requestFingerprint !== requestFingerprint) {
+        fail("That issue request ID was already used for different issue details or evidence.");
+      }
+      return { entityId: existingByRequest.id, changed: false, action: "createIssue", summary: `Issue ${existingByRequest.number} was already created for this request.` };
+    }
+  }
+
   let batch = null;
   let row = null;
   let rowProduct = null;
@@ -85,19 +129,21 @@ export function createIssue(state, data, context) {
   let rowId = null;
   let sourceSnapshot = null;
 
-  if (input.batchId != null && String(input.batchId).trim() !== "") {
-    batch = requireBatch(state, input.batchId);
+  if (batchIdInput !== null) {
+    batch = requireBatch(state, batchIdInput);
     requireEditableBatch(batch);
     batchId = batch.id;
-    if (input.rowId != null && String(input.rowId).trim() !== "") {
-      rowId = requireString(input.rowId, "Inspection row ID", { maxLength: 120 });
+    if (rowIdInput !== null) {
+      rowId = rowIdInput;
       row = batch.rows.find((candidate) => candidate.id === rowId);
       if (!row) fail("That inspection row is not part of the selected batch.");
       rowProduct = getBatchRowProduct(batch, row);
       if (!rowProduct) fail("That inspection row has no locked product allocation.");
       if (row.savedAt === null) fail("Save the inspection row before creating an issue from it.");
-      const existing = state.issues.find((issue) => issue.batchId === batchId && issue.rowId === rowId);
-      if (existing) return { entityId: existing.id, changed: false, action: "createIssue", summary: `Issue ${existing.number} already exists for this inspection row.` };
+      if (requestId === null) {
+        const existing = state.issues.find((issue) => issue.batchId === batchId && issue.rowId === rowId);
+        if (existing) return { entityId: existing.id, changed: false, action: "createIssue", summary: `Issue ${existing.number} already exists for this inspection row.` };
+      }
     } else if (input.rowId != null) {
       fail("An inspection row cannot be linked without a batch.");
     }
@@ -106,13 +152,22 @@ export function createIssue(state, data, context) {
     fail("An inspection row cannot be linked without a batch.");
   }
 
+  if (!files.some((file) => file.category === "photo")) {
+    fail("At least one uploaded photo is required to create an issue.");
+  }
+
   const id = makeId(context.idFactory);
   const number = makeIssueNumber(id);
   if (state.issues.some((issue) => issue.number === number)) fail("The generated issue number already exists. Retry the action.");
-  state.issues.push({
+  const issue = {
     id,
     number,
     title,
+    description,
+    ...(requestId !== null ? {
+      requestId,
+      requestFingerprint: issueRequestFingerprint({ title, description, batchId, rowId, files }),
+    } : {}),
     batchId,
     rowId,
     sourceSnapshot,
@@ -121,9 +176,12 @@ export function createIssue(state, data, context) {
     disposition: "",
     confirmations: ["", "", ""],
     discussion: [],
+    attachmentIds: [],
     createdAt: context.now(),
     closedAt: null,
-  });
+  };
+  appendIssueEvidence(state, issue, files, context);
+  state.issues.push(issue);
   return { entityId: id, action: "createIssue", summary: `Created open issue ${number}.` };
 }
 
@@ -137,6 +195,7 @@ export function saveIssue(state, data) {
   issue.owner = requireString(data.owner ?? "", "Disposition owner", { maxLength: 200, allowBlank: true });
   issue.disposition = requireString(data.disposition ?? "", "Formal disposition", { maxLength: 10000, allowBlank: true });
   issue.confirmations = confirmations.map((name, index) => requireString(name, `Confirmation ${index + 1}`, { maxLength: 200, allowBlank: true }));
+  if (Object.hasOwn(data, "description")) issue.description = requireString(data.description, "Issue description", { maxLength: 10000, allowBlank: true });
   return { entityId: issue.id, action: "saveIssue", summary: `Saved disposition details for ${issue.number}.` };
 }
 

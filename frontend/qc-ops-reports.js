@@ -2,6 +2,7 @@ import {
   button, csvRow, dateLabel, el, list, pageHeading, quantity, safeFilename, safeProcedureUrl, statusPill, text,
 } from "./qc-ops-common.js";
 import { downloadFile, notify } from "./qc-ui.js";
+import { attachmentCanPreview, attachmentDownload, openAttachmentPreview } from "./qc-attachments.js";
 import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
 
@@ -98,6 +99,101 @@ function reportProducts(workspace, state) {
   return products;
 }
 
+function rowAttachments(row, state) {
+  if (row.attachments && typeof row.attachments === "object") return row.attachments;
+  const assets = new Map(list(state.assets).map((asset) => [asset.id, asset]));
+  const ids = row.attachmentIds || {};
+  return {
+    videos: assets.get(ids.videos) || null,
+    procedures: assets.get(ids.procedures) || null,
+    log: assets.get(ids.log) || null,
+  };
+}
+
+function issueEvidence(issue, state) {
+  if (Array.isArray(issue.attachments)) return issue.attachments;
+  const assets = new Map(list(state.assets).map((asset) => [asset.id, asset]));
+  return list(issue.attachmentIds).map((id) => assets.get(id)).filter(Boolean);
+}
+
+function legacyPhotoAssets(row, state) {
+  const assets = new Map(list(state.assets).map((asset) => [asset.id, asset]));
+  const direct = list(row.photos);
+  const photoIds = list(row.photoIds);
+  const seen = new Set();
+  return [...direct, ...photoIds.map((id) => assets.get(id))].filter((asset) => {
+    if (!asset || typeof asset.dataUrl !== "string" || !asset.dataUrl.startsWith("data:image/")) return false;
+    const key = asset.id || `${asset.name || ""}\u0000${asset.dataUrl}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function attachmentActions(asset) {
+  const preview = attachmentCanPreview(asset)
+    ? button("Preview", () => openAttachmentPreview(asset), "button-quiet qc-ops-small-button")
+    : null;
+  return h("div", { className: "qc-ops-report-attachment-actions" }, preview, attachmentDownload(asset));
+}
+
+function legacyEvidence(row, state) {
+  const photos = legacyPhotoAssets(row, state);
+  const remark = String(row.remarks || "").trim();
+  if (!remark && !photos.length) return null;
+  return h("details", { className: "qc-ops-report-legacy-evidence" },
+    h("summary", {}, `Legacy evidence${photos.length ? ` · ${photos.length} photo${photos.length === 1 ? "" : "s"}` : ""}`),
+    remark ? h("p", {}, remark) : null,
+    photos.length ? h("div", { className: "qc-ops-report-photo-gallery qc-ops-report-legacy-photos" }, photos.map((photo) => h("figure", { className: "qc-ops-report-photo" },
+      h("img", { src: photo.dataUrl, alt: text(photo.name, "Legacy photo") }),
+      h("figcaption", {}, text(photo.name, "Legacy photo")),
+      attachmentActions(photo),
+    ))) : null,
+  );
+}
+
+function reportIssueEvidence(issues, state) {
+  if (!issues.length) return null;
+  return h("ul", { className: "qc-ops-report-issue-list" }, issues.map((issue) => {
+    const evidence = issueEvidence(issue, state);
+    return h("li", { className: "qc-ops-report-issue" },
+      h("strong", {}, `${text(issue.number, "Issue")} · ${text(issue.status)}`),
+      issue.title ? h("span", {}, text(issue.title)) : null,
+      issue.description ? h("p", {}, text(issue.description)) : null,
+      evidence.length ? h("ul", { className: "qc-ops-report-issue-evidence" }, evidence.map((asset) => h("li", {},
+        h("span", {}, text(asset.name, "Issue evidence")), attachmentActions(asset),
+      ))) : null,
+    );
+  }));
+}
+
+function reportRowAttachmentCell(row, state) {
+  const attachments = rowAttachments(row, state);
+  const categories = [
+    ["Videos", attachments.videos],
+    ["Procedures", attachments.procedures],
+    ["Log", attachments.log],
+  ];
+  const populated = categories.filter(([, asset]) => asset);
+  return h("td", { className: "qc-ops-attachments qc-ops-report-attachments" }, populated.length
+    ? populated.map(([label, asset]) => h("div", { className: "qc-ops-report-attachment" },
+      h("strong", {}, `${label}:`), h("span", {}, text(asset.name, "Attachment")), attachmentActions(asset),
+    ))
+    : h("span", { className: "qc-ops-empty-photo" }, "No attachments"));
+}
+
+function historicalPhotosCell(row, state) {
+  const photos = legacyPhotoAssets(row, state);
+  if (!photos.length) return h("td", { className: "qc-ops-photos qc-ops-report-photos" }, h("span", { className: "qc-ops-empty-photo" }, "No photos"));
+  return h("td", { className: "qc-ops-photos qc-ops-report-photos" },
+    h("div", { className: "qc-ops-report-photo-gallery" }, photos.map((photo) => h("figure", { className: "qc-ops-report-photo" },
+      h("img", { src: photo.dataUrl, alt: photo.name || `Photo for ${text(row.title)}` }),
+      h("figcaption", {}, text(photo.name, "Inspection photo")),
+      attachmentActions(photo),
+    ))),
+  );
+}
+
 function productLabel(product, state) {
   const variant = product?.variant || list(state.variants).find((entry) => entry.id === product?.variantId);
   return text(product?.variantLabel || product?.productLabel || variant?.label, product?.variantId || "Product");
@@ -127,7 +223,7 @@ function makeReadOnlyTable(workspace, state) {
   const historical = isHistoricalBatch(workspace.batch);
   const multipleProducts = !historical && reportProducts(workspace, state).length > 1;
   const table = h("table", { className: `qc-ops-inspection-table qc-ops-report-table${multipleProducts ? " qc-ops-mixed-product-table" : ""}` });
-  const widths = ["34px", ...(multipleProducts ? ["118px"] : []), "100px", "185px", "80px", "60px", "76px", "55px", "55px", "52px", "52px", "52px", "52px", "52px", "44px", "64px", "165px", "128px"];
+  const widths = ["34px", ...(multipleProducts ? ["118px"] : []), "100px", "185px", "80px", "60px", "76px", "55px", "55px", "52px", "52px", "52px", "52px", "52px", "44px", "64px", "165px", "154px"];
   const colgroup = h("colgroup", {}, widths.map((width) => h("col", { style: { width } })));
   const thead = h("thead", {},
     h("tr", { className: "qc-ops-group-head" },
@@ -143,7 +239,7 @@ function makeReadOnlyTable(workspace, state) {
       h("th", { rowSpan: "2", scope: "col" }, "Time", h("br"), h("span", { lang: "zh" }, "时数 (sec)")),
       h("th", { rowSpan: "2", scope: "col" }, "Procedure / link", h("br"), h("span", { lang: "zh" }, "视频 / 程序 / 报告")),
       h("th", { rowSpan: "2", scope: "col" }, "Remarks / issues", h("br"), h("span", { lang: "zh" }, "备注 / 问题")),
-      h("th", { rowSpan: "2", scope: "col" }, "Photos", h("br"), h("span", { lang: "zh" }, "照片")),
+      h("th", { rowSpan: "2", scope: "col" }, historical ? "Photos" : "Attachments", h("br"), h("span", { lang: "zh" }, historical ? "照片" : "附件")),
     ),
     h("tr", { className: "qc-ops-sub-head" },
       h("th", { scope: "col" }, "Inspection qty", h("br"), h("span", { lang: "zh" }, "检验数量")),
@@ -205,20 +301,10 @@ function makeReadOnlyTable(workspace, state) {
     tr.append(procedureCell);
     const issues = list(row.issues);
     const remarks = h("td", { className: "qc-ops-remarks qc-ops-report-remarks" },
-      h("div", {}, text(row.remarks)),
-      issues.length ? h("div", { className: "qc-ops-report-issue-list" }, issues.map((issue) => h("span", {}, `${text(issue.number, "Issue")} · ${text(issue.status)}`))) : null,
+      historical ? text(row.remarks) : reportIssueEvidence(issues, state),
+      historical ? null : legacyEvidence(row, state),
     );
-    const photos = list(row.photos).filter((photo) => typeof photo.dataUrl === "string" && photo.dataUrl.startsWith("data:image/"));
-    const photoCell = h("td", { className: "qc-ops-photos qc-ops-report-photos" });
-    if (photos.length) {
-      photoCell.append(h("div", { className: "qc-ops-report-photo-gallery" }, photos.map((photo) => h("figure", { className: "qc-ops-report-photo" },
-        h("img", { src: photo.dataUrl, alt: photo.name || `Photo for ${text(row.title)}` }),
-        h("figcaption", {}, text(photo.name, "Inspection photo")),
-      ))));
-    } else {
-      photoCell.append(h("span", { className: "qc-ops-empty-photo" }, "No photos"));
-    }
-    tr.append(remarks, photoCell);
+    tr.append(remarks, historical ? historicalPhotosCell(row, state) : reportRowAttachmentCell(row, state));
     return tr;
   }));
   table.append(colgroup, thead, body);
@@ -273,7 +359,7 @@ function exportRows(workspace, state) {
     "Batch number", "Batch date", "Status", "Batch products summary", "Purchase order", "Factory", "Stage", "Total batch quantity", "PO progress",
     "No.", "Product", "Product quantity", "PO line ordered quantity", "Design version",
     "Inspection title", "检验项目", "Specification", "检验标准", "Devices", "Sampling percent", "Recording rule", "Inspected quantity", "Defective quantity", "Defective rate",
-    "Prior 1", "Prior 2", "Prior 3", "Prior 4", "Time seconds", "Procedure URL", "Remarks", "Linked issues", "Photo file names",
+    "Prior 1", "Prior 2", "Prior 3", "Prior 4", "Time seconds", "Procedure URL", "Remarks", "Linked issues", "Issue descriptions", "Issue evidence file names", "Row attachment file names", "Photo file names",
   ];
   const rows = [csvRow(headers.map((value) => ({ value, textField: false })))];
   for (const row of list(workspace.rows)) {
@@ -283,8 +369,15 @@ function exportRows(workspace, state) {
       const priorBatchNumber = entry ? displayNumbers.get(entry.batchId) ?? entry.batchNumber ?? entry.batchId : "";
       return entry ? `${text(priorBatchNumber, entry.batchId)} · ${dateLabel(entry.date)} · ${percent(entry.rate)}` : "";
     });
-    const issues = list(row.issues).map((issue) => `${text(issue.number, "Issue")} (${text(issue.status)})`).join("; ");
-    const photos = list(row.photos).map((photo) => photo.name).filter(Boolean).join("; ");
+    const issueRows = list(row.issues);
+    const issues = issueRows.map((issue) => `${text(issue.number, "Issue")} (${text(issue.status)})`).join("; ");
+    const issueDescriptions = issueRows.map((issue) => `${text(issue.number, "Issue")}: ${String(issue.description || "").trim()}`).filter((value) => !value.endsWith(": " )).join("; ");
+    const issueEvidenceNames = issueRows.flatMap((issue) => issueEvidence(issue, state)
+      .filter((asset) => asset.name)
+      .map((asset) => `${text(issue.number, "Issue")}: ${asset.name}`)).join("; ");
+    const rowAttachmentNames = Object.entries(rowAttachments(row, state)).filter(([, asset]) => asset?.name)
+      .map(([category, asset]) => `${category}: ${asset.name}`).join("; ");
+    const photos = legacyPhotoAssets(row, state).map((photo) => photo.name).filter(Boolean).join("; ");
     const linkedProduct = historical ? null : rowProduct(workspace, row, state);
     const ownerProduct = products.find((product) => product.lineId === (row.productLineId || linkedProduct?.lineId)) || linkedProduct;
     const ownerLabel = historical ? batchProductLabel(batch, variant) : text(row.productLabel, productLabel(ownerProduct || {}, state));
@@ -300,7 +393,7 @@ function exportRows(workspace, state) {
       [row.no, true], [ownerLabel, true], [ownerQuantity, false], [orderLine?.orderedQty, false], [ownerVersion, true], [row.title, true], [row.titleZh, true],
       [row.specification, true], [row.specificationZh, true], [row.devices, true], [row.samplingPercent, false], [row.recordingRule, true],
       [historical ? row.sourceInspectedQty : row.inspectedQty, false], [reportDefectiveQty, false], [reportDefectiveRate, false],
-      ...priorValues.map((value) => [value, true]), [reportActualTime, false], [row.procedureUrl, true], [row.remarks, true], [issues, true], [photos, true],
+      ...priorValues.map((value) => [value, true]), [reportActualTime, false], [row.procedureUrl, true], [row.remarks, true], [issues, true], [issueDescriptions, true], [issueEvidenceNames, true], [rowAttachmentNames, true], [photos, true],
     ];
     rows.push(csvRow(values.map(([value, textField]) => ({ value, textField }))));
   }

@@ -240,13 +240,19 @@ test("saved row photos remain in an issue snapshot, open issues block release, a
   await harness.command("addPhotos", {
     batchId: created.id, rowId: row.id, files: [{ name: "evidence.png", mimeType: "image/png", dataUrl: PNG_URL }],
   });
-  const issue = await harness.command("createIssue", { title: "Abnormal pressure", batchId: created.id, rowId: row.id });
+  const issue = await harness.command("createIssue", {
+    title: "Abnormal pressure",
+    batchId: created.id,
+    rowId: row.id,
+    files: [{ name: "issue-evidence.png", mimeType: "image/png", dataUrl: PNG_URL, category: "photo" }],
+  });
   const duplicateIssue = await harness.command("createIssue", { title: "Should be ignored", batchId: created.id, rowId: row.id });
   assert.equal(duplicateIssue.entityId, issue.entityId);
   await harness.command("removePhoto", { batchId: created.id, rowId: row.id, assetId: (await harness.state()).batches.find((batch) => batch.id === created.id).rows[0].photoIds[0] });
   let afterRemoval = await harness.state();
   assert.equal(afterRemoval.batches.find((batch) => batch.id === created.id).rows[0].photoIds.length, 0);
-  assert.equal(afterRemoval.assets.length, 1);
+  assert.equal(afterRemoval.assets.filter((asset) => asset.kind === "photo").length, 1);
+  assert.equal(afterRemoval.assets.filter((asset) => asset.kind === "issueAttachment").length, 1);
   const savedIssue = afterRemoval.issues.find((item) => item.id === issue.entityId);
   assert.equal(savedIssue.sourceSnapshot.row.photoIds.length, 1);
   workspace = await harness.service.getBatchWorkspace(created.id);
@@ -514,7 +520,12 @@ test("backup validation rejects malformed issue evidence and unsafe library asse
   const batch = await createBatch(harness, { variant, number: "B-INVALID-BACKUP", quantity: 20 });
   await saveAllRows(harness, batch.id);
   const row = (await harness.service.getBatchWorkspace(batch.id)).rows[0];
-  const issue = await harness.command("createIssue", { title: "Source issue", batchId: batch.id, rowId: row.id });
+  const issue = await harness.command("createIssue", {
+    title: "Source issue",
+    batchId: batch.id,
+    rowId: row.id,
+    files: [{ name: "source-issue.png", mimeType: "image/png", dataUrl: PNG_URL, category: "photo" }],
+  });
   const backup = await harness.service.exportBackup();
 
   const badRate = structuredClone(backup);

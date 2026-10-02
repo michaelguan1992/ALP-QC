@@ -10,6 +10,7 @@ import { createMemoryQCAdapter } from "../storage/memory-qc-adapter.js";
 import { createSQLiteQCAdapter } from "../storage/sqlite-qc-adapter.mjs";
 
 const DATE = "2026-10-01";
+const PNG_URL = "data:image/png;base64,iVBORw0KGgo=";
 
 function makeService(adapter = createMemoryQCAdapter()) {
   let idNumber = 0;
@@ -112,6 +113,7 @@ test("saving inspection time requires a finite non-negative value and rejects in
     title: "Measured-time evidence",
     batchId: batch.id,
     rowId: row.id,
+    files: [{ name: "measured-time.png", mimeType: "image/png", dataUrl: PNG_URL, category: "photo" }],
   }, state.revision);
   state = await service.getState();
   const issue = state.issues.find((candidate) => candidate.id === issueResult.entityId);

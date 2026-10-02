@@ -235,7 +235,20 @@ h3 { margin-bottom: 7px; font-size: 1rem; }
 .qc-ops-report-table-section { display: grid; gap: 8px; }
 .qc-ops-report-table-section .qc-ops-section-heading { margin-bottom: 0; }
 .qc-ops-report-remarks { white-space: pre-wrap; text-align: left !important; }
-.qc-ops-report-issue-list { display: grid; gap: 3px; margin-top: 5px; color: #81452a; font-size: 8px; }
+.qc-ops-report-issue-list { display: grid; gap: 4px; margin: 0; padding: 0; color: #81452a; font-size: 8px; list-style: none; }
+.qc-ops-report-issue { display: grid; gap: 2px; border-bottom: 1px solid #e1e6e1; padding: 2px 0 4px; overflow-wrap: anywhere; }
+.qc-ops-report-issue > p { margin: 1px 0; color: #4d584f; white-space: pre-wrap; }
+.qc-ops-report-issue-evidence { display: grid; gap: 2px; margin: 2px 0 0; padding-left: 10px; color: #45534a; list-style: disc; }
+.qc-ops-report-issue-evidence > li { display: grid; gap: 1px; overflow-wrap: anywhere; }
+.qc-ops-report-attachment { display: grid; justify-items: center; gap: 2px; border-bottom: 1px solid #e1e6e1; padding: 3px 0; overflow-wrap: anywhere; }
+.qc-ops-report-attachment:last-child { border-bottom: 0; }
+.qc-ops-report-attachment-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 5px; }
+.qc-ops-report-attachment-actions .button { padding: 1px 2px; color: #315944; font-size: 7px; }
+.qc-ops-report-legacy-evidence { margin-top: 4px; border-top: 1px solid #e1e6e1; padding-top: 3px; color: #566158; font-size: 7px; }
+.qc-ops-report-legacy-evidence > summary { cursor: pointer; font-weight: 700; }
+.qc-ops-report-legacy-evidence > p { margin: 3px 0; color: #404a42; white-space: pre-wrap; }
+.qc-ops-report-legacy-photos { display: grid; gap: 2px; margin: 3px 0 0; padding: 0; list-style: none; }
+.qc-ops-report-legacy-photos > li { display: grid; gap: 1px; overflow-wrap: anywhere; }
 .qc-ops-report-photo-gallery { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; }
 .qc-ops-report-photo { display: grid; justify-items: center; gap: 2px; max-width: 54px; margin: 0; }
 .qc-ops-report-photo img { display: block; width: 48px; height: 40px; border: 1px solid #b9c3bc; object-fit: contain; background: white; }
@@ -313,4 +326,7 @@ h3 { margin-bottom: 7px; font-size: 1rem; }
   body.printing .qc-ops-table-scroll { overflow: visible !important; width: 100% !important; }
   body.printing .qc-ops-inspection-table { width: 1306px !important; min-width: 1306px !important; }
   body.printing .qc-ops-report-photo img { width: 42px !important; height: 34px !important; }
+  body.printing .qc-ops-report-legacy-evidence:not([open]) > :not(summary) { display: block !important; }
+  body.printing .qc-ops-report-legacy-evidence > summary { display: none !important; }
+  body.printing .qc-ops-report-attachment-actions { display: none !important; }
 }

@@ -14,8 +14,18 @@ import {
   timestampLabel
 } from "./qc-ops-common.js";
 import { closeDialog, showDialog } from "./qc-ui.js";
-import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
 import { createInspectionAutosaveController } from "./qc-inspection-autosave.js";
+import {
+  attachmentCanPreview,
+  attachmentDownload,
+  createAttachmentPreview,
+  issueAttachmentCategory,
+  MEBIBYTE,
+  normalizedMimeType,
+  readAttachmentFile,
+} from "./qc-attachments.js";
+import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
+import { hasRequiredIssuePhoto, remainingIssueDraftAfterDiscussion, submitDiscussionEntry } from "./qc-issue-drafts.js";
 
 const issueDrafts = new Map();
 let activeIssueDialogRuntime = null;
@@ -124,6 +134,12 @@ function quantityOrDash(value) {
   return value === null || value === undefined || value === "" ? "—" : quantity(value);
 }
 
+function rowHasSavedIssueResult(row) {
+  const legacyTimeOmitted = row && !Object.hasOwn(row, "actualTimeSeconds");
+  return Boolean(row?.savedAt) && row.defectiveQty !== null && row.defectiveQty !== undefined &&
+    (row.actualTimeSeconds !== null && row.actualTimeSeconds !== undefined || legacyTimeOmitted);
+}
+
 function issueDraft(issue) {
   return issueDrafts.get(issue.id) || {
     owner: String(issue.owner || ""),
@@ -147,14 +163,6 @@ function draftDiffers(issue, draft) {
   return !sameDisposition(dispositionValue(draft), dispositionValue(saved));
 }
 
-function hasDiscussionDraft(draft) {
-  return Boolean(draft.discussionAuthorName || draft.discussionText);
-}
-
-function hasIssueDraft(issue, draft) {
-  return draftDiffers(issue, draft) || hasDiscussionDraft(draft);
-}
-
 function dispositionValue(draft) {
   return {
     owner: draft.owner.trim(),
@@ -169,12 +177,185 @@ function sameDisposition(left, right) {
     left.confirmations.every((value, index) => value === right.confirmations[index]);
 }
 
+function hasDiscussionDraft(draft) {
+  return Boolean(draft.discussionAuthorName || draft.discussionText);
+}
+
+function hasIssueDraft(issue, draft) {
+  return draftDiffers(issue, draft) || hasDiscussionDraft(draft);
+}
+
 function sourcePhotos(issue, state) {
   const snapshot = sourceSnapshot(issue);
   const row = snapshot.row || snapshot;
   const photoIds = list(row.photoIds || snapshot.photoIds);
   const assets = new Map(list(state.assets).map((asset) => [asset.id, asset]));
   return photoIds.map((id) => assets.get(id)).filter(Boolean);
+}
+
+function issueAttachments(issue, state) {
+  if (Array.isArray(issue.attachments)) return issue.attachments;
+  const assets = new Map(list(state.assets).map((asset) => [asset.id, asset]));
+  return list(issue.attachmentIds).map((id) => assets.get(id)).filter(Boolean);
+}
+
+function newRequestId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  return [...bytes].map((byte, index) => `${index === 4 || index === 6 || index === 8 || index === 10 ? "-" : ""}${byte.toString(16).padStart(2, "0")}`).join("");
+}
+
+function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreservation, onIssueUpdated = null, runIssueCommand = null) {
+  const host = el("section", { className: "qc-ops-issue-attachments" });
+  const previewHost = el("div", { className: "qc-ops-issue-attachment-preview-host" });
+  const pendingOperations = new Set();
+  const removeButtons = new Set();
+  let disabled = readOnly;
+  let disposed = false;
+  let previewCleanup = () => {};
+  const startOperation = (work) => {
+    const operation = Promise.resolve().then(work);
+    pendingOperations.add(operation);
+    operation.then(
+      () => pendingOperations.delete(operation),
+      () => pendingOperations.delete(operation),
+    );
+    return operation;
+  };
+  const issueCommand = (type, data, options) => runIssueCommand
+    ? runIssueCommand(type, data, options)
+    : runCommand(ctx, type, data, options);
+  const flushPending = async () => {
+    while (pendingOperations.size) await Promise.allSettled([...pendingOperations]);
+    return true;
+  };
+  const clearPreview = () => {
+    previewCleanup();
+    previewCleanup = () => {};
+    previewHost.replaceChildren();
+  };
+  const showInlinePreview = (asset) => {
+    clearPreview();
+    const preview = createAttachmentPreview(asset);
+    previewCleanup = preview.cleanup;
+    const closePreview = button("Close preview", clearPreview, "button-quiet qc-ops-small-button");
+    previewHost.replaceChildren(el("div", { className: "qc-ops-attachment-preview" },
+      el("strong", { className: "qc-ops-attachment-preview-name" }, text(asset.name, "Attachment")),
+      preview.element,
+      closePreview,
+    ));
+    if (preview.load) {
+      void preview.load(preview.element).catch((error) => {
+        preview.element.textContent = error instanceof Error ? error.message : "The file preview could not be loaded.";
+      });
+    }
+  };
+
+  const photoInput = el("input", { type: "file", accept: "image/*", multiple: true, className: "qc-ops-hidden-file", disabled: readOnly, "aria-label": "Choose issue photos" });
+  const fileInput = el("input", { type: "file", multiple: true, className: "qc-ops-hidden-file", disabled: readOnly, "aria-label": "Choose issue files" });
+  const photoButton = button("Add photos", () => photoInput.click(), "button-secondary qc-ops-small-button");
+  const fileButton = button("Add files", () => fileInput.click(), "button-secondary qc-ops-small-button");
+  photoButton.disabled = disabled;
+  fileButton.disabled = disabled;
+
+  const upload = async (input) => {
+    const selected = Array.from(input.files || []);
+    if (!selected.length || disposed) return;
+    markDraftForPreservation();
+    try {
+      const files = await Promise.all(selected.map(async (file) => {
+        const mimeType = normalizedMimeType(file.name, file.type);
+        const category = issueAttachmentCategory(mimeType);
+        const payload = await readAttachmentFile(file, {
+          maxBytes: category === "photo" ? 5 * MEBIBYTE : 10 * MEBIBYTE,
+          category: category === "photo" ? "photo" : null,
+        });
+        return { ...payload, category };
+      }));
+      if (disposed) return;
+      const response = await issueCommand("addIssueAttachments", { id: issue.id, files }, { render: false });
+      if (!response.ok) return;
+      input.value = "";
+      const latestState = response.state || state;
+      const latestIssue = list(latestState.issues).find((entry) => entry.id === issue.id) || issue;
+      onIssueUpdated?.(latestIssue, latestState);
+      render(latestIssue, latestState);
+      markDraftForPreservation();
+    } catch (error) {
+      notify(errorText(error, "Could not read the selected file."), true);
+    }
+  };
+  photoInput.addEventListener("change", () => { void startOperation(() => upload(photoInput)); });
+  fileInput.addEventListener("change", () => { void startOperation(() => upload(fileInput)); });
+
+  const removeAttachment = async (asset) => {
+    if (disposed || disabled) return;
+    if (!window.confirm(`Remove “${text(asset.name, "this file")}” from this issue?`)) return;
+    markDraftForPreservation();
+    try {
+      const response = await issueCommand("removeIssueAttachment", { id: issue.id, assetId: asset.id }, { render: false });
+      if (!response.ok) return;
+      const latestState = response.state || state;
+      const latestIssue = list(latestState.issues).find((entry) => entry.id === issue.id) || issue;
+      onIssueUpdated?.(latestIssue, latestState);
+      render(latestIssue, latestState);
+      markDraftForPreservation();
+    } catch (error) {
+      notify(errorText(error, "Could not remove the attachment."), true);
+    }
+  };
+
+  const render = (currentIssue, currentState) => {
+    clearPreview();
+    const attachments = issueAttachments(currentIssue, currentState);
+    const listHost = attachments.length
+      ? el("ul", { className: "qc-ops-issue-attachment-list" }, ...attachments.map((asset) => {
+        const preview = attachmentCanPreview(asset)
+          ? button("Preview", () => showInlinePreview(asset), "button-quiet qc-ops-small-button")
+          : null;
+        const category = asset.category || issueAttachmentCategory(asset.mimeType);
+        const remove = button("Remove", () => { void startOperation(() => removeAttachment(asset)); }, "button-quiet qc-ops-attachment-remove");
+        remove.disabled = disabled;
+        removeButtons.add(remove);
+        return el("li", {},
+          el("span", { className: "qc-ops-issue-attachment-name", title: text(asset.name) }, text(asset.name, "Attachment")),
+          el("small", {}, category === "photo" ? "Photo" : "File"),
+          preview,
+          attachmentDownload(asset),
+          remove,
+        );
+      }))
+      : el("p", { className: "qc-ops-empty-issue-attachments" }, "No evidence");
+    host.replaceChildren(
+      el("div", { className: "qc-ops-section-heading" }, el("h3", {}, "Evidence"),
+        el("div", { className: "qc-ops-issue-attachment-actions" }, photoButton, fileButton)),
+      listHost,
+      previewHost,
+      photoInput,
+      fileInput,
+    );
+  };
+  render(issue, state);
+  return {
+    element: host,
+    cleanup() {
+      disposed = true;
+      clearPreview();
+    },
+    flushPending,
+    hasPending: () => pendingOperations.size > 0,
+    setDisabled(value) {
+      disabled = readOnly || Boolean(value);
+      photoButton.disabled = disabled;
+      fileButton.disabled = disabled;
+      photoInput.disabled = disabled;
+      fileInput.disabled = disabled;
+      removeButtons.forEach((remove) => { remove.disabled = disabled; });
+    },
+  };
 }
 
 function sourceCard(issue, state) {
@@ -216,6 +397,8 @@ function sourceCard(issue, state) {
       el("div", {}, el("small", {}, "Immutable source snapshot"), el("h3", {}, sourceTitle), sourceTitleZh ? el("p", { lang: "zh" }, sourceTitleZh) : null),
       statusPill(issue.status)
     ),
+    String(issue.description || "").trim() ? el("div", { className: "qc-ops-issue-description" },
+      el("strong", {}, "Description"), el("p", {}, String(issue.description).trim())) : null,
     el("p", { className: "qc-ops-source-meta" }, metadata.join(" · ")),
     row ? el("div", { className: "qc-ops-source-standard" },
       el("strong", {}, "Inspection standard"),
@@ -239,8 +422,10 @@ function renderDiscussion(issue) {
 }
 
 function openIssueDialog(issue, state, ctx) {
-  const readOnly = issue.status === "closed";
-  const draft = issueDraft(issue);
+  let currentIssue = issue;
+  let currentState = state;
+  const readOnly = currentIssue.status === "closed";
+  const draft = issueDraft(currentIssue);
   const owner = el("input", { type: "text", maxLength: "100", value: draft.owner, disabled: readOnly, name: "owner" });
   const disposition = el("textarea", { rows: "3", maxLength: "1200", disabled: readOnly, name: "disposition" }, draft.disposition);
   const confirmationInputs = [0, 1, 2].map((index) => el("input", {
@@ -251,10 +436,12 @@ function openIssueDialog(issue, state, ctx) {
     name: "discussionAuthorName", "aria-required": "true"
   });
   const discussionText = el("textarea", { rows: "2", maxLength: "1200", disabled: readOnly, name: "discussionText", placeholder: "Add a separate discussion entry" }, draft.discussionText || "");
-  const discussionList = el("div", { className: "qc-ops-discussion-host" }, renderDiscussion(issue));
+  const discussionList = el("div", { className: "qc-ops-discussion-host" }, renderDiscussion(currentIssue));
   const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
-  const form = el("form", { className: "qc-ops-form qc-ops-issue-form", "data-preserve-drafts": "true", "data-issue-id": issue.id });
-  if (hasIssueDraft(issue, draft)) form.dataset.dirty = "true";
+  const saveStatus = el("p", { className: "save-status qc-ops-issue-save-status", role: "status", "aria-live": "polite" });
+  const form = el("form", { className: "qc-ops-form qc-ops-issue-form", "data-preserve-drafts": "true", "data-issue-id": currentIssue.id });
+  if (hasIssueDraft(currentIssue, draft)) form.dataset.dirty = "true";
+
   const captureDraft = () => ({
     owner: owner.value,
     disposition: disposition.value,
@@ -262,61 +449,107 @@ function openIssueDialog(issue, state, ctx) {
     discussionAuthorName: discussionAuthorName.value,
     discussionText: discussionText.value
   });
+  const updateIssueListProjection = () => {
+    const row = [...document.querySelectorAll("tr[data-issue-id]")].find((item) => item.dataset.issueId === currentIssue.id);
+    const ownerCell = row?.querySelector("[data-issue-owner]");
+    if (ownerCell) ownerCell.textContent = currentIssue.owner || "Unassigned";
+    if (row) row.dataset.search = [currentIssue.number, currentIssue.title, currentIssue.owner, sourceText(currentIssue, currentState), currentIssue.disposition].join(" ").toLowerCase();
+  };
+  const adoptLatestIssue = (latestIssue, latestState) => {
+    if (!latestIssue) return false;
+    const latestRevision = Number(latestState?.revision);
+    const currentRevision = Number(currentState?.revision);
+    if (Number.isFinite(latestRevision) && Number.isFinite(currentRevision) && latestRevision < currentRevision) return false;
+    currentIssue = latestIssue;
+    currentState = latestState || currentState;
+    Object.assign(issue, latestIssue);
+    updateIssueListProjection();
+    return true;
+  };
   const storeDraft = (current) => {
-    if (hasIssueDraft(issue, current)) issueDrafts.set(issue.id, current);
-    else issueDrafts.delete(issue.id);
+    if (hasIssueDraft(currentIssue, current)) issueDrafts.set(currentIssue.id, current);
+    else issueDrafts.delete(currentIssue.id);
   };
   const markDraftForPreservation = () => {
     const current = captureDraft();
     storeDraft(current);
-    if (hasIssueDraft(issue, current)) form.dataset.dirty = "true";
+    if (hasIssueDraft(currentIssue, current)) form.dataset.dirty = "true";
     else delete form.dataset.dirty;
     return current;
   };
+
+  const runEvidenceCommand = async (type, data, options = {}) => {
+    if (autosaveController && !(await autosaveController.flushAll())) {
+      return { ok: false, blocked: true, error: new Error("Disposition changes could not be saved.") };
+    }
+    return runCommand(ctx, type, data, { ...options, autosave: true, render: false });
+  };
+  const evidence = renderIssueAttachments(currentIssue, currentState, ctx, readOnly, markDraftForPreservation, (nextIssue, nextState) => {
+    adoptLatestIssue(nextIssue, nextState);
+  }, runEvidenceCommand);
   const dispositionInputs = [owner, disposition, ...confirmationInputs];
-  const initialDisposition = dispositionValue(savedIssueDraft(issue));
-  const initialDispositionComplete = Boolean(initialDisposition.owner.trim() && initialDisposition.disposition.trim() && initialDisposition.confirmations.every((name) => name.trim()));
-  const saveStatus = el("p", { className: "save-status qc-ops-issue-save-status", role: "status", "aria-live": "polite" }, initialDispositionComplete ? "Saved" : "Saved · Incomplete");
-  const reloadLatestButton = button("Reload latest data", () => {
-    const dialogTitle = document.querySelector("#qc-dialog .dialog-header h2")?.textContent || `${text(issue.number, "Issue")} · ${text(issue.title)}`;
-    showDialog("Unsaved edits", el("div", { className: "discard-prompt" },
-      el("p", {}, "Some edits could not be saved. Reloading will discard this tab’s drafts."),
-      el("div", { className: "button-row" },
-        button("Keep editing", () => showDialog(dialogTitle, form), "button-secondary"),
-        button("Discard edits and reload", () => {
-          closeDialog(true);
-          activeIssueDialogRuntime?.dispose();
-          window.dispatchEvent(new CustomEvent("masterqc:discard-operation-drafts"));
-          void ctx.refresh?.();
-        }, "button-danger"),
-      ),
-    ));
+  const initialDisposition = dispositionValue(savedIssueDraft(currentIssue));
+  const initialDispositionComplete = Boolean(initialDisposition.owner && initialDisposition.disposition && initialDisposition.confirmations.every(Boolean));
+  saveStatus.textContent = initialDispositionComplete ? "Saved" : "Saved · Incomplete";
+  const autosaveController = readOnly ? null : createInspectionAutosaveController();
+  let closeSubmitting = false;
+  let discussionSubmitting = false;
+  let runtime = null;
+  let dialog = null;
+  let discussionButton;
+  let closeButton;
+
+  const reloadLatestButton = button("Reload latest data", async () => {
+    if (runtime?.busy) return;
+    if (runtime) runtime.busy = true;
+    try {
+      await evidence.flushPending();
+      if (!dialog?.open) return;
+      const dialogTitle = document.querySelector("#qc-dialog .dialog-header h2")?.textContent || `${text(currentIssue.number, "Issue")} · ${text(currentIssue.title)}`;
+      showDialog("Unsaved edits", el("div", { className: "discard-prompt" },
+        el("p", {}, "Some edits could not be saved. Reloading will discard this tab’s drafts."),
+        el("div", { className: "button-row" },
+          button("Keep editing", () => showDialog(dialogTitle, form), "button-secondary"),
+          button("Discard edits and reload", () => {
+            closeDialog(true);
+            runtime?.dispose();
+            window.dispatchEvent(new CustomEvent("masterqc:discard-operation-drafts"));
+            void ctx.refresh?.();
+          }, "button-danger"),
+        ),
+      ));
+    } finally {
+      if (runtime) runtime.busy = false;
+    }
   }, "button button-secondary");
   reloadLatestButton.hidden = true;
-  const autosaveController = readOnly ? null : createInspectionAutosaveController();
-  const autosaveEntry = autosaveController?.register(issue.id, {
+
+  const autosaveEntry = autosaveController?.register(currentIssue.id, {
     initial: initialDisposition,
     initiallySaved: true,
     isValid: (value) => typeof value.owner === "string" && typeof value.disposition === "string" &&
       Array.isArray(value.confirmations) && value.confirmations.length === 3 && value.confirmations.every((name) => typeof name === "string"),
     isComplete: (value) => Boolean(value.owner.trim() && value.disposition.trim() && value.confirmations.every((name) => name.trim())),
-    save: (value) => runCommand(ctx, "saveIssue", { id: issue.id, ...value }, { autosave: true, render: false, silent: true }),
+    save: (value) => runCommand(ctx, "saveIssue", { id: currentIssue.id, ...value }, { autosave: true, render: false, silent: true }),
     refreshCommitted: () => ctx.refreshState?.({ render: false }),
     verifyCommitted: (latestState, sentValue) => {
-      const saved = list(latestState?.issues).find((item) => item.id === issue.id);
+      const saved = list(latestState?.issues).find((item) => item.id === currentIssue.id);
       return Boolean(saved && sameDisposition(savedIssueDraft(saved), sentValue));
     },
     onStatus: (status) => { saveStatus.textContent = status; },
-    onSaved: (value) => {
+    onSaved: (value, response) => {
+      formError.textContent = "";
       reloadLatestButton.hidden = true;
-      Object.assign(issue, value);
-      issue.confirmations = [...value.confirmations];
-      const row = [...document.querySelectorAll(".app-main tr[data-issue-id]")].find((item) => item.dataset.issueId === issue.id);
-      const ownerCell = row?.querySelector("[data-issue-owner]");
-      if (ownerCell) ownerCell.textContent = value.owner || "Unassigned";
-      if (row) row.dataset.search = [issue.number, issue.title, value.owner, sourceText(issue, state), issue.disposition].join(" ").toLowerCase();
-      storeDraft(captureDraft());
-      if (hasIssueDraft(issue, captureDraft())) form.dataset.dirty = "true";
+      const latestState = response?.state || currentState;
+      const latestIssue = list(latestState.issues).find((item) => item.id === currentIssue.id) || {
+        ...currentIssue,
+        ...value,
+        confirmations: [...value.confirmations],
+      };
+      adoptLatestIssue(latestIssue, latestState);
+      const liveDraft = captureDraft();
+      storeDraft(liveDraft);
+      if (hasIssueDraft(currentIssue, liveDraft)) form.dataset.dirty = "true";
       else delete form.dataset.dirty;
     },
     onSaveError: (error) => {
@@ -330,131 +563,149 @@ function openIssueDialog(issue, state, ctx) {
       reloadLatestButton.hidden = false;
     },
   });
-  if (autosaveEntry && draftDiffers(issue, draft)) autosaveEntry.update(dispositionValue(draft));
-  let closeSubmitting = false;
+  if (autosaveEntry && draftDiffers(currentIssue, draft)) autosaveEntry.update(dispositionValue(draft));
+
+  const lifecycleController = autosaveController ? {
+    async flushAll() {
+      const saved = await autosaveController.flushAll();
+      if (!saved) return false;
+      return evidence.flushPending();
+    },
+    hasPending() {
+      return autosaveController.hasPending() || evidence.hasPending();
+    },
+    dispose() {
+      autosaveController.dispose();
+      evidence.cleanup();
+    },
+  } : null;
   const flushDisposition = async () => {
     const current = markDraftForPreservation();
     autosaveEntry?.update(dispositionValue(current), { immediate: true });
-    if (!autosaveController?.hasPending()) return true;
+    if (!lifecycleController?.hasPending()) return true;
 
     const wasDisabled = dispositionInputs.map((input) => input.disabled);
     dispositionInputs.forEach((input) => { input.disabled = true; });
-    const saved = await autosaveController.flushAll();
+    const saved = await lifecycleController.flushAll();
     dispositionInputs.forEach((input, index) => { input.disabled = wasDisabled[index]; });
     if (!saved) {
       if (!formError.textContent) formError.textContent = "Disposition changes could not be saved.";
       return false;
     }
     const latest = markDraftForPreservation();
-    if (draftDiffers(issue, latest)) {
+    if (draftDiffers(currentIssue, latest)) {
       formError.textContent = "Disposition changes could not be confirmed.";
       return false;
     }
     return true;
   };
-  const closeButton = button("Close issue", async () => {
-    if (closeSubmitting) return;
-    if (!(await flushDisposition())) return;
-    const current = markDraftForPreservation();
-    if (current.discussionText.trim()) {
-      notify("Add the discussion entry or clear it before closing this issue.", true);
-      return;
-    }
-    if (!current.owner.trim() || !current.disposition.trim() || current.confirmations.some((name) => !name.trim())) {
-      notify("An owner, formal disposition, and all three confirmation names are required before closure.", true);
-      return;
-    }
+
+  closeButton = button("Close issue", async () => {
+    if (closeSubmitting || discussionSubmitting) return;
     closeSubmitting = true;
-    const controls = [...dispositionInputs, discussionAuthorName, discussionText];
-    const wasDisabled = controls.map((input) => input.disabled);
-    controls.forEach((input) => { input.disabled = true; });
-    discussionButton.disabled = true;
     closeButton.disabled = true;
-    const runtime = activeIssueDialogRuntime;
-    if (runtime?.form === form) runtime.busy = true;
+    if (runtime) runtime.busy = true;
+    let controls;
+    let wasDisabled;
     try {
-      const result = await runCommand(ctx, "closeIssue", { id: issue.id }, { render: false });
+      if (!(await flushDisposition())) return;
+      const current = markDraftForPreservation();
+      if (current.discussionText.trim()) {
+        notify("Add the discussion entry or clear it before closing this issue.", true);
+        return;
+      }
+      if (!current.owner.trim() || !current.disposition.trim() || current.confirmations.some((name) => !name.trim())) {
+        notify("An owner, formal disposition, and all three confirmation names are required before closure.", true);
+        return;
+      }
+      controls = [...dispositionInputs, discussionAuthorName, discussionText];
+      wasDisabled = controls.map((input) => input.disabled);
+      controls.forEach((input) => { input.disabled = true; });
+      evidence.setDisabled(true);
+      discussionButton.disabled = true;
+      closeButton.disabled = true;
+      const result = await runCommand(ctx, "closeIssue", { id: currentIssue.id }, { render: false });
       if (result.ok) {
-        const savedIssue = list(result.state?.issues).find((item) => item.id === issue.id);
-        if (savedIssue) Object.assign(issue, savedIssue);
-        issueDrafts.delete(issue.id);
+        const latestIssue = list(result.state?.issues).find((item) => item.id === currentIssue.id);
+        if (latestIssue) adoptLatestIssue(latestIssue, result.state);
+        issueDrafts.delete(currentIssue.id);
         closeDialog(true);
-        activeIssueDialogRuntime?.dispose();
+        runtime?.dispose();
         await ctx.navigate("issues", null, true);
       }
     } finally {
       closeSubmitting = false;
-      controls.forEach((input, index) => { input.disabled = wasDisabled[index]; });
-      discussionButton.disabled = readOnly;
-      closeButton.disabled = readOnly;
-      if (runtime?.form === form) runtime.busy = false;
+      if (controls && wasDisabled) controls.forEach((input, index) => { input.disabled = wasDisabled[index]; });
+      evidence.setDisabled(false);
+      if (discussionButton) discussionButton.disabled = readOnly;
+      if (closeButton) closeButton.disabled = readOnly;
+      if (runtime) runtime.busy = false;
     }
   }, "button button-danger");
   closeButton.disabled = readOnly;
-  let discussionSubmitting = false;
-  const discussionButton = button("Add discussion entry", async () => {
-    if (discussionSubmitting || !(await flushDisposition()) || discussionSubmitting) return;
-    const current = markDraftForPreservation();
-    const authorName = current.discussionAuthorName.trim();
-    if (!authorName) {
-      notify("You must enter your name before adding a discussion entry.", true);
-      discussionAuthorName.focus();
-      return;
-    }
-    const entryText = current.discussionText.trim();
-    if (!entryText) {
-      notify("Enter a discussion entry before adding it.", true);
-      discussionText.focus();
-      return;
-    }
+
+  discussionButton = button("Add discussion entry", async () => {
+    if (discussionSubmitting || closeSubmitting) return;
     discussionSubmitting = true;
     discussionButton.disabled = true;
     closeButton.disabled = true;
-    const runtime = activeIssueDialogRuntime;
-    if (runtime?.form === form) runtime.busy = true;
+    if (runtime) runtime.busy = true;
     try {
-      const response = await runCommand(ctx, "addDiscussion", { id: issue.id, text: entryText, authorName }, { render: false });
-      if (response.ok) {
-        const savedIssue = list(response.state?.issues).find((item) => item.id === issue.id);
-        if (savedIssue) {
-          Object.assign(issue, savedIssue);
-          discussionList.replaceChildren(renderDiscussion(issue));
-        }
-        const latestDraft = issueDrafts.get(issue.id) || current;
-        const clearAuthor = latestDraft.discussionAuthorName === current.discussionAuthorName && discussionAuthorName.value === current.discussionAuthorName;
-        const clearText = latestDraft.discussionText === current.discussionText && discussionText.value === current.discussionText;
-        if (clearAuthor) discussionAuthorName.value = "";
-        if (clearText) discussionText.value = "";
-        const remainingDraft = {
-          ...latestDraft,
-          discussionAuthorName: clearAuthor ? "" : latestDraft.discussionAuthorName,
-          discussionText: clearText ? "" : latestDraft.discussionText
-        };
-        if (hasIssueDraft(issue, remainingDraft)) issueDrafts.set(issue.id, remainingDraft);
-        else issueDrafts.delete(issue.id);
-        if (hasIssueDraft(issue, remainingDraft)) form.dataset.dirty = "true";
-        else delete form.dataset.dirty;
+      if (!(await flushDisposition())) return;
+      const current = markDraftForPreservation();
+      const authorName = current.discussionAuthorName.trim();
+      if (!authorName) {
+        notify("You must enter your name before adding a discussion entry.", true);
+        discussionAuthorName.focus();
+        return;
       }
+      const entryText = current.discussionText.trim();
+      if (!entryText) {
+        notify("Enter a discussion entry before adding it.", true);
+        discussionText.focus();
+        return;
+      }
+      discussionButton.disabled = true;
+      closeButton.disabled = true;
+      const response = await submitDiscussionEntry(ctx, currentIssue.id, entryText, authorName);
+      if (!response.ok) return;
+      const latestState = response.state || currentState;
+      const latestIssue = list(latestState.issues).find((entry) => entry.id === currentIssue.id);
+      if (!latestIssue) {
+        notify("The discussion entry was saved, but the updated Issue could not be reloaded.", true);
+        return;
+      }
+      adoptLatestIssue(latestIssue, latestState);
+      discussionList.replaceChildren(renderDiscussion(currentIssue));
+      const latestDraft = issueDrafts.get(currentIssue.id) || current;
+      const remainingDraft = remainingIssueDraftAfterDiscussion(latestDraft, current);
+      if (discussionAuthorName.value === current.discussionAuthorName) discussionAuthorName.value = remainingDraft.discussionAuthorName;
+      if (discussionText.value === current.discussionText) discussionText.value = remainingDraft.discussionText;
+      if (hasIssueDraft(currentIssue, remainingDraft)) issueDrafts.set(currentIssue.id, remainingDraft);
+      else issueDrafts.delete(currentIssue.id);
+      if (hasIssueDraft(currentIssue, remainingDraft)) form.dataset.dirty = "true";
+      else delete form.dataset.dirty;
     } finally {
       discussionSubmitting = false;
-      discussionButton.disabled = readOnly;
-      closeButton.disabled = readOnly;
-      if (runtime?.form === form) runtime.busy = false;
+      if (discussionButton) discussionButton.disabled = readOnly;
+      if (closeButton) closeButton.disabled = readOnly;
+      if (runtime) runtime.busy = false;
     }
   }, "button button-secondary");
   discussionButton.disabled = readOnly;
+
   const updateDraft = ({ autosave = false } = {}) => {
     const next = captureDraft();
     storeDraft(next);
-    if (hasIssueDraft(issue, next)) form.dataset.dirty = "true";
+    if (hasIssueDraft(currentIssue, next)) form.dataset.dirty = "true";
     else delete form.dataset.dirty;
     if (autosave) {
       formError.textContent = "";
       autosaveEntry?.update(dispositionValue(next));
     }
     queueMicrotask(() => {
-      const savedDraft = issueDrafts.get(issue.id);
-      if (!savedDraft || !hasIssueDraft(issue, savedDraft)) delete form.dataset.dirty;
+      const savedDraft = issueDrafts.get(currentIssue.id);
+      if (!savedDraft || !hasIssueDraft(currentIssue, savedDraft)) delete form.dataset.dirty;
     });
   };
   dispositionInputs.forEach((input) => {
@@ -464,7 +715,8 @@ function openIssueDialog(issue, state, ctx) {
   [discussionAuthorName, discussionText].forEach((input) => input.addEventListener("input", () => updateDraft()));
   form.addEventListener("submit", (event) => event.preventDefault());
   form.append(
-    sourceCard(issue, state),
+    sourceCard(currentIssue, currentState),
+    evidence.element,
     el("div", { className: "qc-ops-form-grid" }, field("Disposition owner", owner), field("Formal disposition", disposition)),
     el("fieldset", { className: "qc-ops-confirmations" },
       el("legend", {}, "Manual confirmations · names entered by staff"),
@@ -482,21 +734,21 @@ function openIssueDialog(issue, state, ctx) {
     reloadLatestButton,
     el("div", { className: "qc-ops-dialog-actions" }, closeButton)
   );
-  const dialog = showDialog(`${text(issue.number, "Issue")} · ${text(issue.title)}`, form);
-  dialog.dataset.operationDraftId = issue.id;
-  dialog.dataset.issueId = issue.id;
+  dialog = showDialog(`${text(currentIssue.number, "Issue")} · ${text(currentIssue.title)}`, form);
+  dialog.dataset.operationDraftId = currentIssue.id;
+  dialog.dataset.issueId = currentIssue.id;
   if (!issueDialogCloseListeners.has(dialog)) {
     dialog.addEventListener("close", () => {
-      const runtime = activeIssueDialogRuntime;
-      if (!dialog.open && runtime?.dialog === dialog) runtime.dispose();
+      const activeRuntime = activeIssueDialogRuntime;
+      if (!dialog.open && activeRuntime?.dialog === dialog) activeRuntime.dispose();
     });
     issueDialogCloseListeners.add(dialog);
   }
-  const unregisterAutosave = autosaveController ? ctx.registerAutosaveController?.(autosaveController) : null;
-  const runtime = {
+  const unregisterAutosave = lifecycleController ? ctx.registerAutosaveController?.(lifecycleController) : null;
+  runtime = {
     dialog,
     form,
-    autosaveController,
+    autosaveController: lifecycleController,
     async closeFromHeader() {
       if (this.busy) return;
       this.busy = true;
@@ -510,7 +762,9 @@ function openIssueDialog(issue, state, ctx) {
     dispose() {
       if (this.disposed) return;
       this.disposed = true;
-      unregisterAutosave?.();
+      if (unregisterAutosave) unregisterAutosave();
+      else if (lifecycleController) lifecycleController.dispose();
+      else evidence.cleanup();
       if (activeIssueDialogRuntime === this) activeIssueDialogRuntime = null;
     },
     busy: false,
@@ -520,8 +774,50 @@ function openIssueDialog(issue, state, ctx) {
   activeIssueDialogRuntime = runtime;
 }
 
-function openNewIssueDialog(state, ctx) {
-  const titleInput = el("input", { type: "text", required: true, maxLength: "180", name: "title", placeholder: "Describe the issue" });
+export function openNewIssueDialog(state, ctx, options = {}) {
+  const requestId = options.requestId || newRequestId();
+  const fixedBatch = options.batchId ? list(state.batches).find((batch) => batch.id === options.batchId) : null;
+  const fixedRow = fixedBatch ? list(fixedBatch.rows).find((row) => row.id === options.rowId) : null;
+  const titleInput = el("input", {
+    type: "text", required: true, maxLength: "180", name: "title", placeholder: "Describe the issue", value: options.title || "",
+  });
+  const descriptionInput = el("textarea", { rows: "3", maxLength: "2000", name: "description" }, options.description || "");
+  const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
+  const form = el("form", { className: "qc-ops-form qc-ops-new-issue-form", "data-preserve-drafts": "true" });
+  const selectedFiles = [];
+  const selectedFileHost = el("div", { className: "qc-ops-selected-issue-files" });
+  const photoInput = el("input", { type: "file", accept: "image/*", multiple: true, className: "qc-ops-hidden-file", "aria-label": "Choose issue photos" });
+  const fileInput = el("input", { type: "file", multiple: true, className: "qc-ops-hidden-file", "aria-label": "Choose issue files" });
+  const photosButton = button("Choose photos", () => photoInput.click(), "button-secondary");
+  const filesButton = button("Choose files", () => fileInput.click(), "button-secondary");
+  const renderSelectedFiles = () => {
+    selectedFileHost.replaceChildren(...(selectedFiles.length
+      ? [el("ul", { className: "qc-ops-selected-issue-file-list" }, ...selectedFiles.map((entry) => {
+        const remove = button("Remove", () => {
+          const index = selectedFiles.findIndex((candidate) => candidate.id === entry.id);
+          if (index >= 0) selectedFiles.splice(index, 1);
+          renderSelectedFiles();
+        }, "button-quiet qc-ops-small-button");
+        return el("li", {},
+          el("span", { title: entry.file.name }, text(entry.file.name, "Attachment")),
+          el("small", {}, entry.category === "photo" ? "Photo" : "File"),
+          remove,
+        );
+      }))]
+      : []));
+  };
+  const collectFiles = (input) => {
+    for (const file of Array.from(input.files || [])) {
+      const mimeType = normalizedMimeType(file.name, file.type);
+      selectedFiles.push({ id: newRequestId(), file, category: issueAttachmentCategory(mimeType) });
+    }
+    input.value = "";
+    renderSelectedFiles();
+    if (selectedFiles.some((entry) => entry.category === "photo")) formError.textContent = "";
+  };
+  photoInput.addEventListener("change", () => collectFiles(photoInput));
+  fileInput.addEventListener("change", () => collectFiles(fileInput));
+
   const editableBatches = list(state.batches).filter((batch) => batch.kind !== "historical" && batch.status !== "released");
   const batchSelect = el("select", { name: "batchId" }, el("option", { value: "" }, "No batch link"), ...editableBatches.map((batch) => {
     const products = getBatchProducts(batch).map((product) => ({ ...product, variant: variantById(state).get(product.variantId) }));
@@ -529,11 +825,9 @@ function openNewIssueDialog(state, ctx) {
     return el("option", { value: batch.id }, `${text(batch.number)} · ${summary} · ${text(batch.factory)} ${text(batch.stage)}`);
   }));
   const rowSelect = el("select", { name: "rowId", disabled: true }, el("option", { value: "" }, "No inspection row"));
-  const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
-  const form = el("form", { className: "qc-ops-form qc-ops-new-issue-form" });
   const updateRows = () => {
     const batch = list(state.batches).find((entry) => entry.id === batchSelect.value);
-    const rows = list(batch?.rows);
+    const rows = list(batch?.rows).filter(rowHasSavedIssueResult);
     rowSelect.disabled = !batch || !rows.length;
     rowSelect.replaceChildren(el("option", { value: "" }, "No inspection row"), ...rows.map((row) => {
       const product = getBatchRowProduct(batch, row) || {};
@@ -546,17 +840,51 @@ function openNewIssueDialog(state, ctx) {
     }));
   };
   batchSelect.addEventListener("change", updateRows);
+
+  const fixedContext = fixedBatch
+    ? el("p", { className: "qc-ops-fixed-issue-source" }, `${text(fixedBatch.number)} · ${text(fixedRow?.no)} · ${text(fixedRow?.title)}`)
+    : null;
+  const associationFields = fixedBatch
+    ? fixedContext
+    : el("div", { className: "qc-ops-form-grid" },
+      field("Related batch (optional)", batchSelect),
+      field("Inspection row (optional)", rowSelect),
+    );
   const submit = el("button", { type: "submit", className: "button button-primary" }, "Create issue");
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     formError.textContent = "";
     if (!form.reportValidity()) return;
-    const data = { title: titleInput.value.trim() };
-    if (batchSelect.value) data.batchId = batchSelect.value;
-    if (rowSelect.value) data.rowId = rowSelect.value;
+    if (!hasRequiredIssuePhoto(selectedFiles)) {
+      formError.textContent = "Choose at least one photo.";
+      photosButton.focus();
+      return;
+    }
+    submit.disabled = true;
+    const data = { title: titleInput.value.trim(), requestId, files: [] };
+    const description = descriptionInput.value.trim();
+    if (description) data.description = description;
+    const batchId = fixedBatch?.id || batchSelect.value;
+    const rowId = fixedRow?.id || rowSelect.value;
+    if (batchId) data.batchId = batchId;
+    if (rowId) data.rowId = rowId;
+    try {
+      data.files = await Promise.all(selectedFiles.map(async (entry) => {
+        const payload = await readAttachmentFile(entry.file, {
+          maxBytes: entry.category === "photo" ? 5 * MEBIBYTE : 10 * MEBIBYTE,
+          category: entry.category === "photo" ? "photo" : null,
+        });
+        return { ...payload, category: entry.category };
+      }));
+    } catch (error) {
+      formError.textContent = errorText(error, "Could not read the selected file.");
+      submit.disabled = false;
+      return;
+    }
     const result = await runCommand(ctx, "createIssue", data);
     if (!result.ok) {
       formError.textContent = errorText(result.error);
+      submit.disabled = false;
       return;
     }
     closeDialog(true);
@@ -566,8 +894,18 @@ function openNewIssueDialog(state, ctx) {
   });
   form.append(
     field("Issue title", titleInput),
-    field("Related batch (optional)", batchSelect),
-    field("Inspection row (optional)", rowSelect),
+    field("Description", descriptionInput),
+    associationFields,
+    el("div", { className: "qc-ops-new-issue-files" },
+      el("div", { className: "qc-ops-new-issue-file-actions" },
+        el("span", { className: "qc-ops-new-issue-photo-required" }, "Photos · required"),
+        photosButton,
+        filesButton,
+      ),
+      selectedFileHost,
+      photoInput,
+      fileInput,
+    ),
     formError,
     el("div", { className: "qc-ops-dialog-actions" }, button("Cancel", () => closeDialog(), "button button-secondary"), submit)
   );
@@ -595,11 +933,10 @@ function renderIssueListPage(root, ctx) {
       if (ctx.selectedId !== issue.id) ctx.navigate("issues", issue.id);
       else openIssueDialog(issue, state, ctx);
     }, "button button-secondary qc-ops-small-button");
-    const ownerCell = el("td", { "data-issue-owner": "" }, text(issue.owner, "Unassigned"));
     tbody.append(el("tr", { "data-issue-id": issue.id, "data-status": issue.status, "data-search": searchText },
       el("td", {}, text(issue.number)),
       el("td", {}, el("strong", {}, text(issue.title)), el("small", { className: "qc-ops-subline" }, source)),
-      ownerCell,
+      el("td", { "data-issue-owner": "true" }, text(issue.owner, "Unassigned")),
       el("td", {}, statusPill(issue.status)),
       el("td", {}, dateLabel(issue.createdAt)),
       el("td", {}, open)

@@ -111,10 +111,11 @@ test("CSP permits local blob document frames while keeping other sources restric
   await handler({ headers: { host: `${HOST}:${PORT}` }, method: "GET", url: "/frontend/index.html" }, response);
 
   assert.equal(response.statusCode, 200);
-  assert.equal(response.headers["Content-Security-Policy"], "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-src 'self' blob:");
+  assert.equal(response.headers["Content-Security-Policy"], "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-src 'self' blob:; media-src 'self' blob:");
   assert.equal(response.headers["Content-Security-Policy"].includes("script-src 'self' blob:"), false);
   assert.equal(response.headers["Content-Security-Policy"].includes("connect-src 'self' blob:"), false);
   assert.equal(response.headers["Content-Security-Policy"].includes("object-src blob:"), false);
+  assert.equal(response.headers["Content-Security-Policy"].includes("media-src 'self' blob:"), true);
 });
 
 test("static routes reject encoded traversal, separators, malformed paths, and external roots", async (t) => {

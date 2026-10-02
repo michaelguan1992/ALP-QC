@@ -10,7 +10,18 @@ import {
 import { createVariant, setVariantActive } from "./qc-catalog.js";
 import { makeBackup, importBackup as applyBackupImport } from "./qc-backup.js";
 import { importHistory as applyHistoryImport, verifyHistoryPackage, verifyHistoryStateAssets } from "./qc-history.js";
-import { addBatchAttachment, addDocument, addPhotos, removeBatchAttachment, removePhoto, removeVersionAttachment } from "./qc-assets.js";
+import {
+  addBatchAttachment,
+  addDocument,
+  addIssueAttachments,
+  addPhotos,
+  removeBatchAttachment,
+  removeIssueAttachment,
+  removePhoto,
+  removeRowAttachment,
+  removeVersionAttachment,
+  setRowAttachment,
+} from "./qc-assets.js";
 import { addDiscussion, closeIssue, createIssue, saveIssue } from "./qc-issues.js";
 import { autosaveInspection, createBatch, deleteBatch, getBatchWorkspace as readBatchWorkspace, releaseBatch, saveBatchDetails, saveInspection } from "./qc-inspections.js";
 import { createOrder, getPurchaseOrderProgress, saveOrder } from "./qc-purchasing.js";
@@ -59,9 +70,13 @@ const COMMANDS = new Map([
   ["autosaveInspection", autosaveInspection],
   ["addPhotos", addPhotos],
   ["removePhoto", removePhoto],
+  ["setRowAttachment", setRowAttachment],
+  ["removeRowAttachment", removeRowAttachment],
   ["addBatchAttachment", addBatchAttachment],
   ["removeBatchAttachment", removeBatchAttachment],
   ["createIssue", createIssue],
+  ["addIssueAttachments", addIssueAttachments],
+  ["removeIssueAttachment", removeIssueAttachment],
   ["saveIssue", saveIssue],
   ["addDiscussion", addDiscussion],
   ["closeIssue", closeIssue],

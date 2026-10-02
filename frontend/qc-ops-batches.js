@@ -14,7 +14,9 @@ import {
   statusPill,
   text
 } from "./qc-ops-common.js";
-import { closeDialog, downloadFile, readFileAsDataURL, showDialog } from "./qc-ui.js";
+import { closeDialog, downloadFile, showDialog } from "./qc-ui.js";
+import { attachmentCanPreview, MEBIBYTE, openAttachmentPreview, readAttachmentFile } from "./qc-attachments.js";
+import { openNewIssueDialog } from "./qc-ops-issues.js";
 import { historicalBatchImportControl } from "./qc-history.js";
 import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { getBatchVersionItems, getBatchVersions, getBatchVersionReadiness, getSharedBatchVersionChoices } from "../core/qc-batch-versions.js";
@@ -170,8 +172,9 @@ function normalizedRemarks(value) {
 }
 
 function sameInspectionValues(row, values) {
-  return row && (row.defectiveQty ?? null) === values.defectiveQty && (row.actualTimeSeconds ?? null) === values.actualTimeSeconds &&
-    normalizedRemarks(row.remarks) === normalizedRemarks(values.remarks);
+  if (!row || (row.defectiveQty ?? null) !== values.defectiveQty || normalizedRemarks(row.remarks) !== normalizedRemarks(values.remarks)) return false;
+  if (values.actualTimeSeconds === undefined) return !Object.hasOwn(row, "actualTimeSeconds");
+  return (row.actualTimeSeconds ?? null) === values.actualTimeSeconds;
 }
 
 function savedDetailsFrom(batch) {
@@ -185,7 +188,7 @@ function validIsoDate(value) {
 }
 
 function getRowPhotos(row, workspace, state) {
-  if (Array.isArray(row.photos)) return row.photos;
+  if (Array.isArray(row.photos) && row.photos.length) return row.photos;
   const assets = new Map(list(state.assets).map((asset) => [asset.id, asset]));
   return list(row.photoIds).map((id) => assets.get(id)).filter(Boolean);
 }
@@ -193,6 +196,25 @@ function getRowPhotos(row, workspace, state) {
 function getRowIssues(row, workspace) {
   if (Array.isArray(row.issues)) return row.issues;
   return list(workspace.issues).filter((issue) => issue.rowId === row.id || issue.sourceSnapshot?.rowId === row.id);
+}
+
+function rowCanCreateIssue(row) {
+  const hasLegacyOmittedTime = row && !Object.hasOwn(row, "actualTimeSeconds");
+  return Boolean(row?.savedAt) && row.defectiveQty !== null && row.defectiveQty !== undefined &&
+    (row.actualTimeSeconds !== null && row.actualTimeSeconds !== undefined || hasLegacyOmittedTime);
+}
+
+const ROW_ATTACHMENT_CATEGORIES = [
+  ["videos", "Videos"],
+  ["procedures", "Procedures"],
+  ["log", "Log"],
+];
+
+function getRowAttachments(row, state) {
+  if (row.attachments && typeof row.attachments === "object") return row.attachments;
+  const assets = new Map(list(state.assets).map((asset) => [asset.id, asset]));
+  const ids = row.attachmentIds && typeof row.attachmentIds === "object" ? row.attachmentIds : {};
+  return Object.fromEntries(ROW_ATTACHMENT_CATEGORIES.map(([category]) => [category, assets.get(ids[category]) || null]));
 }
 
 function rateLabel(value) {
@@ -220,16 +242,8 @@ function makeAction(label, handler, className = "button button-secondary") {
   return button(label, handler, className);
 }
 
-function makePhotoDialog(photo, row, readOnly, onRemove) {
-  const preview = el("div", { className: "qc-ops-photo-preview" },
-    el("img", { src: photo.dataUrl, alt: photo.name || "Inspection photo" }),
-    el("p", {}, photo.name || "Inspection photo")
-  );
-  const actions = readOnly ? [] : [makeAction("Remove photo", onRemove, "button button-danger")];
-  actions.push(makeAction("Done", () => closeDialog(true)));
-  showDialog(`${text(row.title)} · Photo`, el("div", { className: "qc-ops-dialog-content" }, preview,
-    el("div", { className: "qc-ops-dialog-actions" }, ...actions)
-  ));
+function makePhotoDialog(photo, row) {
+  openAttachmentPreview(photo, `${text(row.title)} · ${text(photo.name, "Photo")}`);
 }
 
 function operationalTaskTitle(row, workspace, state) {
@@ -246,9 +260,93 @@ function operationalDetailFact(label, value) {
   return el("div", {}, el("dt", {}, label), el("dd", {}, value));
 }
 
+function legacyEvidenceDisclosure(row, workspace, state) {
+  const remarks = String(row.remarks || "");
+  const photos = getRowPhotos(row, workspace, state);
+  const photoCount = photos.length || list(row.photoIds).length;
+  if (!remarks.trim() && !photoCount) return null;
+  const summaryParts = ["Legacy evidence"];
+  if (photoCount) summaryParts.push(`${photoCount} photo${photoCount === 1 ? "" : "s"}`);
+  if (remarks.trim()) summaryParts.push("remarks");
+  const photoList = photos.length
+    ? el("ul", { className: "qc-ops-legacy-photo-list" }, ...photos.map((photo) => {
+      const name = text(photo?.name, "Inspection photo");
+      const actions = [];
+      if (photo?.dataUrl && attachmentCanPreview(photo)) {
+        actions.push(button("Preview", () => makePhotoDialog(photo, row), "button-quiet qc-ops-small-button"));
+      }
+      if (photo?.dataUrl) {
+        actions.push(button("Download", () => {
+          void downloadFile(name, photo.dataUrl, photo.mimeType).catch((error) => notify(errorText(error, "The photo could not be downloaded."), true));
+        }, "button-quiet qc-ops-small-button"));
+      }
+      return el("li", {}, el("span", { title: name }, name), ...actions);
+    }))
+    : photoCount ? el("span", { className: "qc-ops-empty-photo" }, `${photoCount} photo${photoCount === 1 ? "" : "s"} unavailable`) : null;
+  return el("details", { className: "qc-ops-legacy-evidence" },
+    el("summary", {}, summaryParts.join(" · ")),
+    remarks.trim() ? el("p", { className: "qc-ops-legacy-remarks" }, remarks) : null,
+    photoList,
+  );
+}
+
+function renderRowAttachmentCell(row, workspace, state, ctx, readOnly) {
+  const attachments = getRowAttachments(row, state);
+  const cell = el("td", { className: "qc-ops-row-attachments" });
+  for (const [category, label] of ROW_ATTACHMENT_CATEGORIES) {
+    const asset = attachments?.[category] || null;
+    const input = el("input", {
+      type: "file",
+      accept: category === "videos" ? ".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm" : undefined,
+      className: "qc-ops-hidden-file",
+      "aria-label": `${label} for ${text(row.title)}`,
+      disabled: readOnly,
+    });
+    const choose = button(asset ? "Replace" : "Add", () => input.click(), "button-secondary qc-ops-small-button");
+    choose.disabled = readOnly;
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const payload = await readAttachmentFile(file, { maxBytes: 10 * MEBIBYTE, category: category === "videos" ? "video" : null });
+        const response = await runCommand(ctx, "setRowAttachment", {
+          batchId: workspace.batch.id,
+          rowId: row.id,
+          category,
+          file: payload,
+        });
+        if (response.ok) input.value = "";
+      } catch (error) {
+        notify(errorText(error, `Could not read the selected ${label.toLowerCase()} file.`), true);
+      }
+    });
+    const slot = el("div", { className: "qc-ops-row-attachment-slot" },
+      el("strong", {}, label),
+      asset ? el("span", { className: "qc-ops-row-attachment-name", title: text(asset.name) }, text(asset.name, "Attachment")) : null,
+      asset?.dataUrl && attachmentCanPreview(asset)
+        ? button("Preview", () => openAttachmentPreview(asset, `${text(row.title)} · ${label}`), "button-quiet qc-ops-small-button")
+        : null,
+      asset?.dataUrl ? button("Download", () => {
+        void downloadFile(asset.name, asset.dataUrl, asset.mimeType).catch((error) => notify(errorText(error, "The file could not be downloaded."), true));
+      }, "button-quiet qc-ops-small-button") : null,
+      choose,
+      asset ? button("Remove", () => {
+        if (!window.confirm(`Remove “${text(asset.name, "this attachment")}” from this inspection row?`)) return;
+        void runCommand(ctx, "removeRowAttachment", { batchId: workspace.batch.id, rowId: row.id, category });
+      }, "button-quiet qc-ops-attachment-remove") : null,
+      input,
+    );
+    const remove = slot.querySelector(".qc-ops-attachment-remove");
+    if (remove) remove.disabled = readOnly;
+    cell.append(slot);
+  }
+  return cell;
+}
+
 function renderInspectionRow(row, index, workspace, state, ctx, autosaveController, onDraftChange = null) {
   const readOnly = workspace.batch.status === "released";
   const draft = stateForRow(row, workspace.batch.id);
+  const key = rowKey(workspace.batch.id, row.id);
   const fullTitle = text(row.title);
   const important = row.displayImportant ?? row.important;
   const tr = el("tr", { className: important === true ? "qc-ops-important-row" : "" });
@@ -296,6 +394,8 @@ function renderInspectionRow(row, index, workspace, state, ctx, autosaveControll
     disabled: readOnly,
     "aria-label": `Actual time in seconds for ${text(row.title)}`
   });
+  const legacyTimeOmitted = !Object.hasOwn(row, "actualTimeSeconds");
+  let actualTimeTouched = legacyTimeOmitted && rowDrafts.get(key)?.actualTimeSeconds !== undefined;
   const rowFormId = `qc-row-form-${workspace.batch.id}-${row.id}`.replace(/[^A-Za-z0-9_-]/g, "-");
   defectiveInput.setAttribute("form", rowFormId);
   actualTimeInput.setAttribute("form", rowFormId);
@@ -321,63 +421,58 @@ function renderInspectionRow(row, index, workspace, state, ctx, autosaveControll
   const canCreateFromRow = Boolean(row.savedAt);
   const hasPersistedRowData = Boolean(row.savedAt) || row.defectiveQty !== null && row.defectiveQty !== undefined ||
     row.actualTimeSeconds !== null && row.actualTimeSeconds !== undefined || Boolean(String(row.remarks || "").trim());
-  const rowComplete = row.defectiveQty !== null && row.defectiveQty !== undefined && row.actualTimeSeconds !== null && row.actualTimeSeconds !== undefined;
-  const issueButton = makeAction(linkedIssues.length ? `Open issue · ${text(linkedIssues[0].number, "record")}` : "Create issue", async () => {
-    const linked = linkedIssues[0];
-    if (linked) {
-      navigateWithDraftWarning(ctx, "issues", linked.id, workspace.batch.id);
+  const rowComplete = rowCanCreateIssue(row);
+  const createIssueButton = makeAction("Create issue", async () => {
+    if (!(await ctx.flushAutosaves?.())) return;
+    const fresh = await ctx.refreshState({ render: false });
+    if (!fresh.ok) {
+      notify(errorText(fresh.error, "The saved inspection results could not be reloaded."), true);
       return;
     }
-    const response = await runCommand(ctx, "createIssue", {
-      title: `${text(row.title)} · ${batchLabel(workspace.batch, state)}`,
-      batchId: workspace.batch.id,
-      rowId: row.id
-    });
-    if (response.ok) {
-      const issueId = response.result?.entityId || response.result?.issueId;
-      if (issueId) navigateWithDraftWarning(ctx, "issues", issueId, workspace.batch.id);
-      else {
-        const fresh = await ctx.service.getBatchWorkspace(workspace.batch.id);
-        const issue = list(fresh.issues).find((item) => item.rowId === row.id || item.sourceSnapshot?.rowId === row.id);
-        if (issue) navigateWithDraftWarning(ctx, "issues", issue.id, workspace.batch.id);
-      }
+    const freshBatch = list(fresh.state?.batches).find((candidate) => candidate.id === workspace.batch.id);
+    const freshRow = list(freshBatch?.rows).find((candidate) => candidate.id === row.id);
+    const eligible = rowCanCreateIssue(freshRow);
+    if (!eligible) {
+      notify("Save complete inspection results before creating an issue.", true);
+      return;
     }
+    openNewIssueDialog(fresh.state, ctx, {
+      batchId: workspace.batch.id,
+      rowId: row.id,
+      title: `${text(row.title)} · ${batchLabel(freshBatch, fresh.state)}`,
+    });
   }, "button button-secondary qc-ops-small-button");
-
-  const remarksInput = el("textarea", {
-    className: "qc-ops-row-remarks",
-    rows: "2",
-    maxLength: "1000",
-    disabled: readOnly,
-    "aria-label": `Remarks for ${text(row.title)}`
-  }, draft.remarks);
-  remarksInput.setAttribute("form", rowFormId);
+  createIssueButton.disabled = readOnly || !canCreateFromRow || !rowComplete;
   const rowForm = el("form", { id: rowFormId, className: "qc-ops-row-form", "data-autosave-form": "true" });
   let rowState = el("span", { className: hasPersistedRowData ? "qc-ops-saved" : "qc-ops-incomplete" },
     hasPersistedRowData ? (rowComplete ? "Saved" : "Saved · Incomplete") : "Incomplete");
   rowForm.addEventListener("submit", (event) => event.preventDefault());
-  rowForm.append(remarksInput);
-  issueButton.disabled = (readOnly && !linkedIssues.length) || (!linkedIssues.length && !canCreateFromRow);
-  const issueStatus = linkedIssues.length
-    ? el("span", { className: `qc-ops-row-issue qc-ops-row-issue-${linkedIssues[0].status}` }, `${text(linkedIssues[0].status)} · release blocked while open`)
-    : null;
-  rowForm.append(el("div", { className: "qc-ops-row-actions" }, issueButton, rowState, issueStatus));
+  const issueControls = linkedIssues.map((issue) => makeAction(
+    `Open ${text(issue.number, "issue")} · ${text(issue.status)}`,
+    () => navigateWithDraftWarning(ctx, "issues", issue.id, workspace.batch.id),
+    "button button-quiet qc-ops-row-issue-link"
+  ));
+  rowForm.append(
+    el("div", { className: "qc-ops-row-issues" }, ...issueControls),
+    el("div", { className: "qc-ops-row-actions" }, createIssueButton, rowState),
+  );
+  const legacyEvidence = legacyEvidenceDisclosure(row, workspace, state);
+  if (legacyEvidence) rowForm.append(legacyEvidence);
 
-  const key = rowKey(workspace.batch.id, row.id);
   const readRowValue = () => {
     const defective = nullableNumberFromInput(defectiveInput);
     const actualTime = nullableNumberFromInput(actualTimeInput);
     return {
       defectiveQty: defective.value,
-      actualTimeSeconds: actualTime.value,
-      remarks: remarksInput.value,
+      actualTimeSeconds: legacyTimeOmitted && !actualTimeTouched ? undefined : actualTime.value,
+      remarks: row.remarks ?? "",
       invalidDefectiveQty: defective.invalid,
       invalidActualTimeSeconds: actualTime.invalid,
     };
   };
   const valueForPersistence = (value) => ({
     defectiveQty: value.defectiveQty,
-    actualTimeSeconds: value.actualTimeSeconds,
+    ...(value.actualTimeSeconds === undefined ? {} : { actualTimeSeconds: value.actualTimeSeconds }),
     remarks: value.remarks,
   });
   const saveStatus = (status, meta) => {
@@ -387,7 +482,11 @@ function renderInspectionRow(row, index, workspace, state, ctx, autosaveControll
       : status === "Saving…" ? "qc-ops-save-pending"
         : status === "Save failed" ? "qc-ops-save-failed" : "qc-ops-incomplete";
     if (meta.pending) {
-      rowDrafts.set(key, { defectiveQty: defectiveInput.value, actualTimeSeconds: actualTimeInput.value, remarks: remarksInput.value });
+      rowDrafts.set(key, {
+        defectiveQty: defectiveInput.value,
+        actualTimeSeconds: legacyTimeOmitted && !actualTimeTouched ? undefined : actualTimeInput.value,
+        remarks: row.remarks ?? "",
+      });
     } else {
       rowDrafts.delete(key);
     }
@@ -398,8 +497,8 @@ function renderInspectionRow(row, index, workspace, state, ctx, autosaveControll
     initiallySaved: hasPersistedRowData,
     isValid: (value) => !value.invalidDefectiveQty && !value.invalidActualTimeSeconds &&
       (value.defectiveQty === null || (Number.isInteger(value.defectiveQty) && value.defectiveQty >= 0 && value.defectiveQty <= Number(row.inspectedQty))) &&
-      (value.actualTimeSeconds === null || (Number.isFinite(value.actualTimeSeconds) && value.actualTimeSeconds >= 0)),
-    isComplete: (value) => value.defectiveQty !== null && value.actualTimeSeconds !== null,
+      (value.actualTimeSeconds === undefined || value.actualTimeSeconds === null || (Number.isFinite(value.actualTimeSeconds) && value.actualTimeSeconds >= 0)),
+    isComplete: (value) => value.defectiveQty !== null && (value.actualTimeSeconds !== null || legacyTimeOmitted && value.actualTimeSeconds === undefined),
     save: (value) => runCommand(ctx, "autosaveInspection", {
       batchId: workspace.batch.id,
       rowId: row.id,
@@ -418,62 +517,32 @@ function renderInspectionRow(row, index, workspace, state, ctx, autosaveControll
         row.savedAt = savedRow.savedAt;
         if (meta.isCurrent) {
           row.defectiveQty = savedRow.defectiveQty;
-          row.actualTimeSeconds = savedRow.actualTimeSeconds;
+          if (Object.hasOwn(savedRow, "actualTimeSeconds")) row.actualTimeSeconds = savedRow.actualTimeSeconds;
+          else delete row.actualTimeSeconds;
           row.remarks = savedRow.remarks;
         }
         workspace.releaseBlockers = batchReleaseBlockers(response.state, savedBatch);
       }
-      issueButton.disabled = (readOnly && !linkedIssues.length) || (!linkedIssues.length && !row.savedAt);
+      createIssueButton.disabled = readOnly || !rowCanCreateIssue(row);
       onDraftChange?.();
     },
     onStatus: saveStatus,
   });
   const markRowDraft = (immediate = false) => {
-    const nextDraft = { defectiveQty: defectiveInput.value, actualTimeSeconds: actualTimeInput.value, remarks: remarksInput.value };
+    const nextDraft = { defectiveQty: defectiveInput.value, actualTimeSeconds: actualTimeTouched ? actualTimeInput.value : legacyTimeOmitted ? undefined : actualTimeInput.value, remarks: row.remarks ?? "" };
     rowDrafts.set(key, nextDraft);
     liveRate.textContent = currentRate(row, nextDraft);
     autosave?.update(readRowValue(), { immediate });
     onDraftChange?.();
   };
-  for (const input of [defectiveInput, actualTimeInput, remarksInput]) {
+  actualTimeInput.addEventListener("input", () => { actualTimeTouched = true; });
+  actualTimeInput.addEventListener("change", () => { actualTimeTouched = true; });
+  for (const input of [defectiveInput, actualTimeInput]) {
     input.addEventListener("input", () => markRowDraft(false));
     input.addEventListener("change", () => markRowDraft(true));
     input.addEventListener("blur", () => markRowDraft(true));
   }
-  const remarks = el("td", { className: "qc-ops-remarks" }, rowForm);
-  const photoCell = el("td", { className: "qc-ops-photos" });
-  const photos = getRowPhotos(row, workspace, state);
-  const photoList = el("div", { className: "qc-ops-photo-list" });
-  for (const photo of photos) {
-    if (!photo?.dataUrl) continue;
-    const thumb = el("button", {
-      type: "button",
-      className: "qc-ops-photo-thumb",
-      title: photo.name || "Preview inspection photo",
-      "aria-label": `Preview ${photo.name || "inspection photo"}`
-    }, el("img", { src: photo.dataUrl, alt: photo.name || "Inspection photo" }));
-    thumb.addEventListener("click", () => makePhotoDialog(photo, row, readOnly, async () => {
-      const response = await runCommand(ctx, "removePhoto", { batchId: workspace.batch.id, rowId: row.id, assetId: photo.id });
-      if (response.ok) closeDialog(true);
-    }));
-    photoList.append(thumb);
-  }
-  if (!photoList.childNodes.length) photoList.append(el("span", { className: "qc-ops-empty-photo" }, "No photos"));
-  const fileInput = el("input", { type: "file", accept: "image/*", multiple: true, className: "qc-ops-hidden-file", "aria-label": `Choose photos for ${text(row.title)}`, disabled: readOnly });
-  const addPhotos = makeAction("Add photos", () => fileInput.click(), "button button-secondary qc-ops-small-button");
-  addPhotos.disabled = readOnly;
-  fileInput.addEventListener("change", async () => {
-    const files = Array.from(fileInput.files || []);
-    if (!files.length) return;
-    try {
-      const payload = await Promise.all(files.map(async (file) => ({ name: file.name, mimeType: file.type, dataUrl: await readFileAsDataURL(file) })));
-      await runCommand(ctx, "addPhotos", { batchId: workspace.batch.id, rowId: row.id, files: payload });
-    } catch (error) {
-      notify(errorText(error, "Could not read the selected photo."), true);
-    }
-  });
-  photoCell.append(photoList, el("div", { className: "qc-ops-photo-actions" }, addPhotos), fileInput);
-  tr.append(task, results, remarks, photoCell);
+  tr.append(task, results, el("td", { className: "qc-ops-remarks" }, rowForm), renderRowAttachmentCell(row, workspace, state, ctx, readOnly));
   return tr;
 }
 
@@ -522,30 +591,33 @@ function renderHistoricalInspectionRow(row, index, workspace, state) {
   const procedure = el("td", { className: "qc-ops-link" });
   const procedureUrl = safeProcedureUrl(row.procedureUrl);
   procedure.append(procedureUrl ? el("a", { href: procedureUrl, target: "_blank", rel: "noopener noreferrer" }, "Open procedure") : sourceValue(row.procedureUrl));
-  const remarks = el("td", { className: "qc-ops-remarks" }, sourceValue(row.remarks));
+  const remarks = el("td", { className: "qc-ops-remarks" }, legacyEvidenceDisclosure(row, workspace, state));
   if (list(row.anomalies).length) {
     remarks.append(el("details", { className: "qc-ops-historical-raw" },
       el("summary", {}, "Source review notes"),
       el("ul", {}, list(row.anomalies).map((anomaly) => el("li", {}, typeof anomaly === "string" ? anomaly : JSON.stringify(anomaly)))),
     ));
   }
-  const photos = getRowPhotos(row, workspace, state).filter((photo) => photo?.dataUrl?.startsWith("data:image/"));
-  const photoCell = el("td", { className: "qc-ops-photos" });
-  if (photos.length) {
-    photoCell.append(el("div", { className: "qc-ops-photo-list" }, photos.map((photo) => {
-      const preview = button("", () => makePhotoDialog(photo, row, true, null), "qc-ops-photo-thumb");
-      preview.setAttribute("aria-label", `Preview ${photo.name || "inspection photo"}`);
-      preview.append(el("img", { src: photo.dataUrl, alt: photo.name || "Inspection photo" }));
-      return preview;
-    })));
-  } else {
-    photoCell.append(el("span", { className: "qc-ops-empty-photo" }, "No photos"));
-  }
+  const attachments = getRowAttachments(row, state);
+  const attachmentCell = el("td", { className: "qc-ops-row-attachments qc-ops-row-attachments-readonly" }, ...ROW_ATTACHMENT_CATEGORIES.map(([category, label]) => {
+    const asset = attachments?.[category];
+    const slot = el("div", { className: "qc-ops-row-attachment-slot" },
+      el("strong", {}, label),
+      asset ? el("span", { className: "qc-ops-row-attachment-name", title: text(asset.name) }, text(asset.name, "Attachment")) : el("span", { className: "qc-ops-row-attachment-empty" }, "—"),
+      asset?.dataUrl && attachmentCanPreview(asset)
+        ? button("Preview", () => openAttachmentPreview(asset, `${text(row.title)} · ${label}`), "button-quiet qc-ops-small-button")
+        : null,
+      asset?.dataUrl ? button("Download", () => {
+        void downloadFile(asset.name, asset.dataUrl, asset.mimeType).catch((error) => notify(errorText(error, "The file could not be downloaded."), true));
+      }, "button-quiet qc-ops-small-button") : null,
+    );
+    return slot;
+  }));
   tr.append(
     el("td", { className: "qc-ops-number" }, row.timeSeconds === null || row.timeSeconds === undefined ? "—" : `${row.timeSeconds}s`),
     procedure,
     remarks,
-    photoCell,
+    attachmentCell,
   );
   return tr;
 }
@@ -580,7 +652,7 @@ function makeInspectionTable(workspace, state, ctx, onDraftChange) {
       el("th", { rowSpan: "2", scope: "col" }, "Time", el("br"), el("span", { lang: "zh" }, "时数 (sec)")),
       el("th", { rowSpan: "2", scope: "col" }, "Procedure / link", el("br"), el("span", { lang: "zh" }, "视频 / 程序 / 报告")),
       el("th", { rowSpan: "2", scope: "col" }, "Remarks", el("br"), el("span", { lang: "zh" }, "备注")),
-      el("th", { rowSpan: "2", scope: "col" }, "Photos", el("br"), el("span", { lang: "zh" }, "照片"))
+      el("th", { rowSpan: "2", scope: "col" }, "Attachments", el("br"), el("span", { lang: "zh" }, "附件"))
     ),
     el("tr", { className: "qc-ops-sub-head" },
       el("th", { scope: "col" }, "Inspection qty", el("br"), el("span", { lang: "zh" }, "检验数量")),
@@ -623,17 +695,17 @@ function makeOperationalInspectionTable(workspace, state, ctx, autosaveControlle
   const table = el("table", { className: "qc-ops-inspection-table qc-ops-operational-table" });
   const colgroup = el("colgroup", {},
     el("col", { style: { width: "4.5%" } }),
-    el("col", { style: { width: "41.5%" } }),
-    el("col", { style: { width: "20.5%" } }),
-    el("col", { style: { width: "23.5%" } }),
-    el("col", { style: { width: "10%" } }),
+    el("col", { style: { width: "35.5%" } }),
+    el("col", { style: { width: "21%" } }),
+    el("col", { style: { width: "21%" } }),
+    el("col", { style: { width: "18%" } }),
   );
   const thead = el("thead", {}, el("tr", {},
     el("th", { scope: "col" }, "No.", el("span", { lang: "zh" }, "序号")),
     el("th", { scope: "col" }, "QC task / Details", el("span", { lang: "zh" }, "检验项目 / 规格")),
     el("th", { scope: "col" }, "Results", el("span", { lang: "zh" }, "检验结果")),
-    el("th", { scope: "col" }, "Remarks / actions", el("span", { lang: "zh" }, "备注 / 操作")),
-    el("th", { scope: "col" }, "Photos", el("span", { lang: "zh" }, "照片")),
+    el("th", { scope: "col" }, "Remarks", el("span", { lang: "zh" }, "备注")),
+    el("th", { scope: "col" }, "Attachments", el("span", { lang: "zh" }, "附件")),
   ));
   table.append(colgroup, thead, renderOperationalRows(workspace, state, ctx, autosaveController, onDraftChange));
   return el("div", { className: "qc-ops-table-scroll qc-ops-operational-scroll", tabindex: "0", "aria-label": "Batch inspection table; scroll horizontally to see all columns" }, table);
@@ -682,52 +754,10 @@ function batchAttachments(batch, state) {
     .map((asset) => ({ ...asset, sourcePdf: asset.sourcePdf === true || asset.id === sourceAssetId }));
 }
 
-function canOpenAttachment(asset) {
-  const type = String(asset.mimeType || "").toLowerCase();
-  return type === "application/pdf" || ["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/avif"].includes(type);
-}
-
-function attachmentBlobFromDataUrl(dataUrl, fallbackMimeType = "application/octet-stream") {
-  const comma = dataUrl.indexOf(",");
-  if (comma < 0) throw new Error("The stored attachment data is invalid.");
-  const metadata = dataUrl.slice(0, comma);
-  const payload = dataUrl.slice(comma + 1);
-  const mimeType = metadata.match(/^data:([^;,]+)/)?.[1] || fallbackMimeType;
-  let bytes;
-  if (/;base64/i.test(metadata)) {
-    const binary = atob(payload);
-    bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-  } else {
-    bytes = new TextEncoder().encode(decodeURIComponent(payload));
-  }
-  return new Blob([bytes], { type: mimeType });
-}
-
-async function openAttachment(asset) {
-  if (!asset?.dataUrl || !canOpenAttachment(asset)) return;
-  try {
-    const isImage = String(asset.mimeType || "").toLowerCase().startsWith("image/");
-    const url = isImage ? null : URL.createObjectURL(attachmentBlobFromDataUrl(asset.dataUrl, asset.mimeType));
-    const preview = isImage
-      ? el("img", { className: "qc-ops-attachment-preview-image", src: asset.dataUrl, alt: asset.name || "Attachment preview" })
-      : el("iframe", { className: "qc-ops-attachment-preview-pdf", src: url, title: asset.name || "PDF attachment preview" });
-    const dialog = showDialog(`${text(asset.name, "Attachment")} · Preview`, el("div", { className: "qc-ops-attachment-preview" },
-      preview,
-      el("div", { className: "qc-ops-dialog-actions" },
-        button("Download", () => { void downloadFile(asset.name, asset.dataUrl, asset.mimeType); }, "button-secondary"),
-        button("Done", () => closeDialog(true), "button-primary"),
-      ),
-    ));
-    if (url) dialog.addEventListener("close", () => URL.revokeObjectURL(url), { once: true });
-  } catch (error) {
-    notify(errorText(error, "The attachment preview could not be opened."), true);
-  }
-}
-
 function attachmentActions(asset, batch, ctx) {
   const actions = [];
-  if (asset.dataUrl && canOpenAttachment(asset)) {
-    actions.push(button("Open", () => { void openAttachment(asset); }, "button-quiet qc-ops-small-button"));
+  if (asset.dataUrl && attachmentCanPreview(asset)) {
+    actions.push(button("Open", () => { openAttachmentPreview(asset); }, "button-quiet qc-ops-small-button"));
   }
   if (asset.dataUrl) {
     actions.push(button("Download", () => {
@@ -770,12 +800,10 @@ function renderBatchAttachments(workspace, state, ctx, { compact = false } = {})
         continue;
       }
       try {
-        const dataUrl = await readFileAsDataURL(file);
+        const payload = await readAttachmentFile(file, { maxBytes: 10 * MEBIBYTE });
         const response = await runCommand(ctx, "addBatchAttachment", {
           batchId: batch.id,
-          name: file.name,
-          mimeType: file.type || "application/octet-stream",
-          dataUrl,
+          ...payload,
         });
         if (!response.ok) break;
       } catch (error) {
@@ -1341,7 +1369,7 @@ function renderBatchList(root, ctx) {
   const stage = filterSelect("Stage", stages.map((value) => ({ value })));
   toolbar.append(field("Search", search), field("Family", family), field("Factory", factory), field("Stage", stage));
   const table = el("table", { className: "qc-ops-list-table qc-ops-batch-list-table" },
-    el("thead", {}, el("tr", {}, ...["Batch", "Purchase order", "Total quantity", "Date", "Attachments"].map((label) => el("th", { scope: "col" }, label)))),
+    el("thead", {}, el("tr", {}, ...["Batch", "Purchase order", "Total quantity", "Date"].map((label) => el("th", { scope: "col" }, label)))),
     el("tbody")
   );
   const tbody = table.querySelector("tbody");
@@ -1361,25 +1389,6 @@ function renderBatchList(root, ctx) {
       ...products.flatMap((product) => [productLabel(product, state), product.quantity, product.versionLabel]),
       order?.number, batch.factory, batch.stage, batch.versionLabel, ...attachments.map((asset) => asset.name)]
       .filter((value) => value !== null && value !== undefined).join(" ").toLocaleLowerCase();
-    const attachmentCell = el("td", { className: "qc-ops-list-attachments" });
-    if (attachments.length) {
-      attachmentCell.append(...attachments.map((asset) => {
-        const title = asset.name || "Attachment";
-        const actions = [];
-        if (asset.dataUrl && canOpenAttachment(asset)) {
-          actions.push(button(asset.sourcePdf ? "Open PDF" : "Open", () => { void openAttachment(asset); }, "button-quiet qc-ops-list-attachment-open"));
-        }
-        if (asset.dataUrl) actions.push(button("Download", () => {
-          void downloadFile(title, asset.dataUrl, asset.mimeType).catch((error) => notify(errorText(error, "The attachment could not be downloaded."), true));
-        }, "button-quiet qc-ops-list-attachment-download"));
-        return el("div", { className: "qc-ops-list-attachment" },
-          el("span", { className: "qc-ops-list-attachment-name", title }, title),
-          el("span", { className: "qc-ops-list-attachment-actions" }, actions.length ? actions : el("span", {}, "Unavailable")),
-        );
-      }));
-    } else {
-      attachmentCell.append("—");
-    }
     const tr = el("tr", {
       className: "qc-ops-batch-row",
       tabIndex: 0,
@@ -1393,7 +1402,6 @@ function renderBatchList(root, ctx) {
       el("td", {}, text(order?.number)),
       el("td", { className: "qc-ops-number" }, isHistoricalBatch(batch) ? sourceValue(batch.quantity) : quantity(totalProductQuantity(batch, state))),
       el("td", {}, dateLabel(batch.date)),
-      attachmentCell,
     );
     tr.addEventListener("click", (event) => {
       if (isInteractiveTarget(event.target)) return;

@@ -1,6 +1,6 @@
 # MasterQC Web
 
-A local QC application built around the familiar inspection table: product variants, family design versions, purchase orders, batch inspection, row photographs, issue disposition, release, reports, and backup. It uses plain HTML, CSS, JavaScript, and a local SQLite application service. Chrome and the in-app browser on the same computer share saved data through that service. Multi-computer hosting is a later phase.
+A local QC application built around the familiar inspection table: product variants, family design versions, purchase orders, batch inspection, row and issue evidence, issue disposition, release, reports, and backup. It uses plain HTML, CSS, JavaScript, and a local SQLite application service. Chrome and the in-app browser on the same computer share saved data through that service. Multi-computer hosting is a later phase.
 
 ## Initial Setup
 
@@ -39,13 +39,13 @@ The app starts with two inspection families and normal/Yellow product variants. 
 See [User Guide](docs/user-guide.md) for the complete workflow and [Local App Acceptance](docs/app-acceptance.md) for actual verification and outstanding limits.
 
 - Batches lock applicable standards and calculate inspection quantities automatically.
-- Each inspection row owns its photographs. Issues preserve a source snapshot and keep discussion separate from formal disposition.
+- Each inspection row can own one video, procedure file, and log file. Rows list every linked Issue; Issues preserve a source snapshot and support multiple photo and general-file attachments. Discussion stays separate from formal disposition.
 - Manual issue closure requires an owner, disposition, and three entered confirmation names. These names are not authenticated signatures.
 - Every new OQC batch counts each product's full quantity toward its PO line after explicit release; IQC and historical records do not contribute.
 - Backup exports contain records and attachments. Restore validates the entire backup and rejects conflicting records without partial import.
 - Batches includes imported historical inspections and newly entered batches. Optional batch attachments retain original PDFs; historical quantities, printed versions, and missing-check provenance stay intact without inventing release or PO accounting. See [Original PDF Import](docs/pdf-import.md).
 
-Use the fixed local address. All browsers on this computer connect to the same selected workspace. Export backups regularly and before moving computers or changing the service data directory. This edition allows up to 5 MiB per photo, 10 MiB per library file, 30 MiB total attachment content, and 50 MiB per complete JSON backup.
+Use the fixed local address. All browsers on this computer connect to the same selected workspace. Export backups regularly and before moving computers or changing the service data directory. Attachments allow up to 5 MiB per photo and 10 MiB per video or general file, with 30 MiB total attachment content and 50 MiB per complete JSON backup.
 
 The original [initialization draft](http://127.0.0.1:4173/frontend/initialization.html) is retained separately. The old [AP table prototype](http://127.0.0.1:4173/frontend/prototype.html) remains temporary and resets on refresh; its records are not part of the app. See [Prototype Scope and Review](docs/prototype.md).
 

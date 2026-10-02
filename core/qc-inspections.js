@@ -314,7 +314,7 @@ export function deleteBatch(state, data) {
 
   const number = batch.number;
   state.batches = state.batches.filter((candidate) => candidate.id !== batch.id);
-  state.assets = state.assets.filter((asset) => !(asset.kind === "photo" && asset.batchId === batch.id));
+  state.assets = state.assets.filter((asset) => !(asset.batchId === batch.id && ["photo", "rowAttachment"].includes(asset.kind)));
   return {
     entityId: batch.id,
     action: "deleteBatch",
@@ -351,8 +351,12 @@ export function autosaveInspection(state, data, context) {
   const rowId = requireString(data.rowId, "Inspection row ID", { maxLength: 120 });
   const row = batch.rows.find((candidate) => candidate.id === rowId);
   if (!row) fail("That inspection row is not part of this batch.");
-  for (const field of ["defectiveQty", "actualTimeSeconds", "remarks"]) {
+  for (const field of ["defectiveQty", "remarks"]) {
     if (!Object.hasOwn(data, field)) fail(`Inspection autosave requires ${field}.`);
+  }
+  const hasActualTime = Object.hasOwn(data, "actualTimeSeconds");
+  if (!hasActualTime && Object.hasOwn(row, "actualTimeSeconds")) {
+    fail("Inspection autosave requires actualTimeSeconds for this row.");
   }
 
   const defectiveQty = data.defectiveQty;
@@ -362,19 +366,23 @@ export function autosaveInspection(state, data, context) {
     if (defectiveQty > row.inspectedQty) fail("Defective quantity cannot exceed inspection quantity.");
   }
 
-  const actualTimeSeconds = data.actualTimeSeconds;
-  if (actualTimeSeconds !== null && (typeof actualTimeSeconds !== "number" || !Number.isFinite(actualTimeSeconds) || actualTimeSeconds < 0)) {
+  const actualTimeSeconds = hasActualTime ? data.actualTimeSeconds : undefined;
+  if (hasActualTime && actualTimeSeconds !== null && (typeof actualTimeSeconds !== "number" || !Number.isFinite(actualTimeSeconds) || actualTimeSeconds < 0)) {
     fail("Actual inspection time must be finite and zero or more seconds, or blank.");
   }
   const remarks = requireString(data.remarks, "Inspection remarks", { maxLength: 5000, allowBlank: true });
-  const complete = defectiveQty !== null && actualTimeSeconds !== null;
-  if (row.defectiveQty === defectiveQty && row.actualTimeSeconds === actualTimeSeconds && row.remarks === remarks &&
+  const nextHasActualTime = hasActualTime || Object.hasOwn(row, "actualTimeSeconds");
+  const complete = defectiveQty !== null && (!nextHasActualTime || actualTimeSeconds !== null);
+  const sameActualTime = hasActualTime
+    ? row.actualTimeSeconds === actualTimeSeconds
+    : !Object.hasOwn(row, "actualTimeSeconds");
+  if (row.defectiveQty === defectiveQty && sameActualTime && row.remarks === remarks &&
       (row.savedAt !== null) === complete) {
     return { entityId: batch.id, changed: false, action: "autosaveInspection", summary: `Inspection row ${row.title} for batch ${batch.number} was already up to date.` };
   }
 
   row.defectiveQty = defectiveQty;
-  row.actualTimeSeconds = actualTimeSeconds;
+  if (hasActualTime) row.actualTimeSeconds = actualTimeSeconds;
   row.remarks = remarks;
   row.savedAt = complete ? context.now() : null;
   return { entityId: batch.id, action: "autosaveInspection", summary: `Autosaved inspection row ${row.title} for batch ${batch.number}.` };
@@ -409,10 +417,17 @@ export function getBatchWorkspace(state, batchId) {
       : null,
   }));
   const rows = batch.rows.map((row) => {
+    const attachmentIds = row.attachmentIds ?? {};
+    const attachments = Object.fromEntries(["videos", "procedures", "log"].map((category) => {
+      const assetId = attachmentIds[category] ?? null;
+      const asset = assetId ? state.assets.find((candidate) => candidate.id === assetId) : null;
+      return [category, asset ? structuredClone(asset) : null];
+    }));
     if (historical) {
       return {
         ...structuredClone(row),
         photos: [],
+        attachments,
         issues: [],
         history: [],
       };
@@ -423,7 +438,13 @@ export function getBatchWorkspace(state, batchId) {
       ? null
       : Number(((row.defectiveQty / row.inspectedQty) * 100).toFixed(2));
     const photos = row.photoIds.map((assetId) => state.assets.find((asset) => asset.id === assetId)).filter(Boolean).map((asset) => structuredClone(asset));
-    const issues = state.issues.filter((issue) => issue.batchId === batch.id && issue.rowId === row.id).map((issue) => structuredClone(issue));
+    const issues = state.issues.filter((issue) => issue.batchId === batch.id && issue.rowId === row.id).map((issue) => ({
+      ...structuredClone(issue),
+      attachments: (issue.attachmentIds ?? [])
+        .map((assetId) => state.assets.find((asset) => asset.id === assetId))
+        .filter(Boolean)
+        .map((asset) => structuredClone(asset)),
+    }));
     const history = state.batches
       .filter((candidate) => candidate.id !== batch.id && candidate.kind !== "historical" &&
         factoryKey(candidate.factory) === factoryKey(batch.factory) && candidate.stage === batch.stage &&
@@ -463,6 +484,7 @@ export function getBatchWorkspace(state, batchId) {
       versionLabel: product?.versionLabel ?? null,
       defectiveRate: rate,
       photos,
+      attachments,
       issues,
       history,
     };

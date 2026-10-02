@@ -28,7 +28,18 @@ import { createHistoricalBatch } from "./qc-historical-batches.js";
 import { validateVersionMergeEvidence } from "./qc-version-merge.js";
 
 const PHOTO_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-const DOCUMENT_MIMES = new Set([...PHOTO_MIMES, "application/pdf", "text/plain", "text/csv", "text/markdown"]);
+const VIDEO_MIMES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
+const OFFICE_MIMES = new Set([
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/zip",
+]);
+const DOCUMENT_MIMES = new Set([...PHOTO_MIMES, ...VIDEO_MIMES, ...OFFICE_MIMES, "application/pdf", "text/plain", "text/csv", "text/markdown"]);
+const ROW_ATTACHMENT_CATEGORIES = new Set(["videos", "procedures", "log"]);
 const TEXT_EXTENSIONS = new Set([".txt", ".csv", ".md", ".markdown", ".log"]);
 const MIME_EXTENSIONS = new Map([
   ["image/png", new Set([".png"])],
@@ -36,8 +47,18 @@ const MIME_EXTENSIONS = new Map([
   ["image/webp", new Set([".webp"])],
   ["image/gif", new Set([".gif"])],
   ["application/pdf", new Set([".pdf"])],
+  ["application/msword", new Set([".doc"])],
+  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", new Set([".docx"])],
+  ["application/vnd.ms-excel", new Set([".xls"])],
+  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", new Set([".xlsx"])],
+  ["application/vnd.ms-powerpoint", new Set([".ppt"])],
+  ["application/vnd.openxmlformats-officedocument.presentationml.presentation", new Set([".pptx"])],
+  ["application/zip", new Set([".zip"])],
   ["text/csv", new Set([".csv"])],
   ["text/markdown", new Set([".md", ".markdown"])],
+  ["video/mp4", new Set([".mp4"])],
+  ["video/quicktime", new Set([".mov"])],
+  ["video/webm", new Set([".webm"])],
 ]);
 const DANGEROUS_EXTENSIONS = /\.(?:html?|xhtml|svg|js|mjs|cjs|wasm|hta|jar|exe|bat|cmd|sh|ps1)$/i;
 
@@ -291,6 +312,23 @@ function validateBatchRow(row, batch, family, variant, assets, productQuantity =
     const asset = assets.get(assetId);
     assert(asset && asset.kind === "photo" && asset.batchId === batch.id && asset.rowId === row.id, `Photo ${assetId} is not owned by this batch row.`);
   }
+  if (Object.hasOwn(row, "attachmentIds")) {
+    requireRecord(row.attachmentIds, `Attachments on inspection row ${row.id}`);
+    assert(Object.keys(row.attachmentIds).every((category) => ROW_ATTACHMENT_CATEGORIES.has(category)),
+      `Inspection row ${row.id} has an unsupported attachment category.`);
+    const attachmentAssetIds = [];
+    for (const category of ROW_ATTACHMENT_CATEGORIES) {
+      assert(Object.hasOwn(row.attachmentIds, category), `Inspection row ${row.id} must preserve its ${category} attachment slot.`);
+      const assetId = row.attachmentIds[category];
+      assert(assetId === null || (typeof assetId === "string" && assetId.trim()), `Inspection row ${row.id} ${category} attachment ID must be null or text.`);
+      if (assetId === null) continue;
+      const asset = assets.get(assetId);
+      assert(asset && asset.kind === "rowAttachment" && asset.batchId === batch.id && asset.rowId === row.id && asset.category === category,
+        `Attachment ${assetId} is not owned by this inspection row category.`);
+      attachmentAssetIds.push(assetId);
+    }
+    ensureUnique(attachmentAssetIds, `Attachments on inspection row ${row.id}`);
+  }
   assert(row.models.length === 0 || row.models.includes(variant.model), `Batch row ${row.title} does not apply to ${variant.model}.`);
   assert(factoryKey(row.factory) === factoryKey(batch.factory) && row.stage === batch.stage, `Batch row ${row.title} does not apply to ${batch.factory} ${batch.stage}.`);
   assert(family.models.includes(variant.model), "Batch variant does not belong to its inspection family.");
@@ -516,14 +554,41 @@ function validateAssets(state, batches, versions, issues) {
       const attachedToRow = batch.rows.find((row) => row.id === asset.rowId).photoIds.includes(asset.id);
       const attachedToIssue = issues.some((issue) => issue.sourceSnapshot?.row?.photoIds?.includes(asset.id));
       assert(attachedToRow || attachedToIssue, `Photo ${asset.name} is not referenced by a row or issue snapshot.`);
-    } else {
-      assert(asset.kind === "document", "Attachment kind must be photo or document.");
-      assert(DOCUMENT_MIMES.has(asset.mimeType), "Library documents must be PDF, PNG, JPEG, WebP, GIF, or plain text.");
+    } else if (asset.kind === "document") {
+      assert(DOCUMENT_MIMES.has(asset.mimeType), "Library documents must use a supported document, image, office, zip, text, or video type.");
       assert(parsed.decodedBytes > 0 && parsed.decodedBytes <= DOCUMENT_MAX_BYTES, `Document ${asset.name} exceeds its size limit.`);
       assert(asset.batchId === null && asset.rowId === null, "Library documents cannot be linked to batch rows.");
       assert(asset.versionId === null || versions.has(asset.versionId), `Document ${asset.name} refers to an unknown design version.`);
       if (asset.mimeType === "text/plain") assert(TEXT_EXTENSIONS.has(ext), "Plain-text library files must use .txt, .csv, .md, .markdown, or .log filenames.");
       if (MIME_EXTENSIONS.has(asset.mimeType)) assert(MIME_EXTENSIONS.get(asset.mimeType).has(ext), `Document ${asset.name} extension does not match its MIME type.`);
+    } else if (asset.kind === "rowAttachment") {
+      assert(ROW_ATTACHMENT_CATEGORIES.has(asset.category), `Attachment ${asset.name} has an unsupported inspection row category.`);
+      const allowedMime = asset.category === "videos"
+        ? VIDEO_MIMES.has(asset.mimeType)
+        : DOCUMENT_MIMES.has(asset.mimeType) && !VIDEO_MIMES.has(asset.mimeType);
+      assert(allowedMime, `Attachment ${asset.name} does not match its inspection row category.`);
+      assert(parsed.decodedBytes > 0 && parsed.decodedBytes <= DOCUMENT_MAX_BYTES, `Attachment ${asset.name} exceeds its size limit.`);
+      const batch = batches.get(asset.batchId);
+      const row = batch?.rows.find((candidate) => candidate.id === asset.rowId);
+      assert(row && row.attachmentIds?.[asset.category] === asset.id, `Attachment ${asset.name} is not referenced by its inspection row slot.`);
+      assert(asset.versionId === null && asset.issueId === null, `Inspection row attachment ${asset.name} cannot also belong to a version or issue.`);
+      if (asset.mimeType === "text/plain") assert(TEXT_EXTENSIONS.has(ext), "Plain-text row attachments must use .txt, .csv, .md, .markdown, or .log filenames.");
+      if (MIME_EXTENSIONS.has(asset.mimeType)) assert(MIME_EXTENSIONS.get(asset.mimeType).has(ext), `Attachment ${asset.name} extension does not match its MIME type.`);
+    } else if (asset.kind === "issueAttachment") {
+      assert(["photo", "file"].includes(asset.category), `Issue attachment ${asset.name} must be categorized as photo or file.`);
+      const allowedMime = asset.category === "photo" ? PHOTO_MIMES.has(asset.mimeType) : DOCUMENT_MIMES.has(asset.mimeType);
+      const maxBytes = asset.category === "photo" ? PHOTO_MAX_BYTES : DOCUMENT_MAX_BYTES;
+      assert(allowedMime, `Issue attachment ${asset.name} does not match its photo or file category.`);
+      assert(parsed.decodedBytes > 0 && parsed.decodedBytes <= maxBytes, `Issue attachment ${asset.name} exceeds its size limit.`);
+      const issue = issues.find((candidate) => candidate.id === asset.issueId);
+      assert(issue && (issue.attachmentIds ?? []).includes(asset.id), `Issue attachment ${asset.name} is not referenced by its issue.`);
+      assert(asset.batchId === issue.batchId && asset.rowId === issue.rowId,
+        `Issue attachment ${asset.name} does not match its issue batch and row scope.`);
+      assert(asset.versionId === null, `Issue attachment ${asset.name} cannot be attached to a version.`);
+      if (asset.mimeType === "text/plain") assert(TEXT_EXTENSIONS.has(ext), "Plain-text issue files must use .txt, .csv, .md, .markdown, or .log filenames.");
+      if (MIME_EXTENSIONS.has(asset.mimeType)) assert(MIME_EXTENSIONS.get(asset.mimeType).has(ext), `Issue attachment ${asset.name} extension does not match its MIME type.`);
+    } else {
+      fail("Attachment kind must be photo, document, rowAttachment, or issueAttachment.");
     }
     totalBytes += parsed.decodedBytes;
     requireTimestamp(asset.createdAt, "Attachment created time");
@@ -535,10 +600,31 @@ function validateAssets(state, batches, versions, issues) {
 function validateIssues(state, batches, variants, assets) {
   assertUniqueIds(state.issues, "Issue");
   ensureUnique(state.issues.map((issue) => issue.number.toLocaleLowerCase()), "Issue number");
-  const rowKeys = [];
+  const requestIds = [];
   for (const issue of state.issues) {
     assertText(issue.number, "Issue number", { maxLength: 120 });
     assertText(issue.title, "Issue title", { maxLength: 300 });
+    if (Object.hasOwn(issue, "description")) assertText(issue.description, "Issue description", { maxLength: 10000, allowBlank: true });
+    if (Object.hasOwn(issue, "requestId")) {
+      assertText(issue.requestId, "Issue request ID", { maxLength: 120 });
+      requestIds.push(issue.requestId);
+      if (Object.hasOwn(issue, "requestFingerprint")) {
+        assert(typeof issue.requestFingerprint === "string" && /^[0-9a-f]{16}$/.test(issue.requestFingerprint),
+          `Issue ${issue.number} has an invalid request fingerprint.`);
+      }
+    } else {
+      assert(!Object.hasOwn(issue, "requestFingerprint"), `Issue ${issue.number} cannot have a request fingerprint without a request ID.`);
+    }
+    if (Object.hasOwn(issue, "attachmentIds")) {
+      assert(Array.isArray(issue.attachmentIds), `Issue ${issue.number} attachment IDs must be a list.`);
+      ensureUnique(issue.attachmentIds, `Attachments on issue ${issue.number}`);
+      for (const assetId of issue.attachmentIds) {
+        const asset = assets.get(assetId);
+        assert(asset && asset.kind === "issueAttachment" && asset.issueId === issue.id &&
+          asset.batchId === issue.batchId && asset.rowId === issue.rowId,
+        `Issue ${issue.number} contains a missing or out-of-scope attachment.`);
+      }
+    }
     assert(["open", "closed"].includes(issue.status), `Issue ${issue.number} has an invalid status.`);
     assertText(issue.owner, "Disposition owner", { maxLength: 200, allowBlank: true });
     assertText(issue.disposition, "Formal disposition", { maxLength: 10000, allowBlank: true });
@@ -636,7 +722,6 @@ function validateIssues(state, batches, variants, assets) {
         assertText(sourceRow.remarks, "Issue source row remarks", { maxLength: 5000, allowBlank: true });
         const expectedRate = sourceRow.inspectedQty === 0 ? null : Number(((sourceRow.defectiveQty / sourceRow.inspectedQty) * 100).toFixed(2));
         assert(sourceRow.defectiveRate === expectedRate, `Issue ${issue.number} source snapshot has an invalid defective rate.`);
-        rowKeys.push(`${issue.batchId}|${issue.rowId}`);
         const photoIds = sourceRow.photoIds;
         assert(Array.isArray(photoIds), `Issue ${issue.number} snapshot photo references must be a list.`);
         ensureUnique(photoIds, `Issue snapshot photo references for ${issue.number}`);
@@ -647,7 +732,7 @@ function validateIssues(state, batches, variants, assets) {
       }
     }
   }
-  ensureUnique(rowKeys, "Linked issue per batch inspection row");
+  ensureUnique(requestIds, "Issue request ID");
 }
 
 function validateAudit(state) {
