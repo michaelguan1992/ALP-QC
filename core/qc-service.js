@@ -4,6 +4,7 @@ import {
   createInitialQCState,
   DOCUMENT_MAX_BYTES,
   fail,
+  normalizeDataUrl,
   PHOTO_MAX_BYTES,
   ASSET_TOTAL_MAX_BYTES,
 } from "./qc-domain.js";
@@ -23,11 +24,11 @@ import {
   setRowAttachment,
 } from "./qc-assets.js";
 import { addDiscussion, closeIssue, createIssue, deleteIssue, saveIssue } from "./qc-issues.js";
-import { autosaveInspection, createBatch, deleteBatch, getBatchWorkspace as readBatchWorkspace, releaseBatch, saveBatchDetails, saveInspection } from "./qc-inspections.js";
+import { autosaveInspection, createBatch, deleteBatch, getBatchWorkspace as readBatchWorkspace, releaseBatch, saveBatchChanges, saveBatchDetails, saveInspection } from "./qc-inspections.js";
 import { createOrder, getPurchaseOrderProgress, saveOrder } from "./qc-purchasing.js";
 import { createVersion, cloneVersion, installAPReferences, publishVersion, saveVersion, supersedeOutdatedAPVersions } from "./qc-standards.js";
-import { clone } from "./qc-domain.js";
-import { validateBackup, validateQCState } from "./qc-validation.js";
+import { clone, requireString } from "./qc-domain.js";
+import { createAssetValidationCache, validateBackup, validateQCState } from "./qc-validation.js";
 import { materializeHistoricalBatches } from "./qc-historical-batches.js";
 import { importLarkVersionHistory } from "./qc-lark-versions.js";
 import { mergeSupersededAPVersionDuplicates } from "./qc-version-merge.js";
@@ -66,6 +67,7 @@ const COMMANDS = new Map([
   ["createBatch", createBatch],
   ["deleteBatch", deleteBatch],
   ["saveBatchDetails", saveBatchDetails],
+  ["saveBatchChanges", saveBatchChanges],
   ["saveInspection", saveInspection],
   ["autosaveInspection", autosaveInspection],
   ["addPhotos", addPhotos],
@@ -89,13 +91,7 @@ const COMMANDS = new Map([
 export const QC_COMMAND_TYPES = Object.freeze([...COMMANDS.keys()]);
 
 function defaultIdFactory() {
-  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
-  const bytes = new Uint8Array(16);
-  if (typeof globalThis.crypto?.getRandomValues === "function") globalThis.crypto.getRandomValues(bytes);
-  else for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  return [...bytes].map((byte, index) => `${[4, 6, 8, 10].includes(index) ? "-" : ""}${byte.toString(16).padStart(2, "0")}`).join("");
+  return globalThis.crypto.randomUUID();
 }
 
 function defaultNow() {
@@ -114,6 +110,57 @@ function requireAdapter(adapter) {
   }
 }
 
+const ASSET_METADATA_FIELDS = [
+  "id", "name", "mimeType", "kind", "batchId", "rowId", "versionId", "createdAt", "issueId", "category",
+];
+
+function isLightweightMode(options) {
+  return options === "lightweight" || options?.mode === "lightweight";
+}
+
+function projectLightweightState(state, trustedAssetValidation) {
+  const projected = clone(state);
+  projected.assets = state.assets.map((asset) => {
+    const metadata = Object.fromEntries(
+      ASSET_METADATA_FIELDS.filter((field) => Object.hasOwn(asset, field)).map((field) => [field, asset[field]]),
+    );
+    const trusted = trustedAssetValidation?.get?.(asset.id);
+    if (Number.isSafeInteger(trusted?.decodedBytes)) metadata.decodedBytes = trusted.decodedBytes;
+    else if (typeof asset.dataUrl === "string") metadata.decodedBytes = normalizeDataUrl(asset.dataUrl, "Stored attachment").decodedBytes;
+    if (Number.isSafeInteger(trusted?.contentRevision)) metadata.contentRevision = trusted.contentRevision;
+    return metadata;
+  });
+  return projected;
+}
+
+function projectFullAsset(asset) {
+  const projected = clone(asset);
+  delete projected.contentRef;
+  delete projected.contentValidation;
+  delete projected.decodedBytes;
+  delete projected.contentRevision;
+  return projected;
+}
+
+function projectCommandChanges(type, state, entityId, auditStart) {
+  const changes = {
+    batches: [],
+    issues: [],
+    audit: clone(state.audit.slice(auditStart)),
+  };
+  if (type === "saveBatchChanges") {
+    const batch = state.batches.find((candidate) => candidate.id === entityId);
+    if (batch) changes.batches.push(clone(batch));
+    changes.issues = state.issues.filter((issue) => issue.batchId === entityId).map(clone);
+  } else if (type === "saveIssue") {
+    const issue = state.issues.find((candidate) => candidate.id === entityId);
+    if (issue) changes.issues.push(clone(issue));
+  } else if (type === "createOrder" || type === "saveOrder") {
+    changes.orders = state.orders.filter((order) => order.id === entityId).map(clone);
+  }
+  return changes;
+}
+
 function hasS15TrialCleanupAudit(state) {
   return state.audit.some((event) => event.action === "removeS15TrialVersion" && event.entityId === S15_TRIAL_VERSION_ID);
 }
@@ -122,19 +169,53 @@ export function createQCService(adapter, options = {}) {
   requireAdapter(adapter);
   const idFactory = options.idFactory ?? defaultIdFactory;
   const now = options.now ?? options.clock ?? defaultNow;
+  const assetValidationCache = createAssetValidationCache();
+  const validationClientId = typeof options.validationClientId === "string" && options.validationClientId
+    ? options.validationClientId
+    : "qc-service";
+  let restoreId = 0;
   let openPromise = null;
+
+  function validationOptions(state) {
+    return {
+      trustedAssetValidation: trustedAssetValidation(),
+      assetValidationCache,
+      validationContext: {
+        revision: Number.isSafeInteger(state?.revision) ? state.revision : 0,
+        clientId: validationClientId,
+        restoreId: String(restoreId),
+      },
+    };
+  }
+
+  function trustedAssetValidation() {
+    return typeof adapter.getTrustedAssetValidation === "function"
+      ? adapter.getTrustedAssetValidation()
+      : undefined;
+  }
+
+  function validateState(state, preparedOptions = undefined) {
+    return validateQCState(state, preparedOptions ?? validationOptions(state));
+  }
 
   async function ensureOpen() {
     if (typeof adapter.initialize !== "function") return;
-    if (!openPromise) openPromise = Promise.resolve().then(() => adapter.initialize());
+    if (!openPromise) {
+      const validateLegacyState = async (legacyState) => {
+        validateQCState(legacyState);
+        if (legacyState.history?.sources?.length) await verifyHistoryStateAssets(legacyState);
+      };
+      openPromise = Promise.resolve().then(() => adapter.initialize({ validateLegacyState }));
+    }
     await openPromise;
   }
 
-  async function initialize() {
+  async function initialize(readOptions = {}) {
+    const includeAssetContent = !isLightweightMode(readOptions);
     await ensureOpen();
-    const existing = await adapter.readState();
+    const existing = await adapter.readState({ includeAssetContent });
     if (existing !== null) {
-      validateQCState(existing);
+      validateState(existing);
       const correctionPreview = clone(existing);
       const pendingVersionCorrection = supersedeOutdatedAPVersions(correctionPreview);
       const pendingVersionMerge = mergeSupersededAPVersionDuplicates(correctionPreview);
@@ -142,7 +223,7 @@ export function createQCService(adapter, options = {}) {
       if (existing.history?.inspections?.length || pendingVersionCorrection.versionIds.length || pendingVersionMerge.changed || pendingTrialCleanup.versionIds.length) {
         await adapter.transact((current) => {
           if (current === null) return { state: createInitialQCState(), result: null };
-          validateQCState(current);
+          validateState(current);
           const state = clone(current);
           const migration = state.history?.inspections?.length
             ? materializeHistoricalBatches(state)
@@ -188,31 +269,33 @@ export function createQCService(adapter, options = {}) {
               summary: "Removed the authorized empty S15 trial version 26.09.05.",
             });
           }
-          validateQCState(state);
+          validateState(state);
           return { state, result: null };
-        });
-        return clone(await adapter.readState());
+        }, { includeAssetContent });
+        const initialized = await adapter.readState({ includeAssetContent });
+        return includeAssetContent ? clone(initialized) : projectLightweightState(initialized, trustedAssetValidation());
       }
-      return clone(existing);
+      return includeAssetContent ? clone(existing) : projectLightweightState(existing, trustedAssetValidation());
     }
     await adapter.transact((current) => {
       if (current !== null) {
-        validateQCState(current);
+        validateState(current);
         return { state: current, result: null };
       }
       const state = createInitialQCState();
-      validateQCState(state);
+      validateState(state);
       return { state, result: null };
-    });
-    return getState();
+    }, { includeAssetContent });
+    return getState(readOptions);
   }
 
-  async function getState() {
+  async function getState(readOptions = {}) {
+    const includeAssetContent = !isLightweightMode(readOptions);
     await ensureOpen();
-    const state = await adapter.readState();
+    const state = await adapter.readState({ includeAssetContent });
     if (state === null) return createInitialQCState();
-    validateQCState(state);
-    return clone(state);
+    validateState(state);
+    return includeAssetContent ? clone(state) : projectLightweightState(state, trustedAssetValidation());
   }
 
   async function getRevision() {
@@ -221,35 +304,95 @@ export function createQCService(adapter, options = {}) {
       const revision = await adapter.getRevision();
       return revision === null ? 0 : revision;
     }
-    return (await getState()).revision;
+    return (await getState({ mode: "lightweight" })).revision;
   }
 
   async function command(type, data = {}, expectedRevision) {
     await ensureOpen();
     const handler = COMMANDS.get(type);
     if (!handler) fail(`Unknown QC command: ${String(type)}.`);
+    const includeAssetContent = type === "importLarkVersionHistory";
     return adapter.transact((current) => {
       const state = current === null ? createInitialQCState() : current;
-      validateQCState(state);
+      const currentValidation = validationOptions(state);
+      validateState(state, currentValidation);
       validateExpectedRevision(expectedRevision, state);
-      const outcome = handler(state, data, { idFactory, now });
+      const outcome = handler(state, data, {
+        idFactory,
+        now,
+        trustedAssetValidation: currentValidation.trustedAssetValidation,
+      });
+      const auditStart = state.audit.length;
       if (outcome.changed === false) {
-        return { state, result: { entityId: outcome.entityId, revision: state.revision, ...(type === "autosaveInspection" ? { changed: false } : {}), ...(outcome.counts ? { counts: outcome.counts } : {}) } };
+        return {
+          state,
+          result: {
+            entityId: outcome.entityId,
+            revision: state.revision,
+            ...(type === "autosaveInspection" || type === "saveBatchChanges" ? { changed: false } : {}),
+            ...(outcome.counts ? { counts: outcome.counts } : {}),
+            ...(type === "saveBatchChanges" ? { changes: projectCommandChanges(type, state, outcome.entityId, auditStart) } : {}),
+          },
+        };
       }
       state.revision += 1;
       addAudit(state, { idFactory, now, action: outcome.action || type, entityId: outcome.entityId, summary: outcome.summary || type });
-      validateQCState(state);
-      return { state, result: { entityId: outcome.entityId, revision: state.revision, ...(outcome.counts ? { counts: outcome.counts } : {}) } };
-    });
+      validateState(state, validationOptions(state));
+      return {
+        state,
+        result: {
+          entityId: outcome.entityId,
+          revision: state.revision,
+          ...(outcome.counts ? { counts: outcome.counts } : {}),
+          ...(["saveBatchChanges", "saveIssue", "createOrder", "saveOrder"].includes(type)
+            ? { changes: projectCommandChanges(type, state, outcome.entityId, auditStart) }
+            : {}),
+        },
+      };
+    }, { includeAssetContent });
   }
 
-  async function getBatchWorkspace(batchId) {
-    const state = await getState();
-    return readBatchWorkspace(state, batchId);
+  async function saveBatchChanges(data, expectedRevision) {
+    return command("saveBatchChanges", data, expectedRevision);
+  }
+
+  async function getAsset(assetId) {
+    const id = requireString(assetId, "Asset ID", { maxLength: 160 });
+    await ensureOpen();
+    if (typeof adapter.readAsset === "function") {
+      const asset = await adapter.readAsset(id);
+      if (asset == null) return null;
+      if (asset?.id !== id || typeof asset.dataUrl !== "string") fail("That attachment is no longer available.");
+      return projectFullAsset(asset);
+    }
+    const state = await adapter.readState({ includeAssetContent: true });
+    if (state === null) return null;
+    validateState(state);
+    const asset = state.assets.find((candidate) => candidate.id === id);
+    return asset ? projectFullAsset(asset) : null;
+  }
+
+  async function getBatchWorkspace(batchId, readOptions = {}) {
+    const includeAssetContent = !isLightweightMode(readOptions);
+    await ensureOpen();
+    const state = await adapter.readState({ includeAssetContent });
+    if (state === null) return readBatchWorkspace(createInitialQCState(), batchId, { includeAssetContent });
+    validateState(state);
+    const contentValidation = trustedAssetValidation();
+    const displayState = includeAssetContent
+      ? state
+      : {
+        ...state,
+        assets: state.assets.map((asset) => {
+          const trusted = contentValidation?.get?.(asset.id);
+          return trusted ? { ...asset, decodedBytes: trusted.decodedBytes, contentRevision: trusted.contentRevision } : asset;
+        }),
+      };
+    return readBatchWorkspace(displayState, batchId, { includeAssetContent });
   }
 
   async function getOrderProgress(orderId) {
-    const state = await getState();
+    const state = await getState({ mode: "lightweight" });
     return getPurchaseOrderProgress(state, orderId);
   }
 
@@ -264,9 +407,10 @@ export function createQCService(adapter, options = {}) {
     validateBackup(savedBackup);
     const omittedBackupTrial = removeAuthorizedS15TrialVersion(savedBackup.state);
     await ensureOpen();
+    restoreId += 1;
     return adapter.transact((current) => {
       const state = current === null ? createInitialQCState() : current;
-      validateQCState(state);
+      validateState(state);
       validateExpectedRevision(expectedRevision, state);
       const outcome = applyBackupImport(state, savedBackup, { idFactory, now });
       const trialCleanup = removeAuthorizedS15TrialVersion(outcome.state);
@@ -297,7 +441,7 @@ export function createQCService(adapter, options = {}) {
           summary: "Removed or omitted the authorized empty S15 trial version 26.09.05 during restore.",
         });
       }
-      validateQCState(outcome.state);
+      validateState(outcome.state);
       return {
         state: outcome.state,
         result: {
@@ -311,20 +455,21 @@ export function createQCService(adapter, options = {}) {
           },
         },
       };
-    });
+    }, { includeAssetContent: true });
   }
 
   async function importHistory(historyPackage, expectedRevision) {
     const savedPackage = clone(historyPackage);
     await verifyHistoryPackage(savedPackage);
     await ensureOpen();
+    restoreId += 1;
     return adapter.transact((current) => {
       const state = current === null ? createInitialQCState() : current;
-      validateQCState(state);
+      validateState(state);
       validateExpectedRevision(expectedRevision, state);
       const outcome = applyHistoryImport(state, savedPackage, { idFactory, now });
       return { state: outcome.state, result: outcome.result };
-    });
+    }, { includeAssetContent: true });
   }
 
   return Object.freeze({
@@ -332,6 +477,8 @@ export function createQCService(adapter, options = {}) {
     getState,
     getRevision,
     command,
+    saveBatchChanges,
+    getAsset,
     getBatchWorkspace,
     getPurchaseOrderProgress: getOrderProgress,
     exportBackup,

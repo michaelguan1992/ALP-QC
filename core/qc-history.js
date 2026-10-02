@@ -11,7 +11,6 @@ import {
   requireRecord,
   requireString,
   safeFilename,
-  stableStringify,
 } from "./qc-domain.js";
 import { validateQCState } from "./qc-validation.js";
 import { materializeHistoricalBatches } from "./qc-historical-batches.js";
@@ -23,10 +22,6 @@ export const HISTORY_FORMAT_VERSION = 1;
 
 function assert(condition, message) {
   if (!condition) fail(message);
-}
-
-function isPlainObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function assertJson(value, label) {
@@ -338,8 +333,4 @@ export function importHistory(targetState, historyPackage, context) {
   });
   validateQCState(target);
   return { state: target, result: { entityId: "history-import", changed: true, counts, revision: target.revision } };
-}
-
-export function historyPackageFingerprint(value) {
-  return stableStringify(value);
 }

@@ -1,71 +1,41 @@
 import {
   ASSET_TOTAL_MAX_BYTES,
+  DANGEROUS_EXTENSIONS,
+  DOCUMENT_MIMES,
   DOCUMENT_MAX_BYTES,
   fail,
   makeId,
+  MIME_EXTENSIONS,
   normalizeDataUrl,
+  PHOTO_MIMES,
   PHOTO_MAX_BYTES,
   requireArray,
   requireRecord,
   requireString,
+  ROW_ATTACHMENT_CATEGORIES,
   safeFilename,
+  TEXT_EXTENSIONS,
+  VIDEO_MIMES,
 } from "./qc-domain.js";
 import { requireBatch, requireEditableBatch } from "./qc-inspections.js";
-
-const PHOTO_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-const DOCUMENT_MIME_TYPES = new Set([
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/zip",
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-  "text/plain",
-  "text/csv",
-  "text/markdown",
-  "video/mp4",
-  "video/quicktime",
-  "video/webm",
-]);
-const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
-const IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-const DANGEROUS_EXTENSIONS = /\.(?:html?|xhtml|svg|js|mjs|cjs|wasm|hta|jar|exe|bat|cmd|sh|ps1)$/i;
-const TEXT_EXTENSIONS = new Set([".txt", ".csv", ".md", ".markdown", ".log"]);
-const DOCUMENT_EXTENSIONS = new Map([
-  ["application/pdf", new Set([".pdf"])],
-  ["application/msword", new Set([".doc"])],
-  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", new Set([".docx"])],
-  ["application/vnd.ms-excel", new Set([".xls"])],
-  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", new Set([".xlsx"])],
-  ["application/vnd.ms-powerpoint", new Set([".ppt"])],
-  ["application/vnd.openxmlformats-officedocument.presentationml.presentation", new Set([".pptx"])],
-  ["application/zip", new Set([".zip"])],
-  ["image/png", new Set([".png"])],
-  ["image/jpeg", new Set([".jpg", ".jpeg"])],
-  ["image/webp", new Set([".webp"])],
-  ["image/gif", new Set([".gif"])],
-  ["text/csv", new Set([".csv"])],
-  ["text/markdown", new Set([".md", ".markdown"])],
-  ["video/mp4", new Set([".mp4"])],
-  ["video/quicktime", new Set([".mov"])],
-  ["video/webm", new Set([".webm"])],
-]);
-
-const ROW_ATTACHMENT_CATEGORIES = new Set(["videos", "procedures", "log"]);
 
 function extensionOf(name) {
   const index = name.lastIndexOf(".");
   return index < 0 ? "" : name.slice(index).toLocaleLowerCase();
 }
 
-function currentAssetBytes(state) {
-  return state.assets.reduce((total, asset) => total + normalizeDataUrl(asset.dataUrl, "Stored attachment").decodedBytes, 0);
+function storedAssetBytes(asset, trustedAssetValidation) {
+  if (typeof asset.dataUrl === "string") return normalizeDataUrl(asset.dataUrl, "Stored attachment").decodedBytes;
+  const trusted = trustedAssetValidation?.get?.(asset.id);
+  if (!trusted || trusted.contentRef !== asset.contentRef || trusted.mimeType !== asset.mimeType ||
+      !Number.isSafeInteger(trusted.decodedBytes) || trusted.decodedBytes < 0) {
+    fail(`Stored attachment ${asset.name} is missing trusted content metadata.`);
+  }
+  return trusted.decodedBytes;
+}
+
+function currentAssetBytes(state, trustedAssetValidation) {
+  return state.assets.reduce((total, asset) => total + storedAssetBytes(asset, trustedAssetValidation), 0);
 }
 
 function validateAssetPayload({ name, mimeType, dataUrl }, allowedMimes, maxBytes, label) {
@@ -78,17 +48,17 @@ function validateAssetPayload({ name, mimeType, dataUrl }, allowedMimes, maxByte
   if (declaredMime === "text/plain" && !TEXT_EXTENSIONS.has(extensionOf(normalizedName))) {
     fail("Plain-text library files must use .txt, .csv, .md, or .log filenames.");
   }
-  const allowedExtensions = DOCUMENT_EXTENSIONS.get(declaredMime);
+  const allowedExtensions = MIME_EXTENSIONS.get(declaredMime);
   if (allowedExtensions && !allowedExtensions.has(extensionOf(normalizedName))) {
     fail(`${label} filename extension must match ${declaredMime}.`);
   }
   return { name: normalizedName, mimeType: declaredMime, dataUrl, decodedBytes: parsed.decodedBytes };
 }
 
-function requireTotalCapacity(state, incomingBytes, replacedAssetId = null) {
+function requireTotalCapacity(state, incomingBytes, replacedAssetId = null, trustedAssetValidation = undefined) {
   const replacedAsset = replacedAssetId && state.assets.find((asset) => asset.id === replacedAssetId);
-  const replacedBytes = replacedAsset ? normalizeDataUrl(replacedAsset.dataUrl, "Stored attachment").decodedBytes : 0;
-  if (currentAssetBytes(state) - replacedBytes + incomingBytes > ASSET_TOTAL_MAX_BYTES) {
+  const replacedBytes = replacedAsset ? storedAssetBytes(replacedAsset, trustedAssetValidation) : 0;
+  if (currentAssetBytes(state, trustedAssetValidation) - replacedBytes + incomingBytes > ASSET_TOTAL_MAX_BYTES) {
     fail(`Attachments exceed the ${Math.floor(ASSET_TOTAL_MAX_BYTES / (1024 * 1024))} MiB total storage limit.`);
   }
 }
@@ -97,14 +67,14 @@ function normalizedIssueEvidenceFile(value) {
   const input = requireRecord(value, "Issue evidence file");
   const mimeType = requireString(input.mimeType, "Issue evidence file type", { maxLength: 100 }).toLocaleLowerCase();
   const category = input.category == null || String(input.category).trim() === ""
-    ? (IMAGE_MIME_TYPES.has(mimeType) ? "photo" : "file")
+    ? (PHOTO_MIMES.has(mimeType) ? "photo" : "file")
     : requireString(input.category, "Issue evidence category", { maxLength: 20 });
   if (!new Set(["photo", "file"]).has(category)) fail("Issue evidence category must be photo or file.");
-  const image = IMAGE_MIME_TYPES.has(mimeType);
+  const image = PHOTO_MIMES.has(mimeType);
   if (category === "photo" && !image) fail("Issue photos must be PNG, JPEG, WebP, or GIF images.");
-  if (category === "file" && !DOCUMENT_MIME_TYPES.has(mimeType)) fail("Issue evidence must use a supported file type.");
+  if (category === "file" && !DOCUMENT_MIMES.has(mimeType)) fail("Issue evidence must use a supported file type.");
   const maxBytes = category === "photo" ? PHOTO_MAX_BYTES : DOCUMENT_MAX_BYTES;
-  const file = validateAssetPayload(input, category === "photo" ? PHOTO_MIME_TYPES : DOCUMENT_MIME_TYPES, maxBytes, "Issue evidence");
+  const file = validateAssetPayload(input, category === "photo" ? PHOTO_MIMES : DOCUMENT_MIMES, maxBytes, "Issue evidence");
   return { ...file, category };
 }
 
@@ -115,7 +85,7 @@ export function prepareIssueEvidenceFiles(files) {
 
 export function appendIssueEvidence(state, issue, files, context) {
   if (!files.length) return [];
-  requireTotalCapacity(state, files.reduce((total, file) => total + file.decodedBytes, 0));
+  requireTotalCapacity(state, files.reduce((total, file) => total + file.decodedBytes, 0), null, context.trustedAssetValidation);
   issue.attachmentIds ??= [];
   const ids = [];
   for (const file of files) {
@@ -147,11 +117,11 @@ export function setRowAttachment(state, data, context) {
   const category = requireString(input.category, "Attachment category", { maxLength: 20 }).toLocaleLowerCase();
   if (!ROW_ATTACHMENT_CATEGORIES.has(category)) fail("Choose Videos, Procedures, or Log as the attachment category.");
   const allowedMimes = category === "videos"
-    ? VIDEO_MIME_TYPES
-    : new Set([...DOCUMENT_MIME_TYPES].filter((mimeType) => !VIDEO_MIME_TYPES.has(mimeType)));
+    ? VIDEO_MIMES
+    : new Set([...DOCUMENT_MIMES].filter((mimeType) => !VIDEO_MIMES.has(mimeType)));
   const file = validateAssetPayload(requireRecord(input.file, "Inspection row attachment file"), allowedMimes, DOCUMENT_MAX_BYTES, "Inspection row attachment");
   const currentId = row.attachmentIds?.[category] ?? null;
-  requireTotalCapacity(state, file.decodedBytes, currentId);
+  requireTotalCapacity(state, file.decodedBytes, currentId, context.trustedAssetValidation);
 
   const id = makeId(context.idFactory);
   const { decodedBytes, ...assetFile } = file;
@@ -222,22 +192,6 @@ export function removeIssueAttachment(state, data) {
   return { entityId: issue.id, action: "removeIssueAttachment", summary: `Removed a file from issue ${issue.number}.` };
 }
 
-export function resolveIssueAttachments(state, issue) {
-  return (issue.attachmentIds ?? [])
-    .map((assetId) => state.assets.find((asset) => asset.id === assetId))
-    .filter(Boolean)
-    .map((asset) => structuredClone(asset));
-}
-
-export function resolveRowAttachments(state, row) {
-  const attachmentIds = row.attachmentIds ?? {};
-  return Object.fromEntries(["videos", "procedures", "log"].map((category) => {
-    const assetId = attachmentIds[category] ?? null;
-    const asset = assetId ? state.assets.find((candidate) => candidate.id === assetId) : null;
-    return [category, asset ? structuredClone(asset) : null];
-  }));
-}
-
 export function addPhotos(state, data, context) {
   const batch = requireBatch(state, data.batchId);
   requireEditableBatch(batch);
@@ -246,8 +200,8 @@ export function addPhotos(state, data, context) {
   if (!row) fail("That inspection row is not part of this batch.");
   const files = requireArray(data.files, "Photo files");
   if (!files.length) fail("Choose at least one photo to add.");
-  const normalized = files.map((file) => validateAssetPayload(requireRecord(file, "Photo file"), PHOTO_MIME_TYPES, PHOTO_MAX_BYTES, "Photo"));
-  requireTotalCapacity(state, normalized.reduce((total, file) => total + file.decodedBytes, 0));
+  const normalized = files.map((file) => validateAssetPayload(requireRecord(file, "Photo file"), PHOTO_MIMES, PHOTO_MAX_BYTES, "Photo"));
+  requireTotalCapacity(state, normalized.reduce((total, file) => total + file.decodedBytes, 0), null, context.trustedAssetValidation);
   const ids = [];
   for (const file of normalized) {
     const id = makeId(context.idFactory);
@@ -282,8 +236,8 @@ export function removePhoto(state, data) {
 
 export function addDocument(state, data, context) {
   const input = requireRecord(data, "Library document");
-  const file = validateAssetPayload(input, DOCUMENT_MIME_TYPES, DOCUMENT_MAX_BYTES, "Library document");
-  requireTotalCapacity(state, file.decodedBytes);
+  const file = validateAssetPayload(input, DOCUMENT_MIMES, DOCUMENT_MAX_BYTES, "Library document");
+  requireTotalCapacity(state, file.decodedBytes, null, context.trustedAssetValidation);
   let versionId = null;
   if (input.versionId != null && String(input.versionId).trim() !== "") {
     versionId = requireString(input.versionId, "Version ID", { maxLength: 120 });
@@ -345,8 +299,8 @@ export function addBatchAttachment(state, data, context) {
     name: input.name,
     mimeType: input.mimeType ?? detectedMimeType,
     dataUrl: input.dataUrl,
-  }, DOCUMENT_MIME_TYPES, DOCUMENT_MAX_BYTES, "Batch attachment");
-  requireTotalCapacity(state, file.decodedBytes);
+  }, DOCUMENT_MIMES, DOCUMENT_MAX_BYTES, "Batch attachment");
+  requireTotalCapacity(state, file.decodedBytes, null, context.trustedAssetValidation);
 
   const id = makeId(context.idFactory);
   state.assets.push({

@@ -15,14 +15,26 @@ export function createQCHttpService({ workspace = "main", fetchImpl = globalThis
 
   return Object.freeze({
     workspace: selectedWorkspace,
-    initialize: () => request("/initialize", { method: "POST", body: {} }),
-    getState: () => request("/state"),
+    initialize: (options = {}) => request("/initialize", {
+      method: "POST",
+      body: options?.mode ? { mode: options.mode } : {},
+    }),
+    getState: (options = {}) => request(options === "lightweight" || options?.mode === "lightweight" ? "/state/lightweight" : "/state"),
     getRevision: async () => (await request("/revision")).revision,
     command: (type, data = {}, expectedRevision) => request("/command", {
       method: "POST",
       body: { type, data, expectedRevision },
     }),
-    getBatchWorkspace: (batchId) => request(`/batches/${encodeURIComponent(batchId)}`),
+    saveBatchChanges: (data, expectedRevision) => request("/command", {
+      method: "POST",
+      body: { type: "saveBatchChanges", data, expectedRevision },
+    }),
+    getAsset: (assetId) => request(`/assets/${encodeURIComponent(assetId)}`),
+    getBatchWorkspace: (batchId, options = { mode: "lightweight" }) => request(
+      options === "lightweight" || options?.mode === "lightweight"
+        ? `/batches/${encodeURIComponent(batchId)}/lightweight`
+        : `/batches/${encodeURIComponent(batchId)}`,
+    ),
     getPurchaseOrderProgress: (orderId) => request(`/orders/${encodeURIComponent(orderId)}/progress`),
     exportBackup: () => request("/backup"),
     importBackup: (backup, expectedRevision) => request("/restore", {

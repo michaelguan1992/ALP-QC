@@ -149,9 +149,13 @@ function historicalMatches(state, batch, row, product, version) {
     const inspection = inspections.get(historicalBatch.historyInspectionId) ?? null;
     const source = inspection ? sources.get(inspection.sourceId) ?? null : null;
     const asset = source ? assets.get(source.assetId) ?? null : null;
+    const isValidatedPdf = typeof asset?.dataUrl === "string"
+      ? asset.dataUrl.startsWith("data:application/pdf;base64,")
+      : Number.isSafeInteger(asset?.decodedBytes) && asset.decodedBytes > 0 &&
+        Number.isSafeInteger(asset?.contentRevision) && asset.contentRevision > 0;
     if (!inspection || !source || !asset || source.id !== inspection.sourceId || source.family !== familyId ||
         asset.kind !== "document" || asset.mimeType !== "application/pdf" ||
-        typeof asset.dataUrl !== "string" || !asset.dataUrl.startsWith("data:application/pdf;base64,") ||
+        !isValidatedPdf ||
         !Array.isArray(historicalBatch.attachmentIds) || !historicalBatch.attachmentIds.includes(source.assetId) ||
         !Array.isArray(inspection.rows) || inspection.factory !== historicalBatch.factory || inspection.stage !== historicalBatch.stage ||
         factoryKey(inspection.factory) !== currentFactory || normalizeStage(inspection.stage) !== currentStage) continue;

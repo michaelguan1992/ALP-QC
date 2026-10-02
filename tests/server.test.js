@@ -164,3 +164,57 @@ test("startup reports a missing local Dexie dependency and server uses the canon
   assert.equal(PORT, 4173);
   assert.equal(CANONICAL_URL, "http://127.0.0.1:4173");
 });
+
+test("QC HTTP routes carry lightweight mode and expose on-demand asset reads", async () => {
+  const calls = [];
+  const services = {
+    main: {
+      async initialize(options) { calls.push(["initialize", options]); return { mode: options.mode }; },
+      async getState(options) { calls.push(["getState", options]); return { mode: options?.mode ?? "full" }; },
+      async getAsset(id) { calls.push(["getAsset", id]); return { id, dataUrl: "data:image/png;base64,iVBORw0KGgo=" }; },
+      async getBatchWorkspace(id, options) { calls.push(["getBatchWorkspace", id, options]); return { batch: { id }, mode: options?.mode ?? "full" }; },
+    },
+  };
+  const handler = createRequestHandler(async () => null, { services });
+  const request = async (method, url, body = undefined) => {
+    const response = {
+      headers: null,
+      statusCode: null,
+      body: null,
+      writeHead(statusCode, headers) { this.statusCode = statusCode; this.headers = headers; },
+      end(value) { this.body = value; },
+    };
+    const headers = { host: `${HOST}:${PORT}` };
+    if (body !== undefined) {
+      headers.origin = CANONICAL_URL;
+      headers["content-type"] = "application/json";
+    }
+    const input = {
+      headers,
+      method,
+      url,
+      async *[Symbol.asyncIterator]() {
+        if (body !== undefined) yield Buffer.from(JSON.stringify(body));
+      },
+    };
+    await handler(input, response);
+    return { ...response, json: JSON.parse(response.body) };
+  };
+
+  const initialized = await request("POST", "/api/qc/main/initialize", { mode: "lightweight" });
+  assert.equal(initialized.statusCode, 200);
+  assert.deepEqual(initialized.json, { mode: "lightweight" });
+  assert.deepEqual((await request("GET", "/api/qc/main/state/lightweight")).json, { mode: "lightweight" });
+  assert.deepEqual((await request("GET", "/api/qc/main/assets/asset-1")).json, {
+    id: "asset-1", dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+  });
+  assert.deepEqual((await request("GET", "/api/qc/main/batches/batch-1/lightweight")).json, {
+    batch: { id: "batch-1" }, mode: "lightweight",
+  });
+  assert.deepEqual(calls, [
+    ["initialize", { mode: "lightweight" }],
+    ["getState", { mode: "lightweight" }],
+    ["getAsset", "asset-1"],
+    ["getBatchWorkspace", "batch-1", { mode: "lightweight" }],
+  ]);
+});

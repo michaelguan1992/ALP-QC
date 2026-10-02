@@ -32,6 +32,23 @@ export function timestampLabel(value) {
   return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleString();
 }
 
+export function sourcePercent(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  const printed = String(value);
+  if (/%\s*$/.test(printed)) return printed;
+  return /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(printed.trim()) ? `${printed}%` : printed;
+}
+
+export function computedSourceQuantity(batch, row) {
+  if (row.status === "missing-from-source" || batch.quantity === null || batch.quantity === undefined || batch.quantity === "" || row.sourceInspectedQty === null || row.sourceInspectedQty === undefined || row.sourceInspectedQty === "" || row.samplingPercent === null || row.samplingPercent === undefined || row.samplingPercent === "") return null;
+  const batchQuantity = Number(batch.quantity);
+  const samplingPercent = Number(String(row.samplingPercent).replace(/%\s*$/, ""));
+  const sourceQuantity = Number(row.sourceInspectedQty);
+  if (!Number.isFinite(batchQuantity) || batchQuantity < 0 || !Number.isFinite(samplingPercent) || samplingPercent < 0 || samplingPercent > 100 || !Number.isFinite(sourceQuantity)) return null;
+  const computed = Math.ceil(batchQuantity * samplingPercent / 100);
+  return computed === sourceQuantity ? null : computed;
+}
+
 export function errorText(error, fallback = "The operation could not be completed.") {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
@@ -45,12 +62,6 @@ export function setOptions(select, options, selectedValue = "") {
   }
   select.replaceChildren(fragment);
   if (options.some((option) => option.value === selectedValue)) select.value = selectedValue;
-}
-
-export function labeledControl(labelText, control, hint = "") {
-  const wrapper = field(labelText, control);
-  if (hint) wrapper.append(el("small", { className: "qc-ops-hint" }, hint));
-  return wrapper;
 }
 
 export function pageHeading(title, _description, actions = []) {

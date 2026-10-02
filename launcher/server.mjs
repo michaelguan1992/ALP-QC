@@ -15,7 +15,6 @@ const STATIC_ROOTS = ["frontend", "core", "storage"].map((directory) => ({
   directory: path.join(PROJECT_ROOT, directory),
 }));
 const DEXIE_PACKAGE_ROOT = path.join(PROJECT_ROOT, "node_modules", "dexie");
-const DEXIE_ENTRY = path.join(DEXIE_PACKAGE_ROOT, "dist", "dexie.mjs");
 const DEXIE_URL = "/vendor/dexie.mjs";
 const LARK_IMPORT_ROOT = path.join(PROJECT_ROOT, "data", "lark-import");
 const LARK_IMPORT_PACKAGE_URL = "/data/lark-import/version-history.v1.json";
@@ -272,13 +271,21 @@ async function handleApiRequest(request, response, path, services, maxBodyBytes)
   try {
     if (action.length === 1 && action[0] === "initialize") {
       allowedMethod("POST");
-      await readJsonBody(request, maxBodyBytes);
-      sendJson(response, 200, await service.initialize());
+      const body = await readJsonBody(request, maxBodyBytes);
+      if (body.mode !== undefined && !["full", "lightweight"].includes(body.mode)) {
+        throw requestError(400, "Initialization mode must be full or lightweight.", "invalid_read_mode");
+      }
+      sendJson(response, 200, await service.initialize(body.mode ? { mode: body.mode } : {}));
       return;
     }
     if (action.length === 1 && action[0] === "state") {
       allowedMethod("GET");
       sendJson(response, 200, await service.getState());
+      return;
+    }
+    if (action.length === 2 && action[0] === "state" && action[1] === "lightweight") {
+      allowedMethod("GET");
+      sendJson(response, 200, await service.getState({ mode: "lightweight" }));
       return;
     }
     if (action.length === 1 && action[0] === "revision") {
@@ -324,9 +331,24 @@ async function handleApiRequest(request, response, path, services, maxBodyBytes)
       sendJson(response, 200, await service.importHistory(body.historyPackage, body.expectedRevision));
       return;
     }
+    if (action.length === 2 && action[0] === "assets") {
+      allowedMethod("GET");
+      const asset = await service.getAsset(action[1]);
+      if (!asset) {
+        sendJson(response, 404, { error: "That attachment is no longer available.", code: "asset_not_found" });
+        return;
+      }
+      sendJson(response, 200, asset);
+      return;
+    }
     if (action.length === 2 && action[0] === "batches") {
       allowedMethod("GET");
       sendJson(response, 200, await service.getBatchWorkspace(action[1]));
+      return;
+    }
+    if (action.length === 3 && action[0] === "batches" && action[2] === "lightweight") {
+      allowedMethod("GET");
+      sendJson(response, 200, await service.getBatchWorkspace(action[1], { mode: "lightweight" }));
       return;
     }
     if (action.length === 3 && action[0] === "orders" && action[2] === "progress") {

@@ -14,7 +14,8 @@ let selectedId = null;
 let staleMessage = "";
 let renderNumber = 0;
 let channel = null;
-let activeAutosaveController = null;
+let activeManualSaveController = null;
+const manualSaveControllers = [];
 let commandQueue = Promise.resolve();
 let needsAuthoritativeRefresh = false;
 let commandInFlight = 0;
@@ -51,19 +52,81 @@ function hasUnsavedForm() {
 }
 
 function dirtyForms() {
-  return [...app.querySelectorAll('.app-main form[data-dirty="true"]:not([data-autosave-form="true"])')];
+  return [...app.querySelectorAll('.app-main form[data-dirty="true"]:not([data-autosave-form="true"]):not([data-issue-id])')];
 }
 
-function disposeAutosaveController() {
-  activeAutosaveController?.dispose?.();
-  activeAutosaveController = null;
+function disposeManualSaveController() {
+  for (const entry of manualSaveControllers) entry.controller.dispose?.();
+  manualSaveControllers.length = 0;
+  activeManualSaveController = null;
 }
 
-async function flushAutosaves() {
-  if (!activeAutosaveController) return true;
-  const saved = await activeAutosaveController.flushAll();
-  if (!saved) notify("Resolve pending edits before continuing.", true);
-  return saved;
+function saveDialogSnapshot() {
+  const dialog = document.querySelector("#qc-dialog");
+  if (!dialog?.open) return null;
+  return {
+    dialog,
+    title: dialog.querySelector(".dialog-header h2")?.textContent || "",
+    nodes: [...(dialog.querySelector(".dialog-content")?.childNodes || [])],
+  };
+}
+
+function restoreDialogSnapshot(snapshot) {
+  if (snapshot?.dialog?.open) showDialog(snapshot.title, snapshot.nodes);
+}
+
+async function resolveManualChanges(actionLabel, action) {
+  const controller = activeManualSaveController;
+  if (!controller?.hasPending?.()) return action();
+
+  const snapshot = saveDialogSnapshot();
+  const message = el("p", { className: "qc-ops-manual-exit-message", role: "status" },
+    `Save your changes before you ${actionLabel}, discard them, or cancel.`);
+  const save = button("Save changes", async () => {
+    if (controller.isSaving?.()) return;
+    save.disabled = true;
+    discard.disabled = true;
+    message.textContent = "Saving changes…";
+    const saved = await controller.saveAll();
+    if (!saved) {
+      message.textContent = "The changes could not be saved. Your edits are still here.";
+      save.disabled = false;
+      discard.disabled = false;
+      return;
+    }
+    if (controller.hasPending?.()) {
+      message.textContent = "New changes were made while saving. Save or discard them before continuing.";
+      save.disabled = false;
+      discard.disabled = false;
+      return;
+    }
+    resolved = true;
+    closeDialog(true);
+    await action();
+  }, "button-primary qc-ops-unsaved-save");
+  const discard = button("Discard changes", async () => {
+    if (!controller.discardAll?.() || controller.hasPending?.()) {
+      message.textContent = "Wait for the current save to finish before discarding changes.";
+      return;
+    }
+    resolved = true;
+    closeDialog(true);
+    await action();
+  }, "button-danger qc-ops-unsaved-discard");
+  const cancel = button("Cancel", () => {
+    resolved = true;
+    if (snapshot) restoreDialogSnapshot(snapshot);
+    else closeDialog(true);
+  }, "button-secondary qc-ops-unsaved-cancel");
+  let resolved = false;
+  const dialog = showDialog("Unsaved changes", el("div", { className: "discard-prompt qc-ops-manual-exit" },
+    message,
+    el("div", { className: "button-row" }, save, discard, cancel),
+  ));
+  const restoreIfDismissed = () => {
+    if (!resolved && snapshot) restoreDialogSnapshot(snapshot);
+  };
+  dialog.addEventListener("close", restoreIfDismissed, { once: true });
 }
 
 function enqueueCommand(work) {
@@ -119,7 +182,7 @@ function setStale(message) {
 }
 
 async function readLatestState() {
-  const next = await service.getState();
+  const next = await service.getState({ mode: "lightweight" });
   state = next;
   needsAuthoritativeRefresh = false;
   staleMessage = "";
@@ -127,19 +190,8 @@ async function readLatestState() {
 }
 
 async function requestRefresh() {
-  if (!(await flushAutosaves())) {
-    showDialog("Unsaved edits", el("div", { className: "discard-prompt" },
-      el("p", {}, "Some edits could not be confirmed. Reloading will discard this tab’s drafts."),
-      el("div", { className: "button-row" },
-        button("Stay on this page", () => closeDialog(true), "button-secondary"),
-        button("Discard edits and reload", () => {
-          closeDialog(true);
-          disposeAutosaveController();
-          window.dispatchEvent(new CustomEvent("masterqc:discard-operation-drafts"));
-          void refreshLatest();
-        }, "button-danger"),
-      ),
-    ));
+  if (activeManualSaveController?.hasPending?.()) {
+    await resolveManualChanges("reload the latest data", () => refreshLatest());
     return;
   }
   if (hasUnsavedForm()) {
@@ -161,7 +213,10 @@ async function refreshLatest() {
 
 async function navigate(route, id = null, force = false) {
   if (!routes.has(route)) return false;
-  if (!(await flushAutosaves())) return false;
+  if (!force && activeManualSaveController?.hasPending?.()) {
+    await resolveManualChanges(`leave for ${route === "batch-report" ? "the report" : route}`, () => navigate(route, id, true));
+    return false;
+  }
   if (!closeDialog()) return false;
   if (!force && hasUnsavedForm()) {
     promptToDiscard("continue", () => navigate(route, id, true));
@@ -193,6 +248,28 @@ function settingsNavItem() {
   return item;
 }
 
+function applyCommandProjection(commandResult) {
+  const changes = commandResult?.changes;
+  if (!changes || !state) return false;
+  const next = { ...state };
+  for (const collection of ["batches", "issues", "audit", "orders"]) {
+    const updates = changes[collection];
+    if (!Array.isArray(updates) || !updates.length) continue;
+    const values = [...(Array.isArray(next[collection]) ? next[collection] : [])];
+    for (const update of updates) {
+      if (!update?.id) continue;
+      const index = values.findIndex((value) => value?.id === update.id);
+      if (index < 0) values.push(update);
+      else values[index] = { ...values[index], ...update };
+    }
+    next[collection] = values;
+  }
+  const revision = Number(commandResult.revision ?? commandResult.result?.revision);
+  if (Number.isSafeInteger(revision) && revision >= Number(next.revision || 0)) next.revision = revision;
+  state = next;
+  return true;
+}
+
 function getContext() {
   return {
     service,
@@ -203,20 +280,24 @@ function getContext() {
     refresh: requestRefresh,
     announceChange: (revision) => channel?.postMessage({ revision }),
     selectedId,
-    registerAutosaveController: (controller) => {
-      activeAutosaveController = controller;
+    registerManualSaveController: (controller) => {
+      const registration = { controller };
+      manualSaveControllers.push(registration);
+      activeManualSaveController = controller;
       return () => {
-        if (activeAutosaveController === controller) {
-          controller.dispose?.();
-          activeAutosaveController = null;
+        const index = manualSaveControllers.indexOf(registration);
+        if (index >= 0) manualSaveControllers.splice(index, 1);
+        controller.dispose?.();
+        if (activeManualSaveController === controller) {
+          activeManualSaveController = manualSaveControllers.at(-1)?.controller || null;
         }
       };
     },
-    flushAutosaves,
+    resolveManualChanges,
     refreshState: async ({ render = false } = {}) => enqueueCommand(async () => {
       commandInFlight += 1;
       try {
-        const latest = await service.getState();
+        const latest = await service.getState({ mode: "lightweight" });
         commandInFlight -= 1;
         state = latest;
         needsAuthoritativeRefresh = false;
@@ -232,14 +313,11 @@ function getContext() {
       }
     }),
     run: async (type, data, options = {}) => {
-      if (options.autosave !== true && !(await flushAutosaves())) {
-        return { ok: false, blocked: true, error: new Error("Inspection edits could not be saved.") };
-      }
       return enqueueCommand(async () => {
         if (!state) return { ok: false, error: new Error("The local workspace is not ready.") };
         if (needsAuthoritativeRefresh) {
           try {
-            state = await service.getState();
+            state = await service.getState({ mode: "lightweight" });
             needsAuthoritativeRefresh = false;
           } catch (error) {
             setStale("The saved change is awaiting a fresh read. Reload before making another change.");
@@ -262,8 +340,17 @@ function getContext() {
           return { ok: false, error, stale: /revision|stale|reload|changed in another/i.test(message) };
         }
         const commandRevision = Number(result?.revision ?? result?.result?.revision);
+        if (applyCommandProjection(result)) {
+          commandInFlight -= 1;
+          needsAuthoritativeRefresh = false;
+          staleMessage = "";
+          channel?.postMessage({ revision: state.revision });
+          if (options.render !== false) renderApp();
+          else updateStaleWarning();
+          return { ok: true, result, state, revision: state.revision, refreshed: true, projected: true };
+        }
         try {
-          const latest = await service.getState();
+          const latest = await service.getState({ mode: "lightweight" });
           commandInFlight -= 1;
           state = latest;
           needsAuthoritativeRefresh = false;
@@ -288,7 +375,7 @@ function getContext() {
       if (!state) return { ok: false, error: new Error("The local workspace is not ready.") };
       try {
         const result = await service.importHistory(historyPackage, state.revision);
-        state = await service.getState();
+        state = await service.getState({ mode: "lightweight" });
         staleMessage = "";
         channel?.postMessage({ revision: state.revision });
         renderApp();
@@ -307,7 +394,7 @@ function getContext() {
 
 function renderApp() {
   if (!state) return;
-  disposeAutosaveController();
+  disposeManualSaveController();
   const thisRender = ++renderNumber;
   const shell = el("div", { className: "app-frame" });
   const homeUrl = demoMode ? "/?workspace=demo" : "/";
@@ -378,25 +465,27 @@ function renderApp() {
 document.addEventListener("click", (event) => {
   const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
   if (!anchor || !app.contains(anchor) || anchor.target === "_blank" ||
-      (!activeAutosaveController?.hasPending?.() && !hasUnsavedForm())) return;
+      (!activeManualSaveController?.hasPending?.() && !hasUnsavedForm())) return;
   const target = new URL(anchor.href, location.href);
   event.preventDefault();
-  void (async () => {
-    if (!(await flushAutosaves())) return;
-    const openTarget = () => {
-      if (anchor.target === "_blank") window.open(target.href, "_blank", "noopener,noreferrer");
-      else location.href = target.href;
-    };
-    if (hasUnsavedForm()) promptToDiscard("open link", openTarget);
-    else openTarget();
-  })();
+  const openTarget = () => { location.href = target.href; };
+  if (activeManualSaveController?.hasPending?.()) void resolveManualChanges("open this link", openTarget);
+  else promptToDiscard("open link", openTarget);
 });
 
 window.addEventListener("popstate", () => {
   const next = readRoute();
   void (async () => {
-    if (!(await flushAutosaves())) {
+    const restoreCurrentUrl = () => history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
+    const openNextRoute = () => {
+      currentRoute = next.route;
+      selectedId = next.id;
       history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
+      renderApp();
+    };
+    if (activeManualSaveController?.hasPending?.()) {
+      restoreCurrentUrl();
+      await resolveManualChanges("leave this page", openNextRoute);
       return;
     }
     if (!closeDialog()) {
@@ -404,23 +493,31 @@ window.addEventListener("popstate", () => {
       return;
     }
     if (hasUnsavedForm()) {
-      history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
-      promptToDiscard("continue", () => { void navigate(next.route, next.id, true); });
+      restoreCurrentUrl();
+      promptToDiscard("continue", openNextRoute);
+      return;
+    }
+    if (next.legacyHistory || next.legacyReports) {
+      restoreCurrentUrl();
+      openNextRoute();
       return;
     }
     currentRoute = next.route;
     selectedId = next.id;
-    if (next.legacyHistory || next.legacyReports) {
-      history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
-    }
     renderApp();
   })();
 });
 
+window.addEventListener("beforeunload", (event) => {
+  if (activeManualSaveController?.hasPending?.() || activeManualSaveController?.isSaving?.()) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
+
 async function start() {
   try {
-    await service.initialize();
-    state = await service.getState();
+    state = await service.initialize({ mode: "lightweight" });
     const initial = readRoute();
     currentRoute = initial.route;
     selectedId = initial.id;

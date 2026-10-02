@@ -6,6 +6,49 @@ export const DOCUMENT_MAX_BYTES = 10 * 1024 * 1024;
 export const ASSET_TOTAL_MAX_BYTES = 30 * 1024 * 1024;
 export const BACKUP_MAX_BYTES = 50 * 1024 * 1024;
 
+export const PHOTO_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+export const VIDEO_MIMES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
+const OFFICE_MIMES = new Set([
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/zip",
+]);
+export const DOCUMENT_MIMES = new Set([
+  ...PHOTO_MIMES,
+  ...VIDEO_MIMES,
+  ...OFFICE_MIMES,
+  "application/pdf",
+  "text/plain",
+  "text/csv",
+  "text/markdown",
+]);
+export const ROW_ATTACHMENT_CATEGORIES = new Set(["videos", "procedures", "log"]);
+export const TEXT_EXTENSIONS = new Set([".txt", ".csv", ".md", ".markdown", ".log"]);
+export const MIME_EXTENSIONS = new Map([
+  ["application/pdf", new Set([".pdf"])],
+  ["application/msword", new Set([".doc"])],
+  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", new Set([".docx"])],
+  ["application/vnd.ms-excel", new Set([".xls"])],
+  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", new Set([".xlsx"])],
+  ["application/vnd.ms-powerpoint", new Set([".ppt"])],
+  ["application/vnd.openxmlformats-officedocument.presentationml.presentation", new Set([".pptx"])],
+  ["application/zip", new Set([".zip"])],
+  ["image/png", new Set([".png"])],
+  ["image/jpeg", new Set([".jpg", ".jpeg"])],
+  ["image/webp", new Set([".webp"])],
+  ["image/gif", new Set([".gif"])],
+  ["text/csv", new Set([".csv"])],
+  ["text/markdown", new Set([".md", ".markdown"])],
+  ["video/mp4", new Set([".mp4"])],
+  ["video/quicktime", new Set([".mov"])],
+  ["video/webm", new Set([".webm"])],
+]);
+export const DANGEROUS_EXTENSIONS = /\.(?:html?|xhtml|svg|js|mjs|cjs|wasm|hta|jar|exe|bat|cmd|sh|ps1)$/i;
+
 const SEEDED_VARIANT_IDS = [
   ["S11", "Red", "10000000-0000-4000-8000-000000000111"],
   ["S11", "Yellow", "10000000-0000-4000-8000-000000000112"],

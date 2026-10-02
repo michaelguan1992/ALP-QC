@@ -1,6 +1,8 @@
 import { ASSET_TOTAL_MAX_BYTES, BACKUP_MAX_BYTES, DOCUMENT_MAX_BYTES } from "../core/qc-service.js";
 import { rawLarkVersionFields } from "../core/qc-lark-versions.js";
+import { getPurchaseOrderProgress } from "../core/qc-purchasing.js";
 import { formatNumberedDescription } from "./qc-source-description.js";
+import { downloadAttachment, loadAssetContent } from "./qc-attachments.js";
 import { button, closeDialog, downloadFile, el, field, notify, readFileAsDataURL, showDialog } from "./qc-ui.js";
 
 const h = el;
@@ -14,6 +16,9 @@ const bytesInDataUrl = (dataUrl) => {
   const padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
   return Math.max(0, Math.floor(payload.length * 3 / 4) - padding);
 };
+const bytesForAsset = (asset) => Number.isFinite(Number(asset?.decodedBytes))
+  ? Math.max(0, Number(asset.decodedBytes))
+  : bytesInDataUrl(asset?.dataUrl);
 const formatBytes = (bytes) => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -516,17 +521,7 @@ async function renderOrders(root, ctx) {
     root.append(emptyState("No purchase orders yet", ""));
     return;
   }
-  const loading = h("section", { className: "admin-card card" }, h("p", { className: "muted" }, "Loading…"));
-  root.append(loading);
-  const results = await Promise.all(ctx.state.orders.map(async (order) => {
-    try { return { order, progress: await ctx.service.getPurchaseOrderProgress(order.id), error: null }; }
-    catch (error) { return { order, progress: null, error }; }
-  }));
-  if (!root.isConnected) return;
-  root.replaceChildren();
-  pageHeading(root, "Purchase orders", [
-    button("New purchase order", () => openOrderEditor(ctx), "button-primary"),
-  ]);
+  const results = ctx.state.orders.map((order) => ({ order, progress: getPurchaseOrderProgress(ctx.state, order.id), error: null }));
   root.append(h("div", { className: "admin-grid" }, results.map(({ order, progress, error }) => h("details", { className: "admin-card admin-card-wide card purchase-order-card" },
     h("summary", { className: "purchase-order-summary" },
       h("span", { className: "purchase-order-summary-title" },
@@ -581,7 +576,7 @@ function setUploadFeedback(node, message, tone = "") {
 }
 
 function openVersionAttachmentDialog(ctx, version) {
-  let totalBytes = ctx.state.assets.reduce((sum, asset) => sum + bytesInDataUrl(asset.dataUrl), 0);
+  let totalBytes = ctx.state.assets.reduce((sum, asset) => sum + bytesForAsset(asset), 0);
   let submitting = false;
   const filePicker = input("file", "", "file", {
     accept: ".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.log,.csv,.md,.markdown",
@@ -661,19 +656,20 @@ function attachmentBlobFromDataUrl(asset) {
   return new Blob([attachmentBytesFromDataUrl(asset.dataUrl)], { type: asset.mimeType || "application/octet-stream" });
 }
 
-function openVersionAttachmentViewer(ctx, version, asset) {
+async function openVersionAttachmentViewer(ctx, version, asset) {
   let previewUrl = null;
   try {
-    const mimeType = String(asset.mimeType || "").toLocaleLowerCase();
+    const fullAsset = await loadAssetContent(asset, ctx.service);
+    const mimeType = String(fullAsset.mimeType || "").toLocaleLowerCase();
     let preview;
     if (mimeType === "application/pdf") {
-      previewUrl = URL.createObjectURL(attachmentBlobFromDataUrl(asset));
-      preview = h("iframe", { className: "version-attachment-preview-pdf", src: previewUrl, title: asset.name });
+      previewUrl = URL.createObjectURL(attachmentBlobFromDataUrl(fullAsset));
+      preview = h("iframe", { className: "version-attachment-preview-pdf", src: previewUrl, title: fullAsset.name });
     } else if (mimeType.startsWith("image/")) {
-      preview = h("img", { className: "version-attachment-preview-image", src: asset.dataUrl, alt: asset.name });
+      preview = h("img", { className: "version-attachment-preview-image", src: fullAsset.dataUrl, alt: fullAsset.name });
     } else if (mimeType.startsWith("text/")) {
       preview = h("pre", { className: "version-attachment-preview-text" },
-        new TextDecoder().decode(attachmentBytesFromDataUrl(asset.dataUrl)));
+        new TextDecoder().decode(attachmentBytesFromDataUrl(fullAsset.dataUrl)));
     } else {
       preview = h("p", { className: "source-note" }, "Preview is unavailable for this file type. Download the file to open it.");
     }
@@ -716,7 +712,7 @@ function openVersionAttachmentViewer(ctx, version, asset) {
       );
     }, "button-danger");
     const downloadButton = button("Download", async () => {
-      try { await downloadFile(asset.name, asset.dataUrl, asset.mimeType); }
+      try { await downloadAttachment(fullAsset, ctx.service); }
       catch (error) { notify(error instanceof Error ? error.message : "The file could not be downloaded.", true); }
     }, "button-secondary");
     const actions = h("div", { className: "version-attachment-dialog-actions" },
@@ -756,7 +752,7 @@ function renderVersionAttachmentControl(ctx, version) {
 }
 
 function renderLibrary(root, ctx) {
-  const totalBytes = ctx.state.assets.reduce((sum, asset) => sum + bytesInDataUrl(asset.dataUrl), 0);
+  const totalBytes = ctx.state.assets.reduce((sum, asset) => sum + bytesForAsset(asset), 0);
   pageHeading(root, "File library");
   const versionOptions = [{ value: "", label: "No version link" }, ...ctx.state.versions.map((version) => ({
     value: version.id,
@@ -792,13 +788,13 @@ function renderLibrary(root, ctx) {
   const assets = [...ctx.state.assets].filter((asset) => asset.kind === "document").sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   const files = assets.length ? h("div", { className: "asset-list" }, assets.map((asset) => {
     const version = ctx.state.versions.find((candidate) => candidate.id === asset.versionId);
-    const size = bytesInDataUrl(asset.dataUrl);
+    const size = bytesForAsset(asset);
     return h("article", { className: "asset-card" },
       h("div", { className: "asset-meta" }, h("strong", {}, asset.name),
         h("span", {}, `${asset.mimeType} · ${formatBytes(size)} · added ${new Date(asset.createdAt).toLocaleString()}`),
         h("p", {}, version ? `Linked to ${familyName(ctx, version.familyId)} · ${version.label || "Version label not recorded"}${version.status === "recorded" ? " · Archived" : ""}` : "No design version link")),
       button("Download", async () => {
-        try { await downloadFile(asset.name, asset.dataUrl, asset.mimeType); }
+        try { await downloadAttachment(asset, ctx.service); }
         catch (error) { notify(error instanceof Error ? error.message : "The file could not be downloaded.", true); }
       }, "button-secondary"),
     );
@@ -871,7 +867,7 @@ function renderBackup(root, ctx) {
       notify(error instanceof Error ? error.message : "Browser data could not be migrated.", true);
     }
   }, "button-primary") : null;
-  const assetBytes = ctx.state.assets.reduce((sum, asset) => sum + bytesInDataUrl(asset.dataUrl), 0);
+  const assetBytes = ctx.state.assets.reduce((sum, asset) => sum + bytesForAsset(asset), 0);
   const metrics = h("div", { className: "progress-grid" },
     h("div", { className: "progress-stat" }, h("span", {}, "Design versions"), h("strong", {}, String(ctx.state.versions.length))),
     h("div", { className: "progress-stat" }, h("span", {}, "Purchase orders"), h("strong", {}, String(ctx.state.orders.length))),

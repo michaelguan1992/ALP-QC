@@ -18,6 +18,9 @@ const extensionTypes = new Map([
 ]);
 
 let activeDialogPreviewCleanup = null;
+const assetContentsByService = new WeakMap();
+const MAX_CACHED_ASSETS = 32;
+const MAX_CACHED_ASSET_BYTES = 32 * MEBIBYTE;
 
 export function normalizedMimeType(name, mimeType = "") {
   const supplied = String(mimeType || "").split(";", 1)[0].trim().toLowerCase();
@@ -81,6 +84,81 @@ export function attachmentCanPreview(asset) {
   const mimeType = normalizedMimeType(asset?.name, asset?.mimeType);
   return previewableImages.has(mimeType) || mimeType === "application/pdf" || videoTypes.has(mimeType) ||
     ["text/plain", "text/csv", "text/markdown"].includes(mimeType);
+}
+
+export async function loadAssetContent(asset, service) {
+  if (typeof asset?.dataUrl === "string") return asset;
+  if (!asset?.id || typeof service?.getAsset !== "function") throw new Error("The file content is unavailable.");
+  let loadedAssetContents = assetContentsByService.get(service);
+  if (!loadedAssetContents) {
+    loadedAssetContents = new Map();
+    assetContentsByService.set(service, loadedAssetContents);
+  }
+  const cacheKey = `${asset.id}:${asset.contentRevision ?? "unknown"}`;
+  if (loadedAssetContents.has(cacheKey)) {
+    const entry = loadedAssetContents.get(cacheKey);
+    loadedAssetContents.delete(cacheKey);
+    loadedAssetContents.set(cacheKey, entry);
+    return entry.promise;
+  }
+  for (const key of loadedAssetContents.keys()) {
+    if (key.startsWith(`${asset.id}:`) && key !== cacheKey) loadedAssetContents.delete(key);
+  }
+  const entry = { bytes: Math.max(0, Number(asset.decodedBytes) || 0), promise: null };
+  const pending = Promise.resolve(service.getAsset(asset.id)).then((fullAsset) => {
+    if (!fullAsset || typeof fullAsset.dataUrl !== "string") throw new Error("The file content is unavailable.");
+    entry.bytes = Math.max(0, Number(fullAsset.decodedBytes ?? asset.decodedBytes) || 0);
+    while (loadedAssetContents.size > MAX_CACHED_ASSETS || [...loadedAssetContents.values()].reduce((sum, cached) => sum + cached.bytes, 0) > MAX_CACHED_ASSET_BYTES) {
+      const oldestKey = loadedAssetContents.keys().next().value;
+      loadedAssetContents.delete(oldestKey);
+      if (oldestKey === cacheKey && !loadedAssetContents.has(cacheKey)) break;
+    }
+    return { ...asset, ...fullAsset };
+  });
+  entry.promise = pending;
+  loadedAssetContents.set(cacheKey, entry);
+  try {
+    return await pending;
+  } catch (error) {
+    if (loadedAssetContents.get(cacheKey) === entry) loadedAssetContents.delete(cacheKey);
+    throw error;
+  }
+}
+
+export function loadAssetImage(image, asset, service) {
+  const setSource = (fullAsset) => {
+    if (!image?.isConnected || typeof fullAsset?.dataUrl !== "string" || !fullAsset.dataUrl.startsWith("data:image/")) return false;
+    image.src = fullAsset.dataUrl;
+    return true;
+  };
+  if (typeof asset?.dataUrl === "string") {
+    setSource(asset);
+    return Promise.resolve(asset);
+  }
+  return loadAssetContent(asset, service).then((fullAsset) => {
+    setSource(fullAsset);
+    return fullAsset;
+  }).catch((error) => {
+    if (image?.isConnected) image.classList.add("qc-ops-asset-unavailable");
+    notify(error instanceof Error ? error.message : "The image could not be loaded.", true);
+    return null;
+  });
+}
+
+export function previewAttachment(asset, service, title = null) {
+  return loadAssetContent(asset, service)
+    .then((fullAsset) => openAttachmentPreview(fullAsset, title))
+    .catch((error) => {
+      notify(error instanceof Error ? error.message : "The file preview could not be opened.", true);
+      return null;
+    });
+}
+
+export function downloadAttachment(asset, service, fallbackLabel = "Attachment") {
+  return loadAssetContent(asset, service).then((fullAsset) => {
+    const name = String(fullAsset.name || fallbackLabel);
+    return downloadFile(name, fullAsset.dataUrl, fullAsset.mimeType);
+  });
 }
 
 export function createAttachmentPreview(asset) {
@@ -160,15 +238,11 @@ export function openAttachmentPreview(asset, title = null) {
   return dialog;
 }
 
-export function attachmentDownload(asset, fallbackLabel = "Attachment") {
+export function attachmentDownload(asset, fallbackLabel = "Attachment", service = null) {
   const name = String(asset?.name || fallbackLabel);
   const action = button("Download", () => {
-    if (!asset?.dataUrl) {
-      notify("The file is unavailable.", true);
-      return;
-    }
-    void downloadFile(name, asset.dataUrl, asset.mimeType).catch((error) => notify(error instanceof Error ? error.message : "The file could not be downloaded.", true));
+    void downloadAttachment(asset, service, fallbackLabel).catch((error) => notify(error instanceof Error ? error.message : "The file could not be downloaded.", true));
   }, "button-quiet qc-ops-small-button");
-  action.disabled = !asset?.dataUrl;
+  action.disabled = !asset?.dataUrl && (!asset?.id || typeof service?.getAsset !== "function");
   return action;
 }

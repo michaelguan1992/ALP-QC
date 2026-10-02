@@ -3,14 +3,18 @@ import {
   BACKUP_FORMAT,
   BACKUP_FORMAT_VERSION,
   BACKUP_MAX_BYTES,
+  DANGEROUS_EXTENSIONS,
+  DOCUMENT_MIMES,
   DOCUMENT_MAX_BYTES,
   ensureUnique,
   fail,
   factoryKey,
+  MIME_EXTENSIONS,
   isIsoTimestamp,
   normalizeDataUrl,
   normalizeFactory,
   normalizeStage,
+  PHOTO_MIMES,
   requireNonNegativeInteger,
   PHOTO_MAX_BYTES,
   requireDate,
@@ -18,7 +22,10 @@ import {
   requireRecord,
   requireString,
   requireTimestamp,
+  ROW_ATTACHMENT_CATEGORIES,
   stableStringify,
+  TEXT_EXTENSIONS,
+  VIDEO_MIMES,
 } from "./qc-domain.js";
 import { normalizeStandardItems, selectApplicableItems } from "./qc-standards.js";
 import { getBatchVersionItems, getBatchVersionReadiness } from "./qc-batch-versions.js";
@@ -27,40 +34,7 @@ import { validateHistoryState } from "./qc-history.js";
 import { createHistoricalBatch } from "./qc-historical-batches.js";
 import { validateVersionMergeEvidence } from "./qc-version-merge.js";
 
-const PHOTO_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-const VIDEO_MIMES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
-const OFFICE_MIMES = new Set([
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/zip",
-]);
-const DOCUMENT_MIMES = new Set([...PHOTO_MIMES, ...VIDEO_MIMES, ...OFFICE_MIMES, "application/pdf", "text/plain", "text/csv", "text/markdown"]);
-const ROW_ATTACHMENT_CATEGORIES = new Set(["videos", "procedures", "log"]);
-const TEXT_EXTENSIONS = new Set([".txt", ".csv", ".md", ".markdown", ".log"]);
-const MIME_EXTENSIONS = new Map([
-  ["image/png", new Set([".png"])],
-  ["image/jpeg", new Set([".jpg", ".jpeg"])],
-  ["image/webp", new Set([".webp"])],
-  ["image/gif", new Set([".gif"])],
-  ["application/pdf", new Set([".pdf"])],
-  ["application/msword", new Set([".doc"])],
-  ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", new Set([".docx"])],
-  ["application/vnd.ms-excel", new Set([".xls"])],
-  ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", new Set([".xlsx"])],
-  ["application/vnd.ms-powerpoint", new Set([".ppt"])],
-  ["application/vnd.openxmlformats-officedocument.presentationml.presentation", new Set([".pptx"])],
-  ["application/zip", new Set([".zip"])],
-  ["text/csv", new Set([".csv"])],
-  ["text/markdown", new Set([".md", ".markdown"])],
-  ["video/mp4", new Set([".mp4"])],
-  ["video/quicktime", new Set([".mov"])],
-  ["video/webm", new Set([".webm"])],
-]);
-const DANGEROUS_EXTENSIONS = /\.(?:html?|xhtml|svg|js|mjs|cjs|wasm|hta|jar|exe|bat|cmd|sh|ps1)$/i;
+const MAX_ASSET_VALIDATION_CACHE_CHARS = Math.ceil(ASSET_TOTAL_MAX_BYTES * 4 / 3) + 1024;
 
 function assert(condition, message) {
   if (!condition) fail(message);
@@ -535,14 +509,98 @@ function validateBatches(state, families, variants, orders, versions, assets) {
   ensureUnique(lots, "Released counting batch physical lot and variant");
 }
 
-function validateAssets(state, batches, versions, issues) {
+/**
+ * Content parsing is deterministic for an exact data URL. Keep a bounded cache
+ * for repeated payloads within one client/revision/restore scope; moving to a
+ * different scope drops all entries so a restored or newer state is checked
+ * against its own contents.
+ */
+export function createAssetValidationCache({ maxChars = MAX_ASSET_VALIDATION_CACHE_CHARS } = {}) {
+  const limit = Number.isSafeInteger(maxChars) && maxChars > 0 ? maxChars : MAX_ASSET_VALIDATION_CACHE_CHARS;
+  let scope = null;
+  let cachedChars = 0;
+  const entries = new Map();
+
+  function clear() {
+    entries.clear();
+    cachedChars = 0;
+  }
+
+  function setScope(context = {}) {
+    const nextScope = JSON.stringify({
+      revision: Number.isSafeInteger(context.revision) ? context.revision : null,
+      clientId: typeof context.clientId === "string" ? context.clientId : "default",
+      restoreId: typeof context.restoreId === "string" ? context.restoreId : null,
+    });
+    if (scope !== nextScope) {
+      clear();
+      scope = nextScope;
+    }
+  }
+
+  return Object.freeze({
+    parse(dataUrl, label, context) {
+      setScope(context);
+      if (entries.has(dataUrl)) {
+        const entry = entries.get(dataUrl);
+        entry.validationCount += 1;
+        entries.delete(dataUrl);
+        entries.set(dataUrl, entry);
+        return entry.parsed;
+      }
+      const parsed = normalizeDataUrl(dataUrl, label);
+      if (dataUrl.length <= limit) {
+        while (entries.size > 0 && cachedChars + dataUrl.length > limit) {
+          const oldestKey = entries.keys().next().value;
+          cachedChars -= oldestKey.length;
+          entries.delete(oldestKey);
+        }
+        entries.set(dataUrl, { parsed, validationCount: 1 });
+        cachedChars += dataUrl.length;
+      }
+      return parsed;
+    },
+    completePass() {
+      for (const [dataUrl, entry] of entries) {
+        if (entry.validationCount === 1) {
+          entries.delete(dataUrl);
+          cachedChars -= dataUrl.length;
+        } else {
+          entry.validationCount = 0;
+        }
+      }
+    },
+    reset() {
+      clear();
+      scope = null;
+    },
+  });
+}
+
+function readTrustedAssetContent(asset, trustedAssetValidation) {
+  const trusted = trustedAssetValidation?.get?.(asset.id);
+  assert(trusted && trusted.contentRef === asset.contentRef,
+    `Stored attachment ${asset.name} is missing trusted content metadata.`);
+  assert(trusted.mimeType === asset.mimeType && Number.isSafeInteger(trusted.decodedBytes) && trusted.decodedBytes >= 0,
+    `Stored attachment ${asset.name} has invalid trusted content metadata.`);
+  assert(typeof trusted.contentSha256 === "string" && /^[0-9a-f]{64}$/i.test(trusted.contentSha256),
+    `Stored attachment ${asset.name} has invalid trusted content metadata.`);
+  assert(Number.isSafeInteger(trusted.contentRevision) && trusted.contentRevision > 0,
+    `Stored attachment ${asset.name} has invalid trusted content metadata.`);
+  return { mimeType: trusted.mimeType, decodedBytes: trusted.decodedBytes };
+}
+
+function validateAssets(state, batches, versions, issues, options) {
   assertUniqueIds(state.assets, "Attachment");
   const assets = assetMap(state);
   let totalBytes = 0;
   for (const asset of state.assets) {
     assertText(asset.name, "Attachment name", { maxLength: 200 });
     assert(!/[\\/\u0000-\u001f\u007f]/.test(asset.name) && !DANGEROUS_EXTENSIONS.test(asset.name), "Attachment name cannot contain a path or executable extension.");
-    const parsed = normalizeDataUrl(asset.dataUrl, "Stored attachment");
+    const parsed = typeof asset.dataUrl === "string"
+      ? (options.assetValidationCache?.parse(asset.dataUrl, "Stored attachment", options.validationContext)
+        ?? normalizeDataUrl(asset.dataUrl, "Stored attachment"))
+      : readTrustedAssetContent(asset, options.trustedAssetValidation);
     assert(parsed.mimeType === asset.mimeType, `Attachment ${asset.name} MIME type does not match its data URL.`);
     const ext = asset.name.includes(".") ? asset.name.slice(asset.name.lastIndexOf(".")).toLocaleLowerCase() : "";
     if (asset.kind === "photo") {
@@ -750,29 +808,33 @@ function validateAudit(state) {
   }
 }
 
-export function validateQCState(state) {
-  requireRecord(state, "QC state");
-  assert(state.schemaVersion === 1, "Unsupported QC state schema version.");
-  assert(Number.isSafeInteger(state.revision) && state.revision >= 0, "QC revision must be a non-negative whole number.");
-  for (const collection of ["families", "variants", "versions", "orders", "batches", "issues", "assets", "audit"]) {
-    assert(Array.isArray(state[collection]), `QC state ${collection} must be a list.`);
+export function validateQCState(state, options = {}) {
+  try {
+    requireRecord(state, "QC state");
+    assert(state.schemaVersion === 1, "Unsupported QC state schema version.");
+    assert(Number.isSafeInteger(state.revision) && state.revision >= 0, "QC revision must be a non-negative whole number.");
+    for (const collection of ["families", "variants", "versions", "orders", "batches", "issues", "assets", "audit"]) {
+      assert(Array.isArray(state[collection]), `QC state ${collection} must be a list.`);
+    }
+    validateFamiliesAndVariants(state);
+    const families = familyMap(state);
+    const variants = new Map(state.variants.map((variant) => [variant.id, variant]));
+    validateVersions(state, families);
+    validateVersionMergeEvidence(state, families);
+    const versions = versionMap(state);
+    validateOrders(state, variants);
+    const orders = new Map(state.orders.map((order) => [order.id, order]));
+    const batches = batchMap(state);
+    const assets = assetMap(state);
+    validateBatches(state, families, variants, orders, versions, assets);
+    validateIssues(state, batches, variants, assets);
+    const validatedAssets = validateAssets(state, batches, versions, state.issues, options);
+    validateHistoryState(state.history, validatedAssets);
+    validateAudit(state);
+    return state;
+  } finally {
+    options.assetValidationCache?.completePass?.();
   }
-  validateFamiliesAndVariants(state);
-  const families = familyMap(state);
-  const variants = new Map(state.variants.map((variant) => [variant.id, variant]));
-  validateVersions(state, families);
-  validateVersionMergeEvidence(state, families);
-  const versions = versionMap(state);
-  validateOrders(state, variants);
-  const orders = new Map(state.orders.map((order) => [order.id, order]));
-  const batches = batchMap(state);
-  const assets = assetMap(state);
-  validateBatches(state, families, variants, orders, versions, assets);
-  validateIssues(state, batches, variants, assets);
-  const validatedAssets = validateAssets(state, batches, versions, state.issues);
-  validateHistoryState(state.history, validatedAssets);
-  validateAudit(state);
-  return state;
 }
 
 export function validateBackup(backup) {
@@ -787,6 +849,7 @@ export function validateBackup(backup) {
   }
   const bytes = new TextEncoder().encode(serialized).byteLength;
   if (bytes > BACKUP_MAX_BYTES) fail(`Backup exceeds the ${Math.floor(BACKUP_MAX_BYTES / (1024 * 1024))} MiB import limit.`);
+  // Backups are portable user input and must always carry every payload.
   validateQCState(backup.state);
   return bytes;
 }

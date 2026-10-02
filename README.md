@@ -38,7 +38,7 @@ The app starts with two inspection families and normal/Yellow product variants. 
 
 See [User Guide](docs/user-guide.md) for the complete workflow and [Local App Acceptance](docs/app-acceptance.md) for actual verification and outstanding limits.
 
-- Batches lock applicable standards and calculate inspection quantities automatically.
+- Batches lock applicable standards and calculate inspection quantities automatically. Choose **Save changes** to save all modified results and batch details together; field editing does not autosave. Issue disposition also uses **Save changes**. Unsaved exits offer Save, Discard, or Cancel.
 - Each inspection row can own one video, procedure file, and log file. Rows list every linked Issue; Issues preserve a source snapshot and support multiple photo and general-file attachments. Discussion stays separate from formal disposition.
 - Manual issue closure requires an owner, disposition, and three entered confirmation names. These names are not authenticated signatures.
 - Every new OQC batch counts each product's full quantity toward its PO line after explicit release; IQC and historical records do not contribute.
@@ -51,7 +51,7 @@ The original [initialization draft](http://127.0.0.1:4173/frontend/initializatio
 
 ## Database Location
 
-The default production database is `data/workspace/masterqc-main.sqlite`. Saved records, original PDFs, row photographs, and audit history are inside this file; it is explicitly eligible for Git. The separate `masterqc-demo.sqlite` and temporary SQLite journals are ignored. The server does not expose database files as static downloads.
+The default production database is `data/workspace/masterqc-main.sqlite`. Saved records, original PDFs, row photographs, and audit history are inside this file. Attachment payloads are stored separately from business JSON and loaded on demand; full JSON backups still include every payload. Existing inline databases upgrade atomically with a recovery copy; it is explicitly eligible for Git. The separate `masterqc-demo.sqlite` and temporary SQLite journals are ignored. The server does not expose database files as static downloads.
 
 `MASTERQC_DATA_DIR` can explicitly override the directory. An external override opens another database and is not included when sharing this project. For independent recovery backups, use the app's full JSON export.
 

@@ -1,5 +1,6 @@
 import {
   button,
+  computedSourceQuantity,
   dateLabel,
   el,
   errorText,
@@ -11,17 +12,18 @@ import {
   runCommand,
   safeProcedureUrl,
   setOptions,
+  sourcePercent,
   statusPill,
   text
 } from "./qc-ops-common.js";
-import { closeDialog, downloadFile, showDialog } from "./qc-ui.js";
-import { attachmentCanPreview, MEBIBYTE, openAttachmentPreview, readAttachmentFile } from "./qc-attachments.js";
+import { closeDialog, showDialog } from "./qc-ui.js";
+import { attachmentCanPreview, downloadAttachment, MEBIBYTE, previewAttachment, readAttachmentFile } from "./qc-attachments.js";
 import { openNewIssueDialog } from "./qc-ops-issues.js";
 import { historicalBatchImportControl } from "./qc-history.js";
 import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { getBatchVersionItems, getBatchVersions, getBatchVersionReadiness, getSharedBatchVersionChoices } from "../core/qc-batch-versions.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
-import { createInspectionAutosaveController } from "./qc-inspection-autosave.js";
+import { createManualSaveController } from "./qc-manual-save.js";
 import { batchReleaseBlockers } from "../core/qc-inspections.js";
 
 const rowDrafts = new Map();
@@ -123,30 +125,6 @@ function sourceValue(value) {
   return text(value);
 }
 
-function sourcePercent(value) {
-  if (value === null || value === undefined || value === "") return "—";
-  const printed = String(value);
-  if (/%\s*$/.test(printed)) return printed;
-  return /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(printed.trim()) ? `${printed}%` : printed;
-}
-
-function computedHistoricalQuantity(batch, row) {
-  if (row.status === "missing-from-source" || batch.quantity === null || batch.quantity === undefined || batch.quantity === "" || row.sourceInspectedQty === null || row.sourceInspectedQty === undefined || row.sourceInspectedQty === "" || row.samplingPercent === null || row.samplingPercent === undefined || row.samplingPercent === "") return null;
-  const batchQuantity = Number(batch.quantity);
-  const samplingPercent = Number(String(row.samplingPercent).replace(/%\s*$/, ""));
-  const sourceQuantity = Number(row.sourceInspectedQty);
-  if (!Number.isFinite(batchQuantity) || batchQuantity < 0 || !Number.isFinite(samplingPercent) || samplingPercent < 0 || samplingPercent > 100 || !Number.isFinite(sourceQuantity)) return null;
-  const computed = Math.ceil(batchQuantity * samplingPercent / 100);
-  return computed === sourceQuantity ? null : computed;
-}
-
-function historicalRate(value) {
-  if (value === null || value === undefined || value === "") return "—";
-  const printed = String(value);
-  if (/%\s*$/.test(printed)) return printed;
-  return /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(printed.trim()) ? `${printed}%` : printed;
-}
-
 function stateForRow(row, batchId) {
   const key = rowKey(batchId, row.id);
   return rowDrafts.get(key) || {
@@ -242,8 +220,8 @@ function makeAction(label, handler, className = "button button-secondary") {
   return button(label, handler, className);
 }
 
-function makePhotoDialog(photo, row) {
-  openAttachmentPreview(photo, `${text(row.title)} · ${text(photo.name, "Photo")}`);
+function makePhotoDialog(photo, row, ctx) {
+  void previewAttachment(photo, ctx.service, `${text(row.title)} · ${text(photo.name, "Photo")}`);
 }
 
 function operationalTaskTitle(row, workspace, state) {
@@ -263,7 +241,7 @@ function operationalDetailFact(label, value) {
   return el("div", {}, el("dt", {}, label), el("dd", {}, value));
 }
 
-function legacyEvidenceDisclosure(row, workspace, state) {
+function legacyEvidenceDisclosure(row, workspace, state, ctx) {
   const remarks = String(row.remarks || "");
   const photos = getRowPhotos(row, workspace, state);
   const photoCount = photos.length || list(row.photoIds).length;
@@ -275,12 +253,12 @@ function legacyEvidenceDisclosure(row, workspace, state) {
     ? el("ul", { className: "qc-ops-legacy-photo-list" }, ...photos.map((photo) => {
       const name = text(photo?.name, "Inspection photo");
       const actions = [];
-      if (photo?.dataUrl && attachmentCanPreview(photo)) {
-        actions.push(button("Preview", () => makePhotoDialog(photo, row), "button-quiet qc-ops-small-button"));
+      if (attachmentCanPreview(photo)) {
+        actions.push(button("Preview", () => makePhotoDialog(photo, row, ctx), "button-quiet qc-ops-small-button"));
       }
-      if (photo?.dataUrl) {
+      if (photo?.dataUrl || photo?.id) {
         actions.push(button("Download", () => {
-          void downloadFile(name, photo.dataUrl, photo.mimeType).catch((error) => notify(errorText(error, "The photo could not be downloaded."), true));
+          void downloadAttachment(photo, ctx.service, name).catch((error) => notify(errorText(error, "The photo could not be downloaded."), true));
         }, "button-quiet qc-ops-small-button"));
       }
       return el("li", {}, el("span", { title: name }, name), ...actions);
@@ -326,11 +304,11 @@ function renderRowAttachmentCell(row, workspace, state, ctx, readOnly) {
     const slot = el("div", { className: "qc-ops-row-attachment-slot" },
       el("strong", {}, label),
       asset ? el("span", { className: "qc-ops-row-attachment-name", title: text(asset.name) }, text(asset.name, "Attachment")) : null,
-      asset?.dataUrl && attachmentCanPreview(asset)
-        ? button("Preview", () => openAttachmentPreview(asset, `${text(row.title)} · ${label}`), "button-quiet qc-ops-small-button")
+      asset && attachmentCanPreview(asset)
+        ? button("Preview", () => { void previewAttachment(asset, ctx.service, `${text(row.title)} · ${label}`); }, "button-quiet qc-ops-small-button")
         : null,
-      asset?.dataUrl ? button("Download", () => {
-        void downloadFile(asset.name, asset.dataUrl, asset.mimeType).catch((error) => notify(errorText(error, "The file could not be downloaded."), true));
+      asset && (asset.dataUrl || asset.id) ? button("Download", () => {
+        void downloadAttachment(asset, ctx.service).catch((error) => notify(errorText(error, "The file could not be downloaded."), true));
       }, "button-quiet qc-ops-small-button") : null,
       choose,
       asset ? button("Remove", () => {
@@ -346,7 +324,7 @@ function renderRowAttachmentCell(row, workspace, state, ctx, readOnly) {
   return cell;
 }
 
-function renderInspectionRow(row, index, workspace, state, ctx, autosaveController, onDraftChange = null) {
+function renderInspectionRow(row, index, workspace, state, ctx, manualSaveController, onDraftChange = null) {
   const readOnly = workspace.batch.status === "released";
   const draft = stateForRow(row, workspace.batch.id);
   const key = rowKey(workspace.batch.id, row.id);
@@ -422,33 +400,31 @@ function renderInspectionRow(row, index, workspace, state, ctx, autosaveControll
   );
   const linkedIssues = getRowIssues(row, workspace);
   const canCreateFromRow = Boolean(row.savedAt);
-  const hasPersistedRowData = Boolean(row.savedAt) || row.defectiveQty !== null && row.defectiveQty !== undefined ||
-    row.actualTimeSeconds !== null && row.actualTimeSeconds !== undefined || Boolean(String(row.remarks || "").trim());
   const rowComplete = rowCanCreateIssue(row);
   const createIssueButton = makeAction("Create issue", async () => {
-    if (!(await ctx.flushAutosaves?.())) return;
-    const fresh = await ctx.refreshState({ render: false });
-    if (!fresh.ok) {
-      notify(errorText(fresh.error, "The saved inspection results could not be reloaded."), true);
+    if (rowDrafts.has(key)) {
+      notify("Save inspection changes before creating an issue.", true);
       return;
     }
-    const freshBatch = list(fresh.state?.batches).find((candidate) => candidate.id === workspace.batch.id);
-    const freshRow = list(freshBatch?.rows).find((candidate) => candidate.id === row.id);
-    const eligible = rowCanCreateIssue(freshRow);
+    const latestState = ctx.state || state;
+    const currentBatch = list(latestState?.batches).find((candidate) => candidate.id === workspace.batch.id) || workspace.batch;
+    const currentRow = list(currentBatch?.rows).find((candidate) => candidate.id === row.id) || row;
+    const eligible = rowCanCreateIssue(currentRow);
     if (!eligible) {
       notify("Save complete inspection results before creating an issue.", true);
       return;
     }
-    openNewIssueDialog(fresh.state, ctx, {
+    openNewIssueDialog(latestState, ctx, {
       batchId: workspace.batch.id,
       rowId: row.id,
-      title: `${text(row.title)} · ${batchLabel(freshBatch, fresh.state)}`,
+      title: `${text(row.title)} · ${batchLabel(currentBatch, latestState)}`,
     });
   }, "button button-secondary qc-ops-small-button");
-  createIssueButton.disabled = readOnly || !canCreateFromRow || !rowComplete;
+  createIssueButton.disabled = readOnly || !canCreateFromRow || !rowComplete || rowDrafts.has(key);
   const rowForm = el("form", { id: rowFormId, className: "qc-ops-row-form", "data-autosave-form": "true" });
-  let rowState = el("span", { className: rowComplete ? "qc-ops-saved" : "qc-ops-incomplete" },
-    rowComplete ? "Saved" : "Incomplete");
+  let rowState = el("span", {
+    className: rowHasDraft(row, workspace.batch.id) ? "qc-ops-unsaved" : row.savedAt ? "qc-ops-saved" : "",
+  }, rowHasDraft(row, workspace.batch.id) ? "Unsaved changes" : row.savedAt ? "Saved" : "");
   rowForm.addEventListener("submit", (event) => event.preventDefault());
   const issueControls = linkedIssues.map((issue) => makeAction(
     `Open ${text(issue.number, "issue")} · ${text(issue.status)}`,
@@ -459,7 +435,7 @@ function renderInspectionRow(row, index, workspace, state, ctx, autosaveControll
     el("div", { className: "qc-ops-row-issues" }, ...issueControls),
     el("div", { className: "qc-ops-row-actions" }, createIssueButton, rowState),
   );
-  const legacyEvidence = legacyEvidenceDisclosure(row, workspace, state);
+  const legacyEvidence = legacyEvidenceDisclosure(row, workspace, state, ctx);
   if (legacyEvidence) rowForm.append(legacyEvidence);
 
   const readRowValue = () => {
@@ -478,78 +454,70 @@ function renderInspectionRow(row, index, workspace, state, ctx, autosaveControll
     ...(value.actualTimeSeconds === undefined ? {} : { actualTimeSeconds: value.actualTimeSeconds }),
     remarks: value.remarks,
   });
-  const saveStatus = (status, meta) => {
-    rowState.textContent = status;
-    rowState.className = status === "Saved" || status === "Saved · Incomplete"
-      ? "qc-ops-saved"
-      : status === "Saving…" ? "qc-ops-save-pending"
-        : status === "Save failed" ? "qc-ops-save-failed" : "qc-ops-incomplete";
-    if (meta.pending) {
-      rowDrafts.set(key, {
-        defectiveQty: defectiveInput.value,
-        actualTimeSeconds: legacyTimeOmitted && !actualTimeTouched ? undefined : actualTimeInput.value,
-        remarks: row.remarks ?? "",
-      });
-    } else {
-      rowDrafts.delete(key);
+  const updateRowStatus = (status = null) => {
+    if (status) {
+      rowState.textContent = status;
+      rowState.className = status === "Saved" ? "qc-ops-saved"
+        : status === "Saving…" ? "qc-ops-save-pending"
+          : status === "Save failed" ? "qc-ops-save-failed"
+            : status === "Unsaved changes" ? "qc-ops-unsaved" : "";
+      return;
     }
-    onDraftChange?.();
+    const dirty = rowDrafts.has(key);
+    rowState.textContent = dirty ? "Unsaved changes" : row.savedAt ? "Saved" : "";
+    rowState.className = dirty ? "qc-ops-unsaved" : row.savedAt ? "qc-ops-saved" : "";
   };
-  const autosave = readOnly || !autosaveController ? null : autosaveController.register(key, {
-    initial: readRowValue(),
-    initiallySaved: hasPersistedRowData,
-    isValid: (value) => !value.invalidDefectiveQty && !value.invalidActualTimeSeconds &&
-      (value.defectiveQty === null || (Number.isInteger(value.defectiveQty) && value.defectiveQty >= 0 && value.defectiveQty <= Number(row.inspectedQty))) &&
-      (value.actualTimeSeconds === undefined || value.actualTimeSeconds === null || (Number.isFinite(value.actualTimeSeconds) && value.actualTimeSeconds >= 0)),
-    isComplete: (value) => value.defectiveQty !== null && (value.actualTimeSeconds !== null || legacyTimeOmitted && value.actualTimeSeconds === undefined),
-    save: (value) => runCommand(ctx, "autosaveInspection", {
-      batchId: workspace.batch.id,
-      rowId: row.id,
-      ...valueForPersistence(value),
-    }, { autosave: true, render: false, silent: true }),
-    refreshCommitted: () => ctx.refreshState({ render: false }),
-    verifyCommitted: (latestState, value) => {
-      const batch = list(latestState?.batches).find((candidate) => candidate.id === workspace.batch.id);
-      const saved = list(batch?.rows).find((candidate) => candidate.id === row.id);
-      return sameInspectionValues(saved, valueForPersistence(value));
+  const rowInputState = {
+    defectiveInput,
+    actualTimeInput,
+    actualTimeTouched: () => actualTimeTouched,
+    read: readRowValue,
+    createIssueButton,
+    updateStatus: updateRowStatus,
+    reset(savedRow) {
+      defectiveInput.value = savedRow?.defectiveQty === null || savedRow?.defectiveQty === undefined ? "" : String(savedRow.defectiveQty);
+      actualTimeInput.value = savedRow?.actualTimeSeconds === null || savedRow?.actualTimeSeconds === undefined ? "" : String(savedRow.actualTimeSeconds);
+      actualTimeTouched = false;
+      liveRate.textContent = currentRate(savedRow || row, {
+        defectiveQty: defectiveInput.value,
+        actualTimeSeconds: actualTimeInput.value,
+        remarks: savedRow?.remarks ?? "",
+      });
+      createIssueButton.disabled = readOnly || !rowCanCreateIssue(savedRow);
     },
-    onSaved: (value, response, meta) => {
-      const savedBatch = list(response.state?.batches).find((candidate) => candidate.id === workspace.batch.id);
-      const savedRow = list(savedBatch?.rows).find((candidate) => candidate.id === row.id);
-      if (savedRow && sameInspectionValues(savedRow, valueForPersistence(value))) {
-        row.savedAt = savedRow.savedAt;
-        if (meta.isCurrent) {
-          row.defectiveQty = savedRow.defectiveQty;
-          if (Object.hasOwn(savedRow, "actualTimeSeconds")) row.actualTimeSeconds = savedRow.actualTimeSeconds;
-          else delete row.actualTimeSeconds;
-          row.remarks = savedRow.remarks;
-        }
-        workspace.releaseBlockers = batchReleaseBlockers(response.state, savedBatch);
-      }
-      createIssueButton.disabled = readOnly || !rowCanCreateIssue(row);
-      onDraftChange?.();
-    },
-    onStatus: saveStatus,
-  });
-  const markRowDraft = (immediate = false) => {
-    const nextDraft = { defectiveQty: defectiveInput.value, actualTimeSeconds: actualTimeTouched ? actualTimeInput.value : legacyTimeOmitted ? undefined : actualTimeInput.value, remarks: row.remarks ?? "" };
-    rowDrafts.set(key, nextDraft);
-    liveRate.textContent = currentRate(row, nextDraft);
-    autosave?.update(readRowValue(), { immediate });
+  };
+  onDraftChange?.(row.id, rowState, createIssueButton, rowInputState);
+  const markRowDraft = () => {
+    const value = readRowValue();
+    const nextDraft = {
+      defectiveQty: defectiveInput.value,
+      actualTimeSeconds: legacyTimeOmitted && !actualTimeTouched ? undefined : actualTimeInput.value,
+      remarks: row.remarks ?? "",
+      invalidDefectiveQty: value.invalidDefectiveQty,
+      invalidActualTimeSeconds: value.invalidActualTimeSeconds,
+    };
+    if (!value.invalidDefectiveQty && !value.invalidActualTimeSeconds && sameInspectionValues(row, valueForPersistence(value))) {
+      rowDrafts.delete(key);
+    } else {
+      rowDrafts.set(key, nextDraft);
+    }
+    liveRate.textContent = currentRate(row, rowDrafts.get(key) || nextDraft);
+    updateRowStatus();
+    createIssueButton.disabled = readOnly || !rowCanCreateIssue(row) || rowDrafts.has(key);
+    manualSaveController?.noteChanges();
     onDraftChange?.();
   };
   actualTimeInput.addEventListener("input", () => { actualTimeTouched = true; });
   actualTimeInput.addEventListener("change", () => { actualTimeTouched = true; });
   for (const input of [defectiveInput, actualTimeInput]) {
-    input.addEventListener("input", () => markRowDraft(false));
-    input.addEventListener("change", () => markRowDraft(true));
-    input.addEventListener("blur", () => markRowDraft(true));
+    input.addEventListener("input", markRowDraft);
+    input.addEventListener("change", markRowDraft);
   }
   tr.append(task, results, el("td", { className: "qc-ops-remarks" }, rowForm), renderRowAttachmentCell(row, workspace, state, ctx, readOnly));
   return tr;
 }
 
-function renderHistoricalInspectionRow(row, index, workspace, state) {
+function renderHistoricalInspectionRow(row, index, workspace, state, ctx) {
   const batch = workspace.batch;
   const tr = el("tr", {
     className: `${row.important === true ? "qc-ops-important-row" : ""}${row.status === "missing-from-source" ? " qc-ops-historical-missing-row" : ""}`.trim(),
@@ -578,14 +546,14 @@ function renderHistoricalInspectionRow(row, index, workspace, state) {
     el("td", { className: "qc-ops-recording" }, sourceValue(row.recordingRule)),
   );
 
-  const computed = computedHistoricalQuantity(batch, row);
+  const computed = computedSourceQuantity(batch, row);
   const inspectionQuantity = el("td", { className: "qc-ops-number" }, sourceValue(row.sourceInspectedQty));
   if (computed !== null) inspectionQuantity.append(el("small", { className: "qc-ops-historical-comparison" }, `Web formula: ${quantity(computed)}`));
   const defective = row.defectiveQty === null || row.defectiveQty === undefined || row.defectiveQty === "" ? "—" : String(row.defectiveQty);
   tr.append(
     inspectionQuantity,
     el("td", { className: "qc-ops-number" }, defective),
-    el("td", { className: "qc-ops-number qc-ops-rate" }, historicalRate(row.sourceDefectiveRate)),
+    el("td", { className: "qc-ops-number qc-ops-rate" }, sourcePercent(row.sourceDefectiveRate)),
   );
   for (let historyIndex = 0; historyIndex < 4; historyIndex += 1) {
     tr.append(el("td", { className: "qc-ops-history" }, el("span", { className: "qc-ops-empty-history" }, "—")));
@@ -594,7 +562,7 @@ function renderHistoricalInspectionRow(row, index, workspace, state) {
   const procedure = el("td", { className: "qc-ops-link" });
   const procedureUrl = safeProcedureUrl(row.procedureUrl);
   procedure.append(procedureUrl ? el("a", { href: procedureUrl, target: "_blank", rel: "noopener noreferrer" }, "Open procedure") : sourceValue(row.procedureUrl));
-  const remarks = el("td", { className: "qc-ops-remarks" }, legacyEvidenceDisclosure(row, workspace, state));
+  const remarks = el("td", { className: "qc-ops-remarks" }, legacyEvidenceDisclosure(row, workspace, state, ctx));
   if (list(row.anomalies).length) {
     remarks.append(el("details", { className: "qc-ops-historical-raw" },
       el("summary", {}, "Source review notes"),
@@ -608,11 +576,11 @@ function renderHistoricalInspectionRow(row, index, workspace, state) {
     const slot = el("div", { className: "qc-ops-row-attachment-slot" },
       el("strong", {}, label),
       el("span", { className: "qc-ops-row-attachment-name", title: text(asset.name) }, text(asset.name, "Attachment")),
-      asset?.dataUrl && attachmentCanPreview(asset)
-        ? button("Preview", () => openAttachmentPreview(asset, `${text(row.title)} · ${label}`), "button-quiet qc-ops-small-button")
+      attachmentCanPreview(asset)
+        ? button("Preview", () => { void previewAttachment(asset, ctx.service, `${text(row.title)} · ${label}`); }, "button-quiet qc-ops-small-button")
         : null,
-      asset?.dataUrl ? button("Download", () => {
-        void downloadFile(asset.name, asset.dataUrl, asset.mimeType).catch((error) => notify(errorText(error, "The file could not be downloaded."), true));
+      asset && (asset.dataUrl || asset.id) ? button("Download", () => {
+        void downloadAttachment(asset, ctx.service).catch((error) => notify(errorText(error, "The file could not be downloaded."), true));
       }, "button-quiet qc-ops-small-button") : null,
     );
     return [slot];
@@ -630,7 +598,7 @@ function renderHistoricalInspectionRow(row, index, workspace, state) {
 function renderRows(workspace, state, ctx, onDraftChange) {
   const body = el("tbody", { className: "qc-ops-table-body" });
   list(workspace.rows).forEach((row, index) => body.append(isHistoricalBatch(workspace.batch)
-    ? renderHistoricalInspectionRow(row, index, workspace, state)
+    ? renderHistoricalInspectionRow(row, index, workspace, state, ctx)
     : renderInspectionRow(row, index, workspace, state, ctx, null, onDraftChange)));
   return body;
 }
@@ -670,7 +638,7 @@ function makeInspectionTable(workspace, state, ctx, onDraftChange) {
   return el("div", { className: "qc-ops-table-scroll", tabindex: "0", "aria-label": "Batch inspection table; scroll horizontally to see all columns" }, table);
 }
 
-function renderOperationalRows(workspace, state, ctx, autosaveController, onDraftChange) {
+function renderOperationalRows(workspace, state, ctx, manualSaveController, onDraftChange) {
   const body = el("tbody", { className: "qc-ops-operational-body" });
   const products = batchProducts(workspace.batch, state, workspace);
   const multipleProducts = products.length > 1;
@@ -691,12 +659,12 @@ function renderOperationalRows(workspace, state, ctx, autosaveController, onDraf
       ));
     }
     previousProductKey = productKey;
-    body.append(renderInspectionRow(row, index, workspace, state, ctx, autosaveController, onDraftChange));
+    body.append(renderInspectionRow(row, index, workspace, state, ctx, manualSaveController, onDraftChange));
   });
   return body;
 }
 
-function makeOperationalInspectionTable(workspace, state, ctx, autosaveController, onDraftChange) {
+function makeOperationalInspectionTable(workspace, state, ctx, manualSaveController, onDraftChange) {
   const table = el("table", { className: "qc-ops-inspection-table qc-ops-operational-table" });
   const colgroup = el("colgroup", {},
     el("col", { style: { width: "4.5%" } }),
@@ -712,24 +680,26 @@ function makeOperationalInspectionTable(workspace, state, ctx, autosaveControlle
     el("th", { scope: "col" }, "Remarks", el("span", { lang: "zh" }, "备注")),
     el("th", { scope: "col" }, "Attachments", el("span", { lang: "zh" }, "附件")),
   ));
-  table.append(colgroup, thead, renderOperationalRows(workspace, state, ctx, autosaveController, onDraftChange));
+  table.append(colgroup, thead, renderOperationalRows(workspace, state, ctx, manualSaveController, onDraftChange));
   return el("div", { className: "qc-ops-table-scroll qc-ops-operational-scroll", tabindex: "0", "aria-label": "Batch inspection table; scroll horizontally to see all columns" }, table);
 }
 
-function renderReleaseBlockers(workspace, ctx) {
+function renderReleaseBlockers(workspace, ctx, manualSaveController) {
   const blockerHost = el("div", { className: "qc-ops-release-blockers" });
   const release = button("Release full batch", async () => {
-    const result = await runCommand(ctx, "releaseBatch", { id: workspace.batch.id });
-    if (result.ok) notify("The full batch was released.");
+    const releaseSavedBatch = async () => {
+      const result = await runCommand(ctx, "releaseBatch", { id: workspace.batch.id });
+      if (result.ok) notify("The full batch was released.");
+    };
+    if (manualSaveController?.hasPending()) {
+      await ctx.resolveManualChanges?.("release this batch", releaseSavedBatch);
+      return;
+    }
+    await releaseSavedBatch();
   }, "button button-danger");
   const refresh = () => {
     const alreadyReleased = workspace.batch.status === "released";
     const blockers = alreadyReleased ? [] : list(workspace.releaseBlockers).map((message) => String(message));
-    const changedRows = list(workspace.rows).filter((row) => rowHasDraft(row, workspace.batch.id)).length;
-    const details = batchDetailDrafts.get(detailDraftKey(workspace.batch.id));
-    const changedDetails = details && (details.date !== (workspace.batch.date || "") || details.recorder !== (workspace.batch.recorder || "") || details.notes !== (workspace.batch.notes || ""));
-    if (changedRows) blockers.push(`${changedRows} inspection edit${changedRows === 1 ? " needs" : "s need"} to be saved or corrected.`);
-    if (changedDetails) blockers.push("Batch detail edits need to be saved or corrected.");
     const blockerList = blockers.length
       ? el("ul", { className: "qc-ops-blocker-list" }, ...blockers.map((message) => el("li", {}, message)))
       : null;
@@ -761,12 +731,12 @@ function batchAttachments(batch, state) {
 
 function attachmentActions(asset, batch, ctx) {
   const actions = [];
-  if (asset.dataUrl && attachmentCanPreview(asset)) {
-    actions.push(button("Open", () => { openAttachmentPreview(asset); }, "button-quiet qc-ops-small-button"));
+  if (attachmentCanPreview(asset)) {
+    actions.push(button("Open", () => { void previewAttachment(asset, ctx.service); }, "button-quiet qc-ops-small-button"));
   }
-  if (asset.dataUrl) {
+  if (asset.dataUrl || (asset.id && typeof ctx.service?.getAsset === "function")) {
     actions.push(button("Download", () => {
-      void downloadFile(asset.name, asset.dataUrl, asset.mimeType).catch((error) => notify(errorText(error, "The attachment could not be downloaded."), true));
+      void downloadAttachment(asset, ctx.service).catch((error) => notify(errorText(error, "The attachment could not be downloaded."), true));
     }, "button-quiet qc-ops-small-button"));
   } else {
     actions.push(el("span", { className: "qc-ops-hint" }, "File unavailable"));
@@ -948,19 +918,14 @@ function renderBatchDetail(root, ctx) {
     const draftDetails = batchDetailDrafts.get(detailKey) || savedDetails;
     const order = workspace.order || orderById(state).get(batch.orderId);
     const products = batchProducts(batch, state, workspace);
-    const autosaveController = createInspectionAutosaveController();
-    ctx.registerAutosaveController?.(autosaveController);
-    const detailForm = el("form", { className: "qc-ops-batch-meta qc-ops-detail-form", "data-autosave-form": "true" });
+    const detailForm = el("form", { className: "qc-ops-batch-meta qc-ops-detail-form" });
     const dateInput = el("input", { type: "date", value: draftDetails.date, disabled: isReleased, name: "date", "aria-label": "Batch date 批次日期" });
     const recorderInput = el("input", { type: "text", maxLength: "80", value: draftDetails.recorder, disabled: isReleased, name: "recorder", autocomplete: "name", "aria-label": "Recorded by 记录人员" });
     const notesInput = el("textarea", { rows: "2", maxLength: "1000", disabled: isReleased, name: "notes", "aria-label": "Special notes 本批次特殊情况" }, draftDetails.notes);
     const dateSummary = el("span", {}, `Date: ${dateLabel(savedDetails.date)}`);
     const recorderSummary = el("span", {}, `Recorded by: ${text(savedDetails.recorder)}`);
     const notesSummary = el("span", { className: "qc-ops-detail-note-summary", title: savedDetails.notes }, `Notes: ${text(savedDetails.notes, "—")}`);
-    const detailComplete = (value) => validIsoDate(value.date) && Boolean(value.recorder.trim());
-    let detailStatus = el("span", {
-      className: detailComplete(savedDetails) ? "qc-ops-saved" : "qc-ops-incomplete",
-    }, detailComplete(savedDetails) ? "Saved" : "Incomplete");
+    const detailStatus = el("span", { className: "qc-ops-saved" }, "Saved");
     const detailSummary = el("summary", { className: "qc-ops-batch-details-summary" },
       el("strong", {}, "Batch details"), dateSummary, recorderSummary, notesSummary, detailStatus);
     const readDetailValue = () => ({
@@ -970,81 +935,198 @@ function renderBatchDetail(root, ctx) {
       invalidDate: dateInput.validity.badInput,
     });
     let releasePanel = null;
-    const detailAutosave = autosaveController.register("batch-details", {
-      initial: readDetailValue(),
-      initiallySaved: true,
-      isValid: (value) => !value.invalidDate && validIsoDate(value.date) && value.recorder.length <= 80 && value.notes.length <= 1000,
-      isComplete: detailComplete,
-      save: (value) => runCommand(ctx, "saveBatchDetails", {
-        id: batch.id,
-        date: value.date,
-        recorder: value.recorder,
-        notes: value.notes,
-      }, { autosave: true, render: false, silent: true }),
-      refreshCommitted: () => ctx.refreshState({ render: false }),
-      verifyCommitted: (latestState, value) => {
-        const saved = list(latestState?.batches).find((candidate) => candidate.id === batch.id);
-        return saved && saved.date === value.date && String(saved.recorder || "") === value.recorder.trim() && String(saved.notes || "") === value.notes.trim();
+    const saveError = el("p", { className: "qc-ops-form-error qc-ops-save-error", role: "alert" });
+    const saveButton = button("Save changes", () => { void manualSaveController.saveAll(); }, "button-primary qc-ops-save-changes");
+  const rowStatusElements = new Map();
+  const rowInputStates = new Map();
+  const onRowDraftChange = (rowId = null, status = null, createIssueButton = null, inputState = null) => {
+    if (rowId && status) {
+      rowStatusElements.set(rowId, { status, createIssueButton });
+      rowInputStates.set(rowId, inputState);
+      return;
+    }
+    releasePanel?.refresh();
+  };
+    const rowsDraftedForBatch = () => [...rowDrafts.entries()]
+      .filter(([key]) => key.startsWith(`${batch.id}::`));
+    const detailsDiffer = (value) => value.date !== (savedDetails.date || "") ||
+      value.recorder !== (savedDetails.recorder || "") || value.notes !== (savedDetails.notes || "");
+    const hasChanges = () => rowsDraftedForBatch().length > 0 || Boolean(
+      batchDetailDrafts.has(detailKey) && detailsDiffer(batchDetailDrafts.get(detailKey))
+    );
+    const readSnapshot = () => ({
+      details: batchDetailDrafts.has(detailKey) ? readDetailValue() : null,
+      rows: rowsDraftedForBatch().map(([key, draft]) => {
+        const rowId = key.slice(`${batch.id}::`.length);
+        const row = list(workspace.rows).find((candidate) => candidate.id === rowId);
+        const defectiveQty = draft.defectiveQty === "" ? null : Number(draft.defectiveQty);
+        const actualTimeSeconds = draft.actualTimeSeconds === undefined
+          ? undefined
+          : draft.actualTimeSeconds === "" ? null : Number(draft.actualTimeSeconds);
+        return {
+          rowId,
+          defectiveQty,
+          ...(actualTimeSeconds === undefined ? {} : { actualTimeSeconds }),
+          remarks: String(draft.remarks ?? row?.remarks ?? ""),
+          input: structuredClone(draft),
+          invalidDefectiveQty: draft.invalidDefectiveQty === true,
+          invalidActualTimeSeconds: draft.invalidActualTimeSeconds === true,
+          inspectedQty: row?.inspectedQty,
+        };
+      }),
+    });
+    const readCommandData = (snapshot) => ({
+      batchId: batch.id,
+      ...(snapshot.details ? { details: {
+        date: snapshot.details.date,
+        recorder: snapshot.details.recorder,
+        notes: snapshot.details.notes,
+      } } : {}),
+      rows: snapshot.rows.map(({ input, invalidDefectiveQty, invalidActualTimeSeconds, inspectedQty, ...row }) => row),
+    });
+    const manualSaveController = createManualSaveController({
+      hasChanges,
+      readSnapshot,
+      validate: (snapshot) => {
+        if (snapshot.details && (snapshot.details.invalidDate || !validIsoDate(snapshot.details.date) ||
+          snapshot.details.recorder.length > 80 || snapshot.details.notes.length > 1000 || !snapshot.details.recorder.trim())) {
+          return "Enter a valid batch date and recorded-by name before saving batch details.";
+        }
+        for (const row of snapshot.rows) {
+          if (row.invalidDefectiveQty || row.invalidActualTimeSeconds ||
+            row.defectiveQty !== null && (!Number.isInteger(row.defectiveQty) || row.defectiveQty < 0 || row.defectiveQty > Number(row.inspectedQty)) ||
+            row.actualTimeSeconds !== undefined && row.actualTimeSeconds !== null && (!Number.isFinite(row.actualTimeSeconds) || row.actualTimeSeconds < 0)) {
+            return "Check defective quantity and time values before saving.";
+          }
+        }
+        return true;
       },
-      onSaved: (value, response) => {
-        const saved = list(response.state?.batches).find((candidate) => candidate.id === batch.id);
-        if (!saved) return;
-        Object.assign(savedDetails, savedDetailsFrom(saved));
-        batch.date = savedDetails.date;
-        batch.recorder = savedDetails.recorder;
-        batch.notes = savedDetails.notes;
-        workspace.releaseBlockers = batchReleaseBlockers(response.state, saved);
-        dateSummary.textContent = `Date: ${dateLabel(savedDetails.date)}`;
-        recorderSummary.textContent = `Recorded by: ${text(savedDetails.recorder)}`;
-        notesSummary.textContent = `Notes: ${text(savedDetails.notes, "—")}`;
-        notesSummary.title = savedDetails.notes;
+      save: (snapshot) => runCommand(ctx, "saveBatchChanges", readCommandData(snapshot), { manualSave: true, render: false, silent: true }),
+      onError: (error) => {
+        saveError.textContent = errorText(error, "The changes could not be saved.");
+      },
+      onSaved: (snapshot, response) => {
+        saveError.textContent = "";
+        const savedBatch = list(response.state?.batches).find((candidate) => candidate.id === batch.id) ||
+          list(response.result?.changes?.batches).find((candidate) => candidate.id === batch.id);
+        if (!savedBatch) throw new Error("The saved batch changes could not be confirmed.");
+        Object.assign(batch, savedBatch);
+        Object.assign(workspace.batch, savedBatch);
+        for (const savedRow of list(savedBatch.rows)) {
+          const currentRow = list(workspace.rows).find((candidate) => candidate.id === savedRow.id);
+          if (currentRow) Object.assign(currentRow, savedRow);
+          const rowInputState = rowInputStates.get(savedRow.id);
+          if (rowInputState) {
+            const currentValue = rowInputState.read();
+            const persistenceValue = {
+              defectiveQty: currentValue.defectiveQty,
+              ...(currentValue.actualTimeSeconds === undefined ? {} : { actualTimeSeconds: currentValue.actualTimeSeconds }),
+              remarks: currentValue.remarks,
+            };
+            const key = rowKey(batch.id, savedRow.id);
+            if (currentValue.invalidDefectiveQty || currentValue.invalidActualTimeSeconds || !sameInspectionValues(savedRow, persistenceValue)) {
+              rowDrafts.set(key, {
+                defectiveQty: rowInputState.defectiveInput.value,
+                actualTimeSeconds: rowInputState.actualTimeTouched() ? rowInputState.actualTimeInput.value : undefined,
+                remarks: String(currentValue.remarks || ""),
+                invalidDefectiveQty: currentValue.invalidDefectiveQty,
+                invalidActualTimeSeconds: currentValue.invalidActualTimeSeconds,
+              });
+            } else {
+              rowDrafts.delete(key);
+            }
+            rowInputState.updateStatus();
+            rowInputState.createIssueButton.disabled = isReleased || !rowCanCreateIssue(savedRow) || rowDrafts.has(key);
+          }
+        }
+        if (snapshot.details) {
+          Object.assign(savedDetails, savedDetailsFrom(savedBatch));
+          batch.date = savedDetails.date;
+          batch.recorder = savedDetails.recorder;
+          batch.notes = savedDetails.notes;
+          const currentDetails = readDetailValue();
+          if (detailsDiffer(currentDetails)) {
+            batchDetailDrafts.set(detailKey, { date: currentDetails.date, recorder: currentDetails.recorder, notes: currentDetails.notes });
+          } else {
+            batchDetailDrafts.delete(detailKey);
+          }
+          dateSummary.textContent = `Date: ${dateLabel(savedDetails.date)}`;
+          recorderSummary.textContent = `Recorded by: ${text(savedDetails.recorder)}`;
+          notesSummary.textContent = `Notes: ${text(savedDetails.notes, "—")}`;
+          notesSummary.title = savedDetails.notes;
+        }
+        const currentState = response.state || ctx.state || state;
+        workspace.releaseBlockers = batchReleaseBlockers(currentState, savedBatch);
         releasePanel?.refresh();
+      },
+      onDiscard: () => {
+        clearDraftsForBatch(batch.id);
+        dateInput.value = savedDetails.date;
+        recorderInput.value = savedDetails.recorder;
+        notesInput.value = savedDetails.notes;
+        for (const [rowId, rowInputState] of rowInputStates) {
+          const savedRow = list(workspace.rows).find((candidate) => candidate.id === rowId);
+          rowInputState.reset(savedRow);
+          rowInputState.updateStatus();
+        }
+        saveError.textContent = "";
       },
       onStatus: (status, meta) => {
         detailStatus.textContent = status;
-        detailStatus.className = status === "Saved" || status === "Saved · Incomplete"
-          ? "qc-ops-saved"
+        detailStatus.className = status === "Saved" ? "qc-ops-saved"
           : status === "Saving…" ? "qc-ops-save-pending"
-            : status === "Save failed" ? "qc-ops-save-failed" : "qc-ops-incomplete";
-        if (meta.pending) batchDetailDrafts.set(detailKey, {
-          date: dateInput.value,
-          recorder: recorderInput.value,
-          notes: notesInput.value,
-        });
-        else batchDetailDrafts.delete(detailKey);
+            : status === "Save failed" ? "qc-ops-save-failed" : "qc-ops-unsaved";
+        saveButton.disabled = isReleased || meta.saving || !meta.dirty;
+        for (const [rowId, elements] of rowStatusElements) {
+          const key = rowKey(batch.id, rowId);
+          if (!rowDrafts.has(key)) continue;
+          elements.status.textContent = status;
+          elements.status.className = status === "Saving…" ? "qc-ops-save-pending"
+            : status === "Save failed" ? "qc-ops-save-failed" : "qc-ops-unsaved";
+        }
         releasePanel?.refresh();
       },
     });
-    const updateDetailDraft = (immediate = false) => {
-      batchDetailDrafts.set(detailKey, { date: dateInput.value, recorder: recorderInput.value, notes: notesInput.value });
-      detailAutosave.update(readDetailValue(), { immediate });
+    ctx.registerManualSaveController?.(manualSaveController);
+    const updateDetailDraft = () => {
+      const current = readDetailValue();
+      if (detailsDiffer(current)) batchDetailDrafts.set(detailKey, { date: current.date, recorder: current.recorder, notes: current.notes });
+      else batchDetailDrafts.delete(detailKey);
+      saveError.textContent = "";
+      manualSaveController.noteChanges();
       releasePanel?.refresh();
     };
     for (const input of [dateInput, recorderInput, notesInput]) {
-      input.addEventListener("input", () => updateDetailDraft(false));
-      input.addEventListener("change", () => updateDetailDraft(true));
-      input.addEventListener("blur", () => updateDetailDraft(true));
+      input.addEventListener("input", updateDetailDraft);
+      input.addEventListener("change", updateDetailDraft);
     }
     detailForm.addEventListener("submit", (event) => event.preventDefault());
     detailForm.append(
       field("Batch date 批次日期", dateInput),
       field("Recorded by 记录人员", recorderInput),
-      field("Special notes 本批次特殊情况", notesInput)
+      field("Special notes 本批次特殊情况", notesInput),
+      saveError,
     );
-    releasePanel = renderReleaseBlockers(workspace, ctx);
+    releasePanel = renderReleaseBlockers(workspace, ctx, manualSaveController);
     const sharedVersionAtBatchLevel = typeof batch.versionLabel === "string" && batch.versionLabel.trim() !== "" &&
       products.every((product) => product.versionLabel === batch.versionLabel);
     const deleteBatchButton = button("Delete", async () => {
       if (!window.confirm(`Delete batch ${text(batch.number, "Batch")}? This action cannot be undone.`)) return;
-      const response = await runCommand(ctx, "deleteBatch", { id: batch.id });
-      if (!response.ok) return;
-      clearDraftsForBatch(batch.id);
-      ctx.navigate("batches");
+      const deleteSavedBatch = async () => {
+        const response = await runCommand(ctx, "deleteBatch", { id: batch.id });
+        if (!response.ok) return;
+        clearDraftsForBatch(batch.id);
+        ctx.navigate("batches", null, true);
+      };
+      if (manualSaveController.hasPending()) await ctx.resolveManualChanges?.("delete this batch", deleteSavedBatch);
+      else await deleteSavedBatch();
     }, "button button-danger");
     deleteBatchButton.disabled = batch.status !== "draft";
+    const saveAction = el("div", { className: "qc-ops-manual-save-actions" }, saveButton, detailStatus, saveError);
     const headerActions = [
       button("All batches", () => navigateWithDraftWarning(ctx, "batches", undefined, batch.id), "button button-secondary"),
       button("View report", () => navigateWithDraftWarning(ctx, "batch-report", batch.id, batch.id), "button button-secondary"),
+      saveAction,
       deleteBatchButton,
       statusPill(batch.status)
     ];
@@ -1076,7 +1158,7 @@ function renderBatchDetail(root, ctx) {
     );
     const intro = el("section", { className: "card qc-ops-inspection-card" },
       el("div", { className: "qc-ops-section-heading" }, el("h2", {}, "Batch inspection")),
-      makeOperationalInspectionTable(workspace, state, ctx, autosaveController, () => releasePanel.refresh())
+      makeOperationalInspectionTable(workspace, state, ctx, manualSaveController, onRowDraftChange)
     );
     root.replaceChildren(
       pageHeading(text(batch.number, "Batch"), "", headerActions),

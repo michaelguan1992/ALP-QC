@@ -1,8 +1,8 @@
 import {
-  button, csvRow, dateLabel, el, list, pageHeading, quantity, safeFilename, safeProcedureUrl, statusPill, text,
+  button, computedSourceQuantity, csvRow, dateLabel, el, list, pageHeading, quantity, safeFilename, safeProcedureUrl, sourcePercent, statusPill, text,
 } from "./qc-ops-common.js";
 import { downloadFile, notify } from "./qc-ui.js";
-import { attachmentCanPreview, attachmentDownload, openAttachmentPreview } from "./qc-attachments.js";
+import { attachmentCanPreview, attachmentDownload, loadAssetImage, previewAttachment } from "./qc-attachments.js";
 import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
 
@@ -20,17 +20,6 @@ function isHistoricalBatch(batch) {
 
 function sourceText(value) {
   return value === null || value === undefined || value === "" ? "—" : String(value);
-}
-
-function sourcePercent(value) {
-  if (value === null || value === undefined || value === "") return "—";
-  const printed = String(value);
-  if (/%\s*$/.test(printed)) return printed;
-  return /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(printed.trim()) ? `${printed}%` : printed;
-}
-
-function sourceRate(value) {
-  return sourcePercent(value);
 }
 
 function batchProductLabel(batch, variant) {
@@ -53,16 +42,6 @@ function reportTimeSeconds(row, historical) {
 function reportTimeLabel(row, historical) {
   const value = reportTimeSeconds(row, historical);
   return value === null || value === undefined || value === "" ? historical ? "—" : "Incomplete" : `${value}s`;
-}
-
-function sourceComputedQuantity(batch, row) {
-  if (row.status === "missing-from-source" || batch.quantity === null || batch.quantity === undefined || batch.quantity === "" || row.sourceInspectedQty === null || row.sourceInspectedQty === undefined || row.sourceInspectedQty === "" || row.samplingPercent === null || row.samplingPercent === undefined || row.samplingPercent === "") return null;
-  const batchQuantity = Number(batch.quantity);
-  const samplingPercent = Number(String(row.samplingPercent).replace(/%\s*$/, ""));
-  const sourceQuantity = Number(row.sourceInspectedQty);
-  if (!Number.isFinite(batchQuantity) || batchQuantity < 0 || !Number.isFinite(samplingPercent) || samplingPercent < 0 || samplingPercent > 100 || !Number.isFinite(sourceQuantity)) return null;
-  const computed = Math.ceil(batchQuantity * samplingPercent / 100);
-  return computed === sourceQuantity ? null : computed;
 }
 
 function sourceInspection(batch, state) {
@@ -122,37 +101,38 @@ function legacyPhotoAssets(row, state) {
   const photoIds = list(row.photoIds);
   const seen = new Set();
   return [...direct, ...photoIds.map((id) => assets.get(id))].filter((asset) => {
-    if (!asset || typeof asset.dataUrl !== "string" || !asset.dataUrl.startsWith("data:image/")) return false;
-    const key = asset.id || `${asset.name || ""}\u0000${asset.dataUrl}`;
+    if (!asset || !(String(asset.mimeType || "").toLowerCase().startsWith("image/") || String(asset.dataUrl || "").startsWith("data:image/"))) return false;
+    const key = asset.id || `${asset.name || ""}\u0000${asset.dataUrl || ""}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 }
 
-function attachmentActions(asset) {
+function attachmentActions(asset, service) {
   const preview = attachmentCanPreview(asset)
-    ? button("Preview", () => openAttachmentPreview(asset), "button-quiet qc-ops-small-button")
+    ? button("Preview", () => { void previewAttachment(asset, service); }, "button-quiet qc-ops-small-button")
     : null;
-  return h("div", { className: "qc-ops-report-attachment-actions" }, preview, attachmentDownload(asset));
+  return h("div", { className: "qc-ops-report-attachment-actions" }, preview, attachmentDownload(asset, "Attachment", service));
 }
 
-function legacyEvidence(row, state) {
+function legacyEvidence(row, state, ctx) {
   const photos = legacyPhotoAssets(row, state);
   const remark = String(row.remarks || "").trim();
   if (!remark && !photos.length) return null;
   return h("details", { className: "qc-ops-report-legacy-evidence" },
     h("summary", {}, `Source evidence${photos.length ? ` · ${photos.length} photo${photos.length === 1 ? "" : "s"}` : ""}`),
     remark ? h("p", {}, remark) : null,
-    photos.length ? h("div", { className: "qc-ops-report-photo-gallery qc-ops-report-legacy-photos" }, photos.map((photo) => h("figure", { className: "qc-ops-report-photo" },
-      h("img", { src: photo.dataUrl, alt: text(photo.name, "Legacy photo") }),
-      h("figcaption", {}, text(photo.name, "Legacy photo")),
-      attachmentActions(photo),
-    ))) : null,
+    photos.length ? h("div", { className: "qc-ops-report-photo-gallery qc-ops-report-legacy-photos" }, photos.map((photo) => {
+      const image = h("img", { ...(photo.dataUrl ? { src: photo.dataUrl } : {}), alt: text(photo.name, "Legacy photo"), loading: "lazy" });
+      void loadAssetImage(image, photo, ctx.service);
+      return h("figure", { className: "qc-ops-report-photo" }, image,
+        h("figcaption", {}, text(photo.name, "Legacy photo")), attachmentActions(photo, ctx.service));
+    })) : null,
   );
 }
 
-function reportIssueEvidence(issues, state) {
+function reportIssueEvidence(issues, state, ctx) {
   if (!issues.length) return null;
   return h("ul", { className: "qc-ops-report-issue-list" }, issues.map((issue) => {
     const evidence = issueEvidence(issue, state);
@@ -161,13 +141,13 @@ function reportIssueEvidence(issues, state) {
       issue.title ? h("span", {}, text(issue.title)) : null,
       issue.description ? h("p", {}, text(issue.description)) : null,
       evidence.length ? h("ul", { className: "qc-ops-report-issue-evidence" }, evidence.map((asset) => h("li", {},
-        h("span", {}, text(asset.name, "Issue evidence")), attachmentActions(asset),
+        h("span", {}, text(asset.name, "Issue evidence")), attachmentActions(asset, ctx.service),
       ))) : null,
     );
   }));
 }
 
-function reportRowAttachmentCell(row, state) {
+function reportRowAttachmentCell(row, state, ctx) {
   const attachments = rowAttachments(row, state);
   const categories = [
     ["Videos", attachments.videos],
@@ -177,20 +157,21 @@ function reportRowAttachmentCell(row, state) {
   const populated = categories.filter(([, asset]) => asset);
   return h("td", { className: "qc-ops-attachments qc-ops-report-attachments" }, populated.length
     ? populated.map(([label, asset]) => h("div", { className: "qc-ops-report-attachment" },
-      h("strong", {}, `${label}:`), h("span", {}, text(asset.name, "Attachment")), attachmentActions(asset),
+      h("strong", {}, `${label}:`), h("span", {}, text(asset.name, "Attachment")), attachmentActions(asset, ctx.service),
     ))
     : h("span", { className: "qc-ops-empty-photo" }, "—"));
 }
 
-function historicalPhotosCell(row, state) {
+function historicalPhotosCell(row, state, ctx) {
   const photos = legacyPhotoAssets(row, state);
   if (!photos.length) return h("td", { className: "qc-ops-photos qc-ops-report-photos" }, h("span", { className: "qc-ops-empty-photo" }, "—"));
   return h("td", { className: "qc-ops-photos qc-ops-report-photos" },
-    h("div", { className: "qc-ops-report-photo-gallery" }, photos.map((photo) => h("figure", { className: "qc-ops-report-photo" },
-      h("img", { src: photo.dataUrl, alt: photo.name || `Photo for ${text(row.title)}` }),
-      h("figcaption", {}, text(photo.name, "Inspection photo")),
-      attachmentActions(photo),
-    ))),
+    h("div", { className: "qc-ops-report-photo-gallery" }, photos.map((photo) => {
+      const image = h("img", { ...(photo.dataUrl ? { src: photo.dataUrl } : {}), alt: photo.name || `Photo for ${text(row.title)}`, loading: "lazy" });
+      void loadAssetImage(image, photo, ctx.service);
+      return h("figure", { className: "qc-ops-report-photo" }, image,
+        h("figcaption", {}, text(photo.name, "Inspection photo")), attachmentActions(photo, ctx.service));
+    })),
   );
 }
 
@@ -219,7 +200,7 @@ function rowProduct(workspace, row, state) {
   return { ...linked, ...product, ...linked };
 }
 
-function makeReadOnlyTable(workspace, state) {
+function makeReadOnlyTable(workspace, state, ctx) {
   const historical = isHistoricalBatch(workspace.batch);
   const multipleProducts = !historical && reportProducts(workspace, state).length > 1;
   const table = h("table", { className: `qc-ops-inspection-table qc-ops-report-table${multipleProducts ? " qc-ops-mixed-product-table" : ""}` });
@@ -276,14 +257,14 @@ function makeReadOnlyTable(workspace, state) {
       h("td", { className: "qc-ops-recording" }, text(row.recordingRule)),
       (() => {
         const cell = h("td", { className: "qc-ops-number" }, historical ? sourceText(row.sourceInspectedQty) : quantity(row.inspectedQty));
-        const computed = historical ? sourceComputedQuantity(workspace.batch, row) : null;
+        const computed = historical ? computedSourceQuantity(workspace.batch, row) : null;
         if (computed !== null) cell.append(h("small", { className: "qc-ops-historical-comparison" }, `Web formula: ${quantity(computed)}`));
         return cell;
       })(),
       h("td", { className: "qc-ops-number" }, historical
         ? sourceText(row.defectiveQty)
         : row.defectiveQty === null || row.defectiveQty === undefined ? "Incomplete" : quantity(row.defectiveQty)),
-      h("td", { className: "qc-ops-number qc-ops-rate" }, historical ? sourceRate(row.sourceDefectiveRate) :
+      h("td", { className: "qc-ops-number qc-ops-rate" }, historical ? sourcePercent(row.sourceDefectiveRate) :
         row.defectiveQty === null || row.defectiveQty === undefined ? "Incomplete" : percent(row.defectiveRate)),
     );
     const history = list(row.history);
@@ -301,10 +282,10 @@ function makeReadOnlyTable(workspace, state) {
     tr.append(procedureCell);
     const issues = list(row.issues);
     const remarks = h("td", { className: "qc-ops-remarks qc-ops-report-remarks" },
-      historical ? text(row.remarks) : reportIssueEvidence(issues, state),
-      historical ? null : legacyEvidence(row, state),
+      historical ? text(row.remarks) : reportIssueEvidence(issues, state, ctx),
+      historical ? null : legacyEvidence(row, state, ctx),
     );
-    tr.append(remarks, historical ? historicalPhotosCell(row, state) : reportRowAttachmentCell(row, state));
+    tr.append(remarks, historical ? historicalPhotosCell(row, state, ctx) : reportRowAttachmentCell(row, state, ctx));
     return tr;
   }));
   table.append(colgroup, thead, body);
@@ -414,7 +395,7 @@ async function renderReportDetail(root, ctx) {
   root.replaceChildren(pageHeading("Batch report"), h("section", { className: "card qc-ops-loading" }, "Loading…"));
   let workspace;
   try {
-    workspace = await ctx.service.getBatchWorkspace(ctx.selectedId);
+    workspace = await ctx.service.getBatchWorkspace(ctx.selectedId, { mode: "lightweight" });
   } catch (error) {
     root.replaceChildren(pageHeading("Batch report", "", [button("Back to batch", () => ctx.navigate("batches", ctx.selectedId, true), "button button-secondary")]),
       h("section", { className: "card qc-ops-error-card", role: "alert" }, text(error instanceof Error ? error.message : "The selected batch is unavailable.")));
@@ -437,7 +418,7 @@ async function renderReportDetail(root, ctx) {
     incompleteRows ? h("p", { className: "qc-ops-report-unsaved-note" }, `${incompleteRows} incomplete row${incompleteRows === 1 ? "" : "s"}.`) : null,
     h("section", { className: "qc-ops-report-table-section" },
       h("div", { className: "qc-ops-section-heading" }, h("h2", {}, "Batch inspection table")),
-      makeReadOnlyTable(workspace, state),
+      makeReadOnlyTable(workspace, state, ctx),
     ),
   );
   const header = pageHeading("Batch report", "", [

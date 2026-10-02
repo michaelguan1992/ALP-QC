@@ -14,12 +14,14 @@ import {
   timestampLabel
 } from "./qc-ops-common.js";
 import { closeDialog, showDialog } from "./qc-ui.js";
-import { createInspectionAutosaveController } from "./qc-inspection-autosave.js";
+import { createManualSaveController } from "./qc-manual-save.js";
 import {
   attachmentCanPreview,
   attachmentDownload,
   createAttachmentPreview,
   issueAttachmentCategory,
+  loadAssetContent,
+  loadAssetImage,
   MEBIBYTE,
   normalizedMimeType,
   readAttachmentFile,
@@ -32,7 +34,7 @@ let activeIssueDialogRuntime = null;
 const issueDialogCloseListeners = new WeakSet();
 
 function hasUnsavedIssueWork() {
-  return issueDrafts.size > 0 || Boolean(activeIssueDialogRuntime?.autosaveController?.hasPending?.());
+  return issueDrafts.size > 0 || Boolean(activeIssueDialogRuntime?.manualSaveController?.hasPending?.());
 }
 
 document.addEventListener("click", (event) => {
@@ -222,12 +224,7 @@ function issueAttachments(issue, state) {
 }
 
 function newRequestId() {
-  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
-  const bytes = new Uint8Array(16);
-  globalThis.crypto.getRandomValues(bytes);
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  return [...bytes].map((byte, index) => `${index === 4 || index === 6 || index === 8 || index === 10 ? "-" : ""}${byte.toString(16).padStart(2, "0")}`).join("");
+  return globalThis.crypto.randomUUID();
 }
 
 function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreservation, onIssueUpdated = null, runIssueCommand = null) {
@@ -238,6 +235,7 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
   let disabled = readOnly;
   let disposed = false;
   let previewCleanup = () => {};
+  let previewRequest = 0;
   let pendingOperationError = null;
   const startOperation = (work) => {
     pendingOperationError = null;
@@ -257,17 +255,26 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
     return !pendingOperationError;
   };
   const clearPreview = () => {
+    previewRequest += 1;
     previewCleanup();
     previewCleanup = () => {};
     previewHost.replaceChildren();
   };
-  const showInlinePreview = (asset) => {
+  const showInlinePreview = async (asset) => {
     clearPreview();
-    const preview = createAttachmentPreview(asset);
+    const request = previewRequest;
+    let fullAsset;
+    try { fullAsset = await loadAssetContent(asset, ctx.service); }
+    catch (error) {
+      if (!disposed && request === previewRequest) notify(errorText(error, "The file preview could not be opened."), true);
+      return;
+    }
+    if (disposed || request !== previewRequest) return;
+    const preview = createAttachmentPreview(fullAsset);
     previewCleanup = preview.cleanup;
     const closePreview = button("Close preview", clearPreview, "button-quiet qc-ops-small-button");
     previewHost.replaceChildren(el("div", { className: "qc-ops-attachment-preview" },
-      el("strong", { className: "qc-ops-attachment-preview-name" }, text(asset.name, "Attachment")),
+      el("strong", { className: "qc-ops-attachment-preview-name" }, text(fullAsset.name, "Attachment")),
       preview.element,
       closePreview,
     ));
@@ -343,24 +350,26 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
   const render = (currentIssue, currentState) => {
     clearPreview();
     const attachments = issueAttachments(currentIssue, currentState);
+    const attachmentImages = [];
     const listHost = attachments.length
       ? el("ul", { className: "qc-ops-issue-attachment-list" }, ...attachments.map((asset) => {
         const category = asset.category || issueAttachmentCategory(asset.mimeType);
         const assetName = text(asset.name, "Attachment");
-        const thumbnail = category === "photo" && asset.dataUrl
+        const thumbnail = category === "photo" && (asset.dataUrl || asset.id)
           ? el("img", {
             className: "qc-ops-issue-attachment-thumbnail",
-            src: asset.dataUrl,
+            ...(asset.dataUrl ? { src: asset.dataUrl } : {}),
             alt: assetName,
             title: assetName,
             loading: "lazy",
           })
           : null;
+        if (thumbnail && !asset.dataUrl) attachmentImages.push([thumbnail, asset]);
         const preview = attachmentCanPreview(asset)
           ? button("Preview", () => showInlinePreview(asset), "button-quiet qc-ops-small-button")
           : null;
         if (preview) preview.setAttribute("aria-label", `Preview ${assetName}`);
-        const download = attachmentDownload(asset);
+        const download = attachmentDownload(asset, "Attachment", ctx.service);
         download.setAttribute("aria-label", `Download ${assetName}`);
         const remove = button("Remove", () => { void startOperation(() => removeAttachment(asset)); }, "button-quiet qc-ops-attachment-remove");
         remove.setAttribute("aria-label", `Remove ${assetName} from this issue`);
@@ -384,6 +393,7 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
       photoInput,
       fileInput,
     );
+    for (const [image, asset] of attachmentImages) void loadAssetImage(image, asset, ctx.service);
   };
   render(issue, state);
   return {
@@ -405,7 +415,7 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
   };
 }
 
-function sourceCard(issue, state) {
+function sourceCard(issue, state, ctx) {
   const snapshot = sourceSnapshot(issue);
   const row = snapshot.row || null;
   const batch = snapshot.batch || {};
@@ -447,19 +457,25 @@ function sourceCard(issue, state) {
   const sourceIds = sourcePhotoIds(issue);
   const evidence = sourcePhotos(issue, state);
   const showSourceTitle = !sourceTitleIsIssueTitle;
+  const sourceImages = [];
   const evidenceBlock = sourceIds.length || evidence.length
     ? el("div", { className: "qc-ops-issue-evidence" },
       el("strong", {}, "Source photos"),
-      evidence.length ? el("div", { className: "qc-ops-issue-evidence-list" }, ...evidence.map((asset) => el("figure", {},
-        el("img", { src: asset.dataUrl, alt: asset.name || "Inspection source photo" }),
-        el("figcaption", {}, text(asset.name, "Inspection photo"))
-      ))) : null,
+      evidence.length ? el("div", { className: "qc-ops-issue-evidence-list" }, ...evidence.map((asset) => {
+        const image = el("img", {
+          ...(asset.dataUrl ? { src: asset.dataUrl } : {}),
+          alt: asset.name || "Inspection source photo",
+          loading: "lazy",
+        });
+        if (!asset.dataUrl) sourceImages.push([image, asset]);
+        return el("figure", {}, image, el("figcaption", {}, text(asset.name, "Inspection photo")));
+      })) : null,
       sourceIds.length > evidence.length
         ? el("p", {}, "Some inspection source photos are unavailable in this workspace.")
         : null
     )
     : null;
-  return el("section", { className: "qc-ops-source-card" },
+  const card = el("section", { className: "qc-ops-source-card" },
     el("div", { className: "qc-ops-source-heading" },
       el("div", {}, row ? el("small", {}, "Inspection") : null, showSourceTitle ? el("h3", {}, sourceTitle) : null, sourceTitleZh ? el("p", { lang: "zh" }, sourceTitleZh) : null),
       statusPill(issue.status)
@@ -475,6 +491,8 @@ function sourceCard(issue, state) {
     row ? el("dl", { className: "qc-ops-source-facts" }, ...facts.map(([label, value]) => el("div", {}, el("dt", {}, label), el("dd", {}, label === "Inspection quantity" || label === "Defective quantity" ? quantityOrDash(value) : text(value))))) : null,
     evidenceBlock
   );
+  for (const [image, asset] of sourceImages) void loadAssetImage(image, asset, ctx.service);
+  return card;
 }
 
 function renderDiscussion(issue) {
@@ -507,7 +525,6 @@ function openIssueDialog(issue, state, ctx) {
   const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
   const saveStatus = el("p", { className: "save-status qc-ops-issue-save-status", role: "status", "aria-live": "polite" });
   const form = el("form", { className: "qc-ops-form qc-ops-issue-form", "data-preserve-drafts": "true", "data-issue-id": currentIssue.id });
-  if (hasIssueDraft(currentIssue, draft)) form.dataset.dirty = "true";
 
   const captureDraft = () => ({
     owner: owner.value,
@@ -540,31 +557,26 @@ function openIssueDialog(issue, state, ctx) {
   const markDraftForPreservation = () => {
     const current = captureDraft();
     storeDraft(current);
-    if (hasIssueDraft(currentIssue, current)) form.dataset.dirty = "true";
-    else delete form.dataset.dirty;
     return current;
   };
 
   const runEvidenceCommand = async (type, data, options = {}) => {
-    if (autosaveController && !(await autosaveController.flushAll())) {
-      return { ok: false, blocked: true, error: new Error("Disposition changes could not be saved.") };
-    }
     return runCommand(ctx, type, data, { ...options, autosave: true, render: false });
   };
   const evidence = renderIssueAttachments(currentIssue, currentState, ctx, readOnly, markDraftForPreservation, (nextIssue, nextState) => {
     adoptLatestIssue(nextIssue, nextState);
   }, runEvidenceCommand);
   const dispositionInputs = [owner, disposition, ...confirmationInputs];
-  const initialDisposition = dispositionValue(savedIssueDraft(currentIssue));
-  const initialDispositionComplete = Boolean(initialDisposition.owner && initialDisposition.disposition && initialDisposition.confirmations.every(Boolean));
-  saveStatus.textContent = initialDispositionComplete ? "Saved" : "Incomplete";
-  const autosaveController = readOnly ? null : createInspectionAutosaveController();
+  saveStatus.textContent = "Saved";
+  let manualSaveController = null;
   let closeSubmitting = false;
   let discussionSubmitting = false;
   let deleteSubmitting = false;
   let runtime = null;
   let dialog = null;
   let discussionButton;
+  const saveButton = button("Save changes", () => { void manualSaveController?.saveAll(); }, "button-primary qc-ops-save-changes");
+  saveButton.disabled = readOnly;
   let closeButton;
   let deleteButton;
   let deleteConfirmation;
@@ -573,141 +585,97 @@ function openIssueDialog(issue, state, ctx) {
 
   const reloadLatestButton = button("Reload latest data", async () => {
     if (runtime?.busy) return;
-    if (runtime) runtime.busy = true;
-    try {
-      await evidence.flushPending();
-      if (!dialog?.open) return;
-      const dialogTitle = document.querySelector("#qc-dialog .dialog-header h2")?.textContent || `${text(currentIssue.number, "Issue")} · ${text(currentIssue.title)}`;
-      showDialog("Unsaved edits", el("div", { className: "discard-prompt" },
-        el("p", {}, "Some edits could not be saved. Reloading will discard this tab’s drafts."),
-        el("div", { className: "button-row" },
-          button("Keep editing", () => showDialog(dialogTitle, form), "button-secondary"),
-          button("Discard edits and reload", () => {
-            closeDialog(true);
-            runtime?.dispose();
-            window.dispatchEvent(new CustomEvent("masterqc:discard-operation-drafts"));
-            void ctx.refresh?.();
-          }, "button-danger"),
-        ),
-      ));
-    } finally {
-      if (runtime) runtime.busy = false;
-    }
+    const reload = async () => {
+      if (!(await evidence.flushPending())) {
+        formError.textContent = "Issue evidence changes could not be saved. Try again before reloading.";
+        return;
+      }
+      closeDialog(true);
+      runtime?.dispose();
+      window.dispatchEvent(new CustomEvent("masterqc:discard-operation-drafts"));
+      await ctx.refresh?.();
+    };
+    await ctx.resolveManualChanges?.("reload the latest data", reload);
   }, "button button-secondary");
   reloadLatestButton.hidden = true;
 
-  const autosaveEntry = autosaveController?.register(currentIssue.id, {
-    initial: initialDisposition,
-    initiallySaved: true,
-    isValid: (value) => typeof value.owner === "string" && typeof value.disposition === "string" &&
-      Array.isArray(value.confirmations) && value.confirmations.length === 3 && value.confirmations.every((name) => typeof name === "string"),
-    isComplete: (value) => Boolean(value.owner.trim() && value.disposition.trim() && value.confirmations.every((name) => name.trim())),
-    save: (value) => runCommand(ctx, "saveIssue", { id: currentIssue.id, ...value }, { autosave: true, render: false, silent: true }),
-    refreshCommitted: () => ctx.refreshState?.({ render: false }),
-    verifyCommitted: (latestState, sentValue) => {
-      const saved = list(latestState?.issues).find((item) => item.id === currentIssue.id);
-      return Boolean(saved && sameDisposition(savedIssueDraft(saved), sentValue));
+  manualSaveController = readOnly ? null : createManualSaveController({
+    hasChanges: () => draftDiffers(currentIssue, captureDraft()),
+    readSnapshot: () => dispositionValue(captureDraft()),
+    validate: (value) => typeof value.owner === "string" && value.owner.length <= 200 &&
+      typeof value.disposition === "string" && value.disposition.length <= 1200 &&
+      Array.isArray(value.confirmations) && value.confirmations.length === 3 &&
+      value.confirmations.every((name) => typeof name === "string" && name.length <= 100),
+    save: (value) => runCommand(ctx, "saveIssue", { id: currentIssue.id, ...value }, { manualSave: true, render: false, silent: true }),
+    onStatus: (status, meta) => {
+      saveStatus.textContent = status;
+      saveStatus.className = `save-status qc-ops-issue-save-status ${status === "Saved" ? "qc-ops-saved" : status === "Saving…" ? "qc-ops-save-pending" : status === "Save failed" ? "qc-ops-save-failed" : "qc-ops-unsaved"}`;
+      saveButton.disabled = meta.saving || !meta.dirty;
     },
-    onStatus: (status) => { saveStatus.textContent = status; },
     onSaved: (value, response) => {
       formError.textContent = "";
       reloadLatestButton.hidden = true;
       const latestState = response?.state || currentState;
-      const latestIssue = list(latestState.issues).find((item) => item.id === currentIssue.id) || {
-        ...currentIssue,
-        ...value,
-        confirmations: [...value.confirmations],
-      };
+      const latestIssue = list(latestState.issues).find((item) => item.id === currentIssue.id);
+      if (!latestIssue) throw new Error("The saved Issue changes could not be confirmed.");
       adoptLatestIssue(latestIssue, latestState);
-      const liveDraft = captureDraft();
-      storeDraft(liveDraft);
-      if (hasIssueDraft(currentIssue, liveDraft)) form.dataset.dirty = "true";
-      else delete form.dataset.dirty;
+      storeDraft(captureDraft());
     },
-    onSaveError: (error) => {
+    onError: (error) => {
       const message = error instanceof Error ? error.message : String(error || "The disposition could not be saved.");
       formError.textContent = message;
       reloadLatestButton.hidden = !/revision|stale|another tab changed|changed since your last view/i.test(message);
     },
-    onSyncError: (error) => {
-      const message = error instanceof Error ? error.message : String(error || "The saved disposition could not be verified.");
-      formError.textContent = message;
-      reloadLatestButton.hidden = false;
+    onDiscard: () => {
+      owner.value = String(currentIssue.owner || "");
+      disposition.value = String(currentIssue.disposition || "");
+      confirmationInputs.forEach((input, index) => { input.value = String(currentIssue.confirmations?.[index] || ""); });
+      storeDraft(captureDraft());
+      formError.textContent = "";
     },
   });
-  if (autosaveEntry && draftDiffers(currentIssue, draft)) autosaveEntry.update(dispositionValue(draft));
-
-  const lifecycleController = autosaveController ? {
-    async flushAll() {
-      const saved = await autosaveController.flushAll();
-      if (!saved) return false;
-      return evidence.flushPending();
-    },
-    hasPending() {
-      return autosaveController.hasPending() || evidence.hasPending();
-    },
-    dispose() {
-      autosaveController.dispose();
-      evidence.cleanup();
-    },
-  } : null;
-  const flushDisposition = async () => {
-    const current = markDraftForPreservation();
-    autosaveEntry?.update(dispositionValue(current), { immediate: true });
-    if (!lifecycleController?.hasPending()) return true;
-
-    const wasDisabled = dispositionInputs.map((input) => input.disabled);
-    dispositionInputs.forEach((input) => { input.disabled = true; });
-    const saved = await lifecycleController.flushAll();
-    dispositionInputs.forEach((input, index) => { input.disabled = wasDisabled[index]; });
-    if (!saved) {
-      if (!formError.textContent) formError.textContent = "Disposition changes could not be saved.";
-      return false;
-    }
-    const latest = markDraftForPreservation();
-    if (draftDiffers(currentIssue, latest)) {
-      formError.textContent = "Disposition changes could not be confirmed.";
-      return false;
-    }
-    return true;
-  };
 
   closeButton = button("Close issue", async () => {
     if (closeSubmitting || discussionSubmitting) return;
     closeSubmitting = true;
     closeButton.disabled = true;
     if (runtime) runtime.busy = true;
-    let controls;
-    let wasDisabled;
     try {
-      if (!(await flushDisposition())) return;
-      const current = markDraftForPreservation();
-      if (current.discussionText.trim()) {
-        notify("Add the discussion entry or clear it before closing this issue.", true);
-        return;
-      }
-      if (!current.owner.trim() || !current.disposition.trim() || current.confirmations.some((name) => !name.trim())) {
-        notify("An owner, formal disposition, and all three confirmation names are required before closure.", true);
-        return;
-      }
-      controls = [...dispositionInputs, discussionAuthorName, discussionText];
-      wasDisabled = controls.map((input) => input.disabled);
-      controls.forEach((input) => { input.disabled = true; });
-      evidence.setDisabled(true);
-      discussionButton.disabled = true;
-      closeButton.disabled = true;
-      const result = await runCommand(ctx, "closeIssue", { id: currentIssue.id }, { render: false });
-      if (result.ok) {
+      const closeSavedIssue = async () => {
+        const current = markDraftForPreservation();
+        if (current.discussionText.trim() || current.discussionAuthorName.trim()) {
+          notify("Add or clear the discussion draft before closing this issue.", true);
+          return;
+        }
+        if (!currentIssue.owner?.trim() || !currentIssue.disposition?.trim() || currentIssue.confirmations?.some((name) => !String(name || "").trim())) {
+          notify("An owner, formal disposition, and all three confirmation names are required before closure.", true);
+          return;
+        }
+        if (!(await evidence.flushPending())) {
+          formError.textContent = "Issue evidence changes could not be saved. Try again before closing this issue.";
+          return;
+        }
+        const controls = [...dispositionInputs, discussionAuthorName, discussionText];
+        const wasDisabled = controls.map((input) => input.disabled);
+        controls.forEach((input) => { input.disabled = true; });
+        evidence.setDisabled(true);
+        discussionButton.disabled = true;
+        closeButton.disabled = true;
+        const result = await runCommand(ctx, "closeIssue", { id: currentIssue.id }, { render: false });
+        controls.forEach((input, index) => { input.disabled = wasDisabled[index]; });
+        evidence.setDisabled(false);
+        if (!result.ok) return;
         const latestIssue = list(result.state?.issues).find((item) => item.id === currentIssue.id);
         if (latestIssue) adoptLatestIssue(latestIssue, result.state);
         issueDrafts.delete(currentIssue.id);
         closeDialog(true);
         runtime?.dispose();
         await ctx.navigate("issues", null, true);
-      }
+      };
+      if (manualSaveController?.hasPending()) await ctx.resolveManualChanges?.("close this issue", closeSavedIssue);
+      else await closeSavedIssue();
     } finally {
       closeSubmitting = false;
-      if (controls && wasDisabled) controls.forEach((input, index) => { input.disabled = wasDisabled[index]; });
       evidence.setDisabled(false);
       if (discussionButton) discussionButton.disabled = readOnly;
       if (closeButton) closeButton.disabled = readOnly;
@@ -723,52 +691,40 @@ function openIssueDialog(issue, state, ctx) {
     if (deleteSubmitting || closeSubmitting || discussionSubmitting || runtime?.busy || protectedBatchIssue) return;
     deleteSubmitting = true;
     if (runtime) runtime.busy = true;
-    const mutableInputs = [...dispositionInputs, discussionAuthorName, discussionText];
-    const priorDisabled = mutableInputs.map((input) => input.disabled);
-    mutableInputs.forEach((input) => { input.disabled = true; });
-    evidence.setDisabled(true);
-    if (discussionButton) discussionButton.disabled = true;
-    if (closeButton) closeButton.disabled = true;
-    if (deleteButton) deleteButton.disabled = true;
-    if (cancelDeleteButton) cancelDeleteButton.disabled = true;
-    if (confirmDeleteButton) confirmDeleteButton.disabled = true;
-    reloadLatestButton.disabled = true;
     let deleted = false;
     try {
-      if (!(await flushDisposition())) return;
-      if (!(await evidence.flushPending())) {
-        formError.textContent = "Issue evidence changes could not be saved. Try again before deleting this issue.";
-        return;
-      }
-      markDraftForPreservation();
-      const response = await runCommand(ctx, "deleteIssue", { id: currentIssue.id }, { render: false });
-      if (!response.ok && !response.committed) {
-        formError.textContent = errorText(response.error, "The issue could not be deleted.");
-        return;
-      }
-      if (response.committed && !response.ok && typeof ctx.refreshState === "function") {
-        const refresh = await ctx.refreshState({ render: false });
-        if (!refresh?.ok) notify("The issue was deleted, but the latest issue list could not be loaded. Reload before continuing.", true);
-        else currentState = refresh.state;
-      }
-      deleted = true;
-      issueDrafts.delete(currentIssue.id);
-      runtime?.dispose();
-      closeDialog(true);
-      await ctx.navigate("issues", null, true);
+      const deleteSavedIssue = async () => {
+        if (!(await evidence.flushPending())) {
+          formError.textContent = "Issue evidence changes could not be saved. Try again before deleting this issue.";
+          return;
+        }
+        markDraftForPreservation();
+        const response = await runCommand(ctx, "deleteIssue", { id: currentIssue.id }, { render: false });
+        if (!response.ok && !response.committed) {
+          formError.textContent = errorText(response.error, "The issue could not be deleted.");
+          return;
+        }
+        if (response.committed && !response.ok && typeof ctx.refreshState === "function") {
+          const refresh = await ctx.refreshState({ render: false });
+          if (!refresh?.ok) notify("The issue was deleted, but the latest issue list could not be loaded. Reload before continuing.", true);
+          else currentState = refresh.state;
+        }
+        deleted = true;
+        issueDrafts.delete(currentIssue.id);
+        runtime?.dispose();
+        closeDialog(true);
+        await ctx.navigate("issues", null, true);
+      };
+      if (manualSaveController?.hasPending()) await ctx.resolveManualChanges?.("delete this issue", deleteSavedIssue);
+      else await deleteSavedIssue();
     } finally {
       deleteSubmitting = false;
+      if (runtime) runtime.busy = false;
+      evidence.setDisabled(false);
       if (!deleted) {
-        mutableInputs.forEach((input, index) => { input.disabled = priorDisabled[index]; });
-        evidence.setDisabled(false);
         if (discussionButton) discussionButton.disabled = readOnly;
         if (closeButton) closeButton.disabled = readOnly;
-        if (deleteButton) deleteButton.disabled = protectedBatchIssue;
-        if (cancelDeleteButton) cancelDeleteButton.disabled = false;
-        if (confirmDeleteButton) confirmDeleteButton.disabled = false;
-        reloadLatestButton.disabled = false;
       }
-      if (runtime) runtime.busy = false;
     }
   };
   cancelDeleteButton = button("Cancel", () => {
@@ -806,7 +762,6 @@ function openIssueDialog(issue, state, ctx) {
     closeButton.disabled = true;
     if (runtime) runtime.busy = true;
     try {
-      if (!(await flushDisposition())) return;
       const current = markDraftForPreservation();
       const authorName = current.discussionAuthorName.trim();
       if (!authorName) {
@@ -838,8 +793,6 @@ function openIssueDialog(issue, state, ctx) {
       if (discussionText.value === current.discussionText) discussionText.value = remainingDraft.discussionText;
       if (hasIssueDraft(currentIssue, remainingDraft)) issueDrafts.set(currentIssue.id, remainingDraft);
       else issueDrafts.delete(currentIssue.id);
-      if (hasIssueDraft(currentIssue, remainingDraft)) form.dataset.dirty = "true";
-      else delete form.dataset.dirty;
     } finally {
       discussionSubmitting = false;
       if (discussionButton) discussionButton.disabled = readOnly;
@@ -849,35 +802,30 @@ function openIssueDialog(issue, state, ctx) {
   }, "button button-secondary");
   discussionButton.disabled = readOnly;
 
-  const updateDraft = ({ autosave = false } = {}) => {
+  const updateDraft = () => {
     const next = captureDraft();
     storeDraft(next);
-    if (hasIssueDraft(currentIssue, next)) form.dataset.dirty = "true";
-    else delete form.dataset.dirty;
-    if (autosave) {
-      formError.textContent = "";
-      autosaveEntry?.update(dispositionValue(next));
-    }
-    queueMicrotask(() => {
-      const savedDraft = issueDrafts.get(currentIssue.id);
-      if (!savedDraft || !hasIssueDraft(currentIssue, savedDraft)) delete form.dataset.dirty;
-    });
+    formError.textContent = "";
+    manualSaveController?.noteChanges();
   };
   dispositionInputs.forEach((input) => {
-    input.addEventListener("input", () => updateDraft({ autosave: true }));
-    input.addEventListener("blur", () => autosaveEntry?.update(dispositionValue(captureDraft()), { immediate: true }));
+    input.addEventListener("input", updateDraft);
+    input.addEventListener("change", updateDraft);
   });
-  [discussionAuthorName, discussionText].forEach((input) => input.addEventListener("input", () => updateDraft()));
+  [discussionAuthorName, discussionText].forEach((input) => {
+    input.addEventListener("input", updateDraft);
+    input.addEventListener("change", updateDraft);
+  });
   form.addEventListener("submit", (event) => event.preventDefault());
   form.append(
-    sourceCard(currentIssue, currentState),
+    sourceCard(currentIssue, currentState, ctx),
     evidence.element,
     el("div", { className: "qc-ops-form-grid" }, field("Disposition owner", owner), field("Formal disposition", disposition)),
     el("fieldset", { className: "qc-ops-confirmations" },
       el("legend", {}, "Confirmations"),
       ...confirmationInputs.map((input, index) => field(`Confirmation ${index + 1}`, input))
     ),
-    saveStatus,
+    el("div", { className: "qc-ops-manual-save-actions" }, saveButton, saveStatus),
     el("section", { className: "qc-ops-discussion" },
       el("h3", {}, "Discussion"),
       discussionList,
@@ -900,17 +848,21 @@ function openIssueDialog(issue, state, ctx) {
     });
     issueDialogCloseListeners.add(dialog);
   }
-  const unregisterAutosave = lifecycleController ? ctx.registerAutosaveController?.(lifecycleController) : null;
+  const unregisterManualSave = manualSaveController ? ctx.registerManualSaveController?.(manualSaveController) : null;
   runtime = {
     dialog,
     form,
-    autosaveController: lifecycleController,
+    manualSaveController,
     async closeFromHeader() {
       if (this.busy) return;
       this.busy = true;
       try {
-        if (!(await flushDisposition()) || activeIssueDialogRuntime !== this || !dialog.open) return;
-        if (closeDialog()) this.dispose();
+        markDraftForPreservation();
+        await ctx.resolveManualChanges?.("close this Issue", async () => {
+          if (activeIssueDialogRuntime !== this || !dialog.open) return;
+          closeDialog(true);
+          this.dispose();
+        });
       } finally {
         this.busy = false;
       }
@@ -918,9 +870,9 @@ function openIssueDialog(issue, state, ctx) {
     dispose() {
       if (this.disposed) return;
       this.disposed = true;
-      if (unregisterAutosave) unregisterAutosave();
-      else if (lifecycleController) lifecycleController.dispose();
-      else evidence.cleanup();
+      if (unregisterManualSave) unregisterManualSave();
+      else manualSaveController?.dispose();
+      evidence.cleanup();
       if (activeIssueDialogRuntime === this) activeIssueDialogRuntime = null;
     },
     busy: false,

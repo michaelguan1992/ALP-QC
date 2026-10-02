@@ -3,12 +3,14 @@ import {
   fail,
   factoryKey,
   makeId,
+  normalizeDataUrl,
   normalizeFactory,
   normalizeStage,
   requireArray,
   requireDate,
   requireNonNegativeInteger,
   requirePositiveInteger,
+  requireRecord,
   requireString,
 } from "./qc-domain.js";
 import { normalizeStandardItems, selectApplicableItems } from "./qc-standards.js";
@@ -27,6 +29,21 @@ export function requireBatch(state, batchId) {
 export function requireEditableBatch(batch) {
   if (batch.kind === "historical") fail("Historical inspection records are read-only.");
   if (batch.status === "released") fail("This batch is released and its records are read-only.");
+}
+
+const ASSET_METADATA_FIELDS = [
+  "id", "name", "mimeType", "kind", "batchId", "rowId", "versionId", "createdAt", "issueId", "category",
+];
+
+function assetMetadata(asset, includeAssetContent) {
+  if (includeAssetContent) return structuredClone(asset);
+  const metadata = Object.fromEntries(ASSET_METADATA_FIELDS
+    .filter((field) => Object.hasOwn(asset, field))
+    .map((field) => [field, asset[field]]));
+  if (Number.isSafeInteger(asset.decodedBytes)) metadata.decodedBytes = asset.decodedBytes;
+  else if (typeof asset.dataUrl === "string") metadata.decodedBytes = normalizeDataUrl(asset.dataUrl, "Stored attachment").decodedBytes;
+  if (Number.isSafeInteger(asset.contentRevision)) metadata.contentRevision = asset.contentRevision;
+  return metadata;
 }
 
 export function batchReleaseBlockers(state, batch) {
@@ -299,6 +316,54 @@ export function saveBatchDetails(state, data) {
   return { entityId: batch.id, action: "saveBatchDetails", summary: `Updated draft batch ${batch.number}.` };
 }
 
+export function saveBatchChanges(state, data, context) {
+  const batch = requireBatch(state, data.batchId);
+  requireEditableBatch(batch);
+  const rowInputs = requireArray(data.rows, "Inspection row changes");
+  if (rowInputs.length > batch.rows.length) fail("A batch save cannot include more rows than the batch contains.");
+
+  let detailsChanged = false;
+  if (Object.hasOwn(data, "details")) {
+    const details = requireRecord(data.details, "Batch details");
+    const nextDetails = {
+      date: requireDate(details.date, "Batch date"),
+      recorder: requireString(details.recorder ?? "", "Recorder", { maxLength: 200, allowBlank: true }),
+      notes: requireString(details.notes ?? "", "Batch notes", { maxLength: 5000, allowBlank: true }),
+    };
+    detailsChanged = batch.date !== nextDetails.date || batch.recorder !== nextDetails.recorder || batch.notes !== nextDetails.notes;
+    Object.assign(batch, nextDetails);
+  }
+
+  const seenRowIds = new Set();
+  let changedRows = 0;
+  for (const [index, rowInput] of rowInputs.entries()) {
+    requireRecord(rowInput, `Inspection row change ${index + 1}`);
+    const rowId = requireString(rowInput.rowId, `Inspection row change ${index + 1} ID`, { maxLength: 120 });
+    if (seenRowIds.has(rowId)) fail("A batch save cannot include the same inspection row more than once.");
+    seenRowIds.add(rowId);
+    const outcome = autosaveInspection(state, { ...rowInput, batchId: batch.id, rowId }, context);
+    if (outcome.changed !== false) changedRows += 1;
+  }
+
+  if (!detailsChanged && changedRows === 0) {
+    return {
+      entityId: batch.id,
+      changed: false,
+      action: "saveBatchChanges",
+      summary: `Batch ${batch.number} already has those details and inspection results.`,
+    };
+  }
+
+  const updated = [];
+  if (detailsChanged) updated.push("batch details");
+  if (changedRows > 0) updated.push(`${changedRows} inspection row${changedRows === 1 ? "" : "s"}`);
+  return {
+    entityId: batch.id,
+    action: "saveBatchChanges",
+    summary: `Saved ${updated.join(" and ")} for batch ${batch.number}.`,
+  };
+}
+
 export function deleteBatch(state, data) {
   const batch = requireBatch(state, data.id);
   if (batch.kind === "historical") fail("Historical inspection records cannot be deleted.");
@@ -401,7 +466,7 @@ export function releaseBatch(state, data, context) {
   return { entityId: batch.id, action: "releaseBatch", summary: `Released batch ${batch.number} for its full quantity of ${batch.quantity}.` };
 }
 
-export function getBatchWorkspace(state, batchId) {
+export function getBatchWorkspace(state, batchId, { includeAssetContent = true } = {}) {
   const batch = requireBatch(state, batchId);
   const variant = state.variants.find((candidate) => candidate.id === batch.variantId);
   const version = state.versions.find((candidate) => candidate.id === batch.versionId);
@@ -421,7 +486,7 @@ export function getBatchWorkspace(state, batchId) {
     const attachments = Object.fromEntries(["videos", "procedures", "log"].map((category) => {
       const assetId = attachmentIds[category] ?? null;
       const asset = assetId ? state.assets.find((candidate) => candidate.id === assetId) : null;
-      return [category, asset ? structuredClone(asset) : null];
+      return [category, asset ? assetMetadata(asset, includeAssetContent) : null];
     }));
     if (historical) {
       return {
@@ -437,13 +502,13 @@ export function getBatchWorkspace(state, batchId) {
     const rate = row.defectiveQty == null || row.inspectedQty === 0
       ? null
       : Number(((row.defectiveQty / row.inspectedQty) * 100).toFixed(2));
-    const photos = row.photoIds.map((assetId) => state.assets.find((asset) => asset.id === assetId)).filter(Boolean).map((asset) => structuredClone(asset));
+    const photos = row.photoIds.map((assetId) => state.assets.find((asset) => asset.id === assetId)).filter(Boolean).map((asset) => assetMetadata(asset, includeAssetContent));
     const issues = state.issues.filter((issue) => issue.batchId === batch.id && issue.rowId === row.id).map((issue) => ({
       ...structuredClone(issue),
       attachments: (issue.attachmentIds ?? [])
         .map((assetId) => state.assets.find((asset) => asset.id === assetId))
         .filter(Boolean)
-        .map((asset) => structuredClone(asset)),
+        .map((asset) => assetMetadata(asset, includeAssetContent)),
     }));
     const history = state.batches
       .filter((candidate) => candidate.id !== batch.id && candidate.kind !== "historical" &&
@@ -499,7 +564,7 @@ export function getBatchWorkspace(state, batchId) {
   const attachments = (batch.attachmentIds ?? [])
     .map((assetId) => state.assets.find((asset) => asset.id === assetId))
     .filter(Boolean)
-    .map((asset) => ({ ...structuredClone(asset), sourcePdf: asset.id === sourceAssetId }));
+    .map((asset) => ({ ...assetMetadata(asset, includeAssetContent), sourcePdf: asset.id === sourceAssetId }));
   return {
     batch: structuredClone(batch),
     displayNumber: resolveBatchDisplayNumbers(state).get(batch.id),

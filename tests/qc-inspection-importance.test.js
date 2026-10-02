@@ -172,6 +172,21 @@ test("query-only fallback resolves a PDF-matched recorded row and returns audita
   assert.deepEqual(state, before);
 });
 
+test("lightweight validated PDF metadata keeps the same projected importance decision", () => {
+  const fullState = makeState();
+  const fullRow = workspaceFor(fullState).rows[0];
+  const lightweightState = structuredClone(fullState);
+  lightweightState.assets = lightweightState.assets.map((asset) => {
+    const { dataUrl, ...metadata } = asset;
+    return { ...metadata, decodedBytes: 8, contentRevision: 1 };
+  });
+
+  const lightweightRow = workspaceFor(lightweightState).rows[0];
+
+  assert.equal(lightweightRow.displayImportant, fullRow.displayImportant);
+  assert.deepEqual(lightweightRow.importanceEvidence, fullRow.importanceEvidence);
+});
+
 test("a recognized explicit source true or false takes precedence over historical evidence", () => {
   for (const [sourceValue, historicalValue] of [[false, true], [true, false]]) {
     const state = makeState({
