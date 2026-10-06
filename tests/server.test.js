@@ -25,33 +25,47 @@ async function createRoots() {
   return { root, roots };
 }
 
-test("static routes expose only the allowlisted app roots and exact Dexie resource", async (t) => {
+test("static routes expose only the allowlisted app roots and browser storage transport", async (t) => {
   const { root, roots } = await createRoots();
   t.after(() => rm(root, { recursive: true, force: true }));
-  const dexieRoot = path.join(root, "dexie");
-  await mkdir(path.join(dexieRoot, "dist"), { recursive: true });
-  await writeFile(path.join(dexieRoot, "dist", "dexie.mjs"), "export default class Dexie {}");
-  const options = { roots, dexiePackageRoot: dexieRoot, projectRoot: root };
+  await writeFile(path.join(roots[2].directory, "http-json-transport.js"), "export const transport = true;");
+  await writeFile(path.join(roots[2].directory, "qc-adapter.js"), "private legacy adapter");
+  const options = { roots, projectRoot: root };
 
   assert.equal(await resolveStaticTarget("/", options), path.join(roots[0].directory, "index.html"));
   assert.equal(await resolveStaticTarget("/frontend/index.html", options), path.join(roots[0].directory, "index.html"));
-  assert.equal(await resolveStaticTarget("/vendor/dexie.mjs", options), path.join(dexieRoot, "dist", "dexie.mjs"));
+  assert.equal(await resolveStaticTarget("/storage/http-json-transport.js", options), path.join(roots[2].directory, "http-json-transport.js"));
+  assert.equal(await resolveStaticTarget("/storage/qc-adapter.js", options), null);
+  assert.equal(await resolveStaticTarget("/vendor/dexie.mjs", options), null);
+  assert.equal(await resolveStaticTarget("/frontend/initialization.html", options), null);
+  assert.equal(await resolveStaticTarget("/frontend/prototype.html", options), null);
   assert.equal(await resolveStaticTarget("/README.md", options), null);
   assert.equal(await resolveStaticTarget("/package.json", options), null);
-  assert.equal(await resolveStaticTarget("/vendor/package.json", options), null);
+
+  const handler = createRequestHandler((requestPath) => resolveStaticTarget(requestPath, options));
+  for (const url of [
+    "/frontend/initialization.html",
+    "/frontend/prototype.html",
+    "/vendor/dexie.mjs",
+  ]) {
+    const response = {
+      statusCode: null,
+      writeHead(statusCode) { this.statusCode = statusCode; },
+      end() {},
+    };
+    await handler({ headers: { host: `${HOST}:${PORT}` }, method: "GET", url }, response);
+    assert.equal(response.statusCode, 404, `${url} should return Not Found`);
+  }
 });
 
 test("static routes expose only the generated Lark import package", async (t) => {
   const { root, roots } = await createRoots();
   t.after(() => rm(root, { recursive: true, force: true }));
-  const dexieRoot = path.join(root, "dexie");
   const larkImportRoot = path.join(root, "data", "lark-import");
-  await mkdir(path.join(dexieRoot, "dist"), { recursive: true });
   await mkdir(larkImportRoot, { recursive: true });
-  await writeFile(path.join(dexieRoot, "dist", "dexie.mjs"), "export default class Dexie {}");
   await writeFile(path.join(larkImportRoot, "version-history.v1.json"), "{\"format\":\"masterqc-lark-version-import\"}");
   await writeFile(path.join(larkImportRoot, "source-export.ndjson"), "private source export");
-  const options = { roots, dexiePackageRoot: dexieRoot, larkImportRoot, projectRoot: root };
+  const options = { roots, larkImportRoot, projectRoot: root };
 
   assert.equal(await resolveStaticTarget("/data/lark-import/version-history.v1.json", options), path.join(larkImportRoot, "version-history.v1.json"));
   assert.equal(await resolveStaticTarget("/data/lark-import/package.json", options), null);
@@ -62,14 +76,11 @@ test("static routes expose only the generated Lark import package", async (t) =>
 test("generated Lark package is served as JSON through its exact route", async (t) => {
   const { root, roots } = await createRoots();
   t.after(() => rm(root, { recursive: true, force: true }));
-  const dexieRoot = path.join(root, "dexie");
   const larkImportRoot = path.join(root, "data", "lark-import");
-  await mkdir(path.join(dexieRoot, "dist"), { recursive: true });
   await mkdir(larkImportRoot, { recursive: true });
-  await writeFile(path.join(dexieRoot, "dist", "dexie.mjs"), "export default class Dexie {}");
   const expectedBody = "{\"format\":\"masterqc-lark-version-import\"}";
   await writeFile(path.join(larkImportRoot, "version-history.v1.json"), expectedBody);
-  const options = { roots, dexiePackageRoot: dexieRoot, larkImportRoot, projectRoot: root };
+  const options = { roots, larkImportRoot, projectRoot: root };
   const response = {
     headers: null,
     statusCode: null,
@@ -154,12 +165,12 @@ test("static routes reject symlinks that escape the allowlisted directory", asyn
   assert.equal(await resolveStaticTarget("/frontend/escape.txt", { roots, projectRoot: root }), null);
 });
 
-test("startup reports a missing local Dexie dependency and server uses the canonical loopback address", async (t) => {
+test("startup does not require Dexie and server uses the canonical loopback address", async (t) => {
   const { root } = await createRoots();
   t.after(() => rm(root, { recursive: true, force: true }));
   const issue = await checkStartupRequirements({ projectRoot: root });
 
-  assert.match(issue, /Dexie/);
+  assert.equal(issue, null);
   assert.equal(HOST, "127.0.0.1");
   assert.equal(PORT, 4173);
   assert.equal(CANONICAL_URL, "http://127.0.0.1:4173");

@@ -9,8 +9,5 @@
   "scripts": {
     "start": "node launcher/server.mjs",
     "test": "node --test"
-  },
-  "dependencies": {
-    "dexie": "^4.2.1"
   }
 }

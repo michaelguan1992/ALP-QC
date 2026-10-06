@@ -2,7 +2,7 @@
 
 ## Start and choose a workspace
 
-Start with `Start-Mac.command` or `Start-Windows.cmd`, or run `npm start`. Keep the startup terminal open. Open `http://127.0.0.1:4173/` for the working database. Use `?workspace=demo` for a separately stored rehearsal workspace. The original table prototype remains at `/frontend/prototype.html` and resets on refresh; the complete app saves to the local SQLite service. Chrome and the in-app browser on this computer share the same selected workspace.
+Start with `Start-Mac.command` or `Start-Windows.cmd`, or run `npm start`. Keep the startup terminal open. Open `http://127.0.0.1:4173/` for the working database. Use `?workspace=demo` for a separately stored rehearsal workspace. The app saves to the local SQLite service. Chrome and the in-app browser on this computer share the same selected workspace.
 
 ## Set up standards
 
@@ -64,10 +64,10 @@ The app limits each photo to 5 MiB and each video, general file, or document to 
 
 The project folder includes the saved production database at `data/workspace/masterqc-main.sqlite`. Stop the service before copying, committing, pulling, or replacing it. A collaborator starting that project sees its saved snapshot, including attachments. Later changes on separate computers remain independent; Git does not provide live synchronization or automatic database merging. Download a full backup before applying another snapshot. The configured GitHub repository is public, so uploading this database exposes all its records and attachments. Windows runtime verification must be completed on a Windows computer; Mac checks do not verify it.
 
-## Migrate the Older Browser Workspace
+## Restore an Older Workspace Backup
 
-In the browser containing your existing records, first download a full backup. Start the updated local service, open **Backup and restore** in that browser, then choose **Migrate data from this browser**. This reads the browser's legacy IndexedDB records and restores them additively into the selected SQLite workspace. Alternatively, select the exported JSON backup and choose **Validate and restore backup**. Both paths validate references and attachments; matching records are skipped and conflicts stop the import without partial changes.
+Direct browser migration has been removed from the current app. To restore an existing exported JSON backup from the older browser-only edition, open **Backup and restore**, select the file, and choose **Validate and restore backup**. Restore validates references and attachments; matching records are skipped and conflicts stop the import without partial changes.
 
-Verify the record counts and open an attachment in both browsers after reload. Keep the downloaded backup and source browser data. Legacy IndexedDB is not cleared, and later SQLite saves are not copied back into it. The preserved initialization draft continues to be local to its original browser.
+Verify the record counts and open an attachment in both browsers after reload. Keep the downloaded backup and source browser data. Legacy IndexedDB is not cleared, and later SQLite saves are not copied back into it. The retired initialization draft and AP table prototype are no longer included in the app.
 
 When another browser changes the workspace, the page offers a reload before the next save. Save your drafts or explicitly choose how to handle them; an outdated page cannot silently overwrite newer saved records.

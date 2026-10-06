@@ -853,20 +853,6 @@ function renderBackup(root, ctx) {
       notify(error instanceof Error ? error.message : "The backup could not be restored.", true);
     }
   });
-  const migrationButton = !ctx.isDemo ? button("Migrate data from this browser", async () => {
-    try {
-      const backup = await ctx.exportLegacyBrowserBackup();
-      const result = await ctx.service.importBackup(backup, ctx.state.revision);
-      ctx.announceChange?.(result.revision);
-      const counts = result.counts ?? {};
-      const added = Object.values(counts.added ?? {}).reduce((sum, count) => sum + count, 0);
-      const skipped = Object.values(counts.skipped ?? {}).reduce((sum, count) => sum + count, 0);
-      notify(`Migration complete: ${added} records added; ${skipped} identical records skipped. The original browser data remains available.`);
-      ctx.refresh();
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "Browser data could not be migrated.", true);
-    }
-  }, "button-primary") : null;
   const assetBytes = ctx.state.assets.reduce((sum, asset) => sum + bytesForAsset(asset), 0);
   const metrics = h("div", { className: "progress-grid" },
     h("div", { className: "progress-stat" }, h("span", {}, "Design versions"), h("strong", {}, String(ctx.state.versions.length))),
@@ -877,20 +863,8 @@ function renderBackup(root, ctx) {
   root.append(h("div", { className: "admin-grid backup-grid" },
     h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("h3", {}, "Export")), exportButton),
     h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("h3", {}, "Restore")), form),
-    !ctx.isDemo ? h("details", { className: "admin-card admin-card-wide card backup-disclosure" },
-      h("summary", {}, "Browser migration"),
-      migrationButton,
-    ) : null,
-    h("details", { className: "admin-card admin-card-wide card backup-disclosure" },
-      h("summary", {}, ctx.isDemo ? "Demo workspace details" : "Shared workspace details"),
+    h("div", { className: "admin-card admin-card-wide card backup-metrics" },
       metrics,
-    ),
-    h("details", { className: "admin-card admin-card-wide card backup-disclosure" },
-      h("summary", {}, "Reference pages"),
-      h("div", { className: "stack" },
-        h("a", { href: "/frontend/initialization.html" }, "Initialization draft"),
-        h("a", { href: "/frontend/prototype.html" }, "AP table prototype"),
-      ),
     ),
   ));
 }

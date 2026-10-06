@@ -1,4 +1,4 @@
-import { qcService, createDemoQCService, exportLegacyBrowserBackup } from "../core/qc-app.js";
+import { qcService, createDemoQCService } from "../core/qc-app.js";
 import { renderAdminPage } from "./qc-admin.js";
 import { renderOperationsPage } from "./qc-operations.js";
 import { button, el, notify, showDialog, closeDialog } from "./qc-ui.js";
@@ -274,7 +274,6 @@ function getContext() {
   return {
     service,
     isDemo: demoMode,
-    exportLegacyBrowserBackup,
     state,
     navigate,
     refresh: requestRefresh,
@@ -554,7 +553,6 @@ async function start() {
       el("p", {}, message),
       el("p", {}, "Start the local server and open http://127.0.0.1:4173 in a regular browser window, then retry."),
       button("Retry", () => { app.replaceChildren(el("p", {}, "Connecting to the local QC service…")); void start(); }, "button-primary"),
-      el("p", {}, el("a", { href: "/frontend/initialization.html" }, "Open the preserved initialization draft")),
     ));
   }
 }

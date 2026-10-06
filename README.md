@@ -6,13 +6,7 @@ A local QC application built around the familiar inspection table: product varia
 
 Install [Node.js](https://nodejs.org/en/download) version 22.13+ on the 22.x line, 23.4+ on the 23.x line, or 24+ once on each Mac and Windows computer. A supported LTS release is recommended.
 
-Run this once from the project directory:
-
-```sh
-npm ci
-```
-
-Dependency versions are pinned by `package-lock.json`. The first installation requires network access; after installation, the application does not depend on an external CDN.
+No package installation is required. The app uses built-in Node.js modules and local browser files.
 
 ## Daily Startup
 
@@ -47,8 +41,6 @@ See [User Guide](docs/user-guide.md) for the complete workflow and [Local App Ac
 
 Use the fixed local address. All browsers on this computer connect to the same selected workspace. Export backups regularly and before moving computers or changing the service data directory. Attachments allow up to 5 MiB per photo and 10 MiB per video or general file, with 30 MiB total attachment content and 50 MiB per complete JSON backup.
 
-The original [initialization draft](http://127.0.0.1:4173/frontend/initialization.html) is retained separately. The old [AP table prototype](http://127.0.0.1:4173/frontend/prototype.html) remains temporary and resets on refresh; its records are not part of the app. See [Prototype Scope and Review](docs/prototype.md).
-
 ## Database Location
 
 The default production database is `data/workspace/masterqc-main.sqlite`. Saved records, original PDFs, row photographs, and audit history are inside this file. Attachment payloads are stored separately from business JSON and loaded on demand; full JSON backups still include every payload. Existing inline databases upgrade atomically with a recovery copy; it is explicitly eligible for Git. The separate `masterqc-demo.sqlite` and temporary SQLite journals are ignored. The server does not expose database files as static downloads.
@@ -60,15 +52,15 @@ To share a saved snapshot through GitHub:
 1. Save app edits and download a full backup.
 2. Stop the local service with Ctrl+C before copying or committing its database.
 3. Include `data/workspace/masterqc-main.sqlite` with the application changes in the Git commit and upload it.
-4. A collaborator downloads/clones that project, runs `npm ci` once, and starts the app. Its saved records and attachments are already present.
+4. A collaborator downloads/clones that project and starts the app with a supported Node.js installation. Its saved records and attachments are already present.
 
 Stop the service before pulling or replacing a database as well. Back up local edits first. Git exchanges snapshots; later edits on different computers are independent, and the binary SQLite file cannot be automatically merged. Coordinate which saved database is authoritative before updating it. The configured ALP-QC repository is public, so uploading this file publishes all included business records and attachments.
 
 ## Existing Browser Data
 
-Before switching from the older browser-only edition, export **Download full backup** in the populated browser. After starting the SQLite service, open **Backup and restore** in that same browser and use **Migrate data from this browser**, or restore the full exported backup. The service validates the complete data graph, skips identical records, and rejects conflicts without partial changes. Keep the source IndexedDB and backup until records and attachments have been verified.
+The current app uses SQLite and no longer offers direct browser migration. To import an existing full JSON backup from the older browser-only edition, open **Backup and restore**, select the file, and choose **Validate and restore backup**. The service validates the complete data graph, skips identical records, and rejects conflicts without partial changes. Preserved source IndexedDB data is not deleted.
 
-Migration is a one-time import, not continuing synchronization with IndexedDB. Subsequent saved changes go to SQLite. The original initialization draft remains browser-local, and the disposable prototype still resets on refresh.
+Saved changes go to SQLite. The retired initialization draft and AP table prototype pages and their dedicated files have been removed; existing browser data is not cleared.
 
 ## Development Checks
 
@@ -94,4 +86,4 @@ Concrete implementation uses Luna Max subagents; the primary agent coordinates r
 
 ## Verification Boundaries
 
-See [Local App Acceptance](docs/app-acceptance.md) for the current test record. The existing initialization draft has been checked before and after the database upgrade and remains unchanged. Windows startup and browser behavior have not been run on a Windows computer; a Mac check does not verify Windows.
+See [Local App Acceptance](docs/app-acceptance.md) for the current test record. Windows startup and browser behavior have not been run on a Windows computer; a Mac check does not verify Windows.

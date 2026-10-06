@@ -2,13 +2,13 @@
 
 Status: 2026-09-28. The first local edition implements the module decomposition below. Exact interfaces are defined in [Local App Contract](app-contract.md), and actual verification is recorded in [Local App Acceptance](app-acceptance.md). Confirmed business rules remain in [Requirements and Decisions](requirements.md); terminology is defined in [the domain glossary](../CONTEXT.md).
 
-## Batch Workspace Prototype Direction
+## Batch Workspace Layout Direction
 
-- Use the original PDF inspection table as the layout reference for the main workspace. On 2026-09-27, the AP OQC pages in the S11-S14 and S15 reference PDFs were visually inspected for the requested prototype; see [Prototype Scope and Review](prototype.md) for source references and the review boundary.
+- Use the original PDF inspection table as the layout reference for the main workspace. The AP OQC pages in the S11-S14 and S15 original PDFs informed the layout. Source provenance and import boundaries are retained in [Original PDF Import](pdf-import.md).
 - Keep the table editable for batch inspection results, with each inspection record owning its photo references. A photo column may exist, but its cells must belong to individual inspection rows rather than a merged, shared photo area.
 - Use the Lark edition as a reference for per-record photo association. This is a confirmed user requirement, not a claim that the live Lark configuration was inspected during this update.
 - Proposed photo interaction: show each row's thumbnails and an add-photo action, and open that row's photos for larger viewing. Selecting or adding evidence for one row must not change another row's photo references.
-- Include prototype acceptance checks for separate photo collections on two inspection rows and on the same inspection item in two different batches. Retain green as the important-check marker, not a pass/fail color.
+- Include acceptance checks for separate photo collections on two inspection rows and on the same inspection item in two different batches. Retain green as the important-check marker, not a pass/fail color.
 
 ## Module Responsibilities
 
@@ -24,7 +24,7 @@ flowchart TB
     OPS --> Q[Issues: sources, disposition, signatures, closure]
     OPS --> P[Purchasing: order lines, released quantity progress]
     OPS --> A[Storage adapter interface]
-    A --> DB[IndexedDB through Dexie]
+    A --> DB[SQLite through the local service]
 ```
 
 | Module | Responsibility | Important invariant |
@@ -35,7 +35,7 @@ flowchart TB
 | Issues | Link sources, prevent duplicate issue creation, retain discussion and formal disposition separately, and check closure requirements | Three confirmations do not automatically close an issue; open linked issues block batch release |
 | Purchasing | Represent ordered variants and quantities; compute progress from attributable released quantities | Unreleased quantities contribute zero; one variant's surplus cannot cover another's shortage |
 
-The operation coordinator loads relevant data through the adapter, invokes rules, and commits related changes together. Rule calculations do not depend on the DOM or Dexie. Storage owns reads, writes, indexes, migrations, attachments, and transaction mechanics; it does not independently decide whether a batch may be released.
+The operation coordinator loads relevant data through the adapter, invokes rules, and commits related changes together. Rule calculations do not depend on the DOM or SQLite. Storage owns reads, writes, indexes, migrations, attachments, and transaction mechanics; it does not independently decide whether a batch may be released.
 
 ## Original Interface Sketch
 

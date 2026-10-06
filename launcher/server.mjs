@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
-import { access, lstat, readFile, realpath, stat } from "node:fs/promises";
+import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BACKUP_MAX_BYTES, QC_COMMAND_TYPES, createQCService } from "../core/qc-service.js";
@@ -14,11 +14,9 @@ const STATIC_ROOTS = ["frontend", "core", "storage"].map((directory) => ({
   urlPrefix: `/${directory}`,
   directory: path.join(PROJECT_ROOT, directory),
 }));
-const DEXIE_PACKAGE_ROOT = path.join(PROJECT_ROOT, "node_modules", "dexie");
-const DEXIE_URL = "/vendor/dexie.mjs";
 const LARK_IMPORT_ROOT = path.join(PROJECT_ROOT, "data", "lark-import");
 const LARK_IMPORT_PACKAGE_URL = "/data/lark-import/version-history.v1.json";
-const BROWSER_STORAGE_FILES = new Set(["qc-adapter.js", "dexie-adapter.js", "prototype-memory.js", "http-json-transport.js"]);
+const BROWSER_STORAGE_FILES = new Set(["http-json-transport.js"]);
 const API_BODY_MAX_BYTES = BACKUP_MAX_BYTES + 4096;
 const ALLOWED_WORKSPACES = new Set(["main", "demo"]);
 const ALLOWED_COMMANDS = new Set(QC_COMMAND_TYPES);
@@ -94,17 +92,12 @@ async function resolveFileWithinRoot(rootDirectory, relativePath, boundaryDirect
 
 export async function resolveStaticTarget(requestTarget, {
   roots = STATIC_ROOTS,
-  dexiePackageRoot = DEXIE_PACKAGE_ROOT,
   larkImportRoot = LARK_IMPORT_ROOT,
   projectRoot = PROJECT_ROOT,
 } = {}) {
   const requestPath = parseSafeRequestPath(requestTarget);
   if (requestPath === null) return null;
   if (requestPath === "/data/workspace" || requestPath.startsWith("/data/workspace/")) return null;
-
-  if (requestPath === DEXIE_URL) {
-    return resolveFileWithinRoot(dexiePackageRoot, "dist/dexie.mjs", projectRoot);
-  }
 
   if (requestPath === LARK_IMPORT_PACKAGE_URL) {
     return resolveFileWithinRoot(larkImportRoot, "version-history.v1.json", projectRoot);
@@ -129,10 +122,7 @@ export async function resolveStaticTarget(requestTarget, {
   return null;
 }
 
-export async function checkStartupRequirements({
-  projectRoot = PROJECT_ROOT,
-  dexiePackageRoot = path.join(projectRoot, "node_modules", "dexie"),
-} = {}) {
+export async function checkStartupRequirements({ projectRoot = PROJECT_ROOT } = {}) {
   const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number);
   const supportsBuiltInSQLite = (nodeMajor === 22 && nodeMinor >= 13) ||
     (nodeMajor === 23 && nodeMinor >= 4) || nodeMajor >= 24;
@@ -160,20 +150,6 @@ export async function checkStartupRequirements({
     }
   }
 
-  const entry = path.join(dexiePackageRoot, "dist", "dexie.mjs");
-  try {
-    const packageLinkDetails = await lstat(dexiePackageRoot);
-    if (packageLinkDetails.isSymbolicLink()) throw new Error("symbolic package");
-    const resolvedPackage = await realpath(dexiePackageRoot);
-    const resolvedEntry = await realpath(entry);
-    const details = await stat(resolvedEntry);
-    if (!isInside(resolvedProjectRoot, resolvedPackage) || !isInside(resolvedPackage, resolvedEntry) || !details.isFile()) {
-      throw new Error("invalid Dexie entry");
-    }
-    await access(resolvedEntry);
-  } catch {
-    return "未找到本地 Dexie 依赖。请在项目目录执行 npm ci 后重试。";
-  }
   return null;
 }
 
