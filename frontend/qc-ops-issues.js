@@ -8,7 +8,6 @@ import {
   notify,
   pageHeading,
   quantity,
-  runCommand,
   statusPill,
   text,
   timestampLabel
@@ -28,7 +27,7 @@ import {
 } from "./qc-attachments.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
 import { resolveBatchDisplayNumber } from "../core/qc-batch-display.js";
-import { hasRequiredIssuePhoto, remainingIssueDraftAfterDiscussion, submitDiscussionEntry } from "./qc-issue-drafts.js";
+import { hasRequiredIssuePhoto, remainingIssueDraftAfterDiscussion } from "./qc-issue-drafts.js";
 
 const issueDrafts = new Map();
 let activeIssueDialogRuntime = null;
@@ -156,12 +155,6 @@ function quantityOrDash(value) {
   return value === null || value === undefined || value === "" ? "—" : quantity(value);
 }
 
-function rowHasSavedIssueResult(row) {
-  const legacyTimeOmitted = row && !Object.hasOwn(row, "actualTimeSeconds");
-  return Boolean(row?.savedAt) && row.defectiveQty !== null && row.defectiveQty !== undefined &&
-    (row.actualTimeSeconds !== null && row.actualTimeSeconds !== undefined || legacyTimeOmitted);
-}
-
 function issueDraft(issue) {
   return issueDrafts.get(issue.id) || {
     owner: String(issue.owner || ""),
@@ -251,7 +244,7 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
   };
   const issueCommand = (type, data, options) => runIssueCommand
     ? runIssueCommand(type, data, options)
-    : runCommand(ctx, type, data, options);
+    : ctx.run(type, data, options);
   const flushPending = async () => {
     while (pendingOperations.size) await Promise.allSettled([...pendingOperations]);
     return !pendingOperationError;
@@ -563,7 +556,7 @@ function openIssueDialog(issue, state, ctx) {
   };
 
   const runEvidenceCommand = async (type, data, options = {}) => {
-    return runCommand(ctx, type, data, { ...options, autosave: true, render: false });
+    return ctx.run(type, data, { ...options, autosave: true, render: false });
   };
   const evidence = renderIssueAttachments(currentIssue, currentState, ctx, readOnly, markDraftForPreservation, (nextIssue, nextState) => {
     adoptLatestIssue(nextIssue, nextState);
@@ -608,7 +601,7 @@ function openIssueDialog(issue, state, ctx) {
       typeof value.disposition === "string" && value.disposition.length <= 1200 &&
       Array.isArray(value.confirmations) && value.confirmations.length === 3 &&
       value.confirmations.every((name) => typeof name === "string" && name.length <= 100),
-    save: (value) => runCommand(ctx, "saveIssue", { id: currentIssue.id, ...value }, { manualSave: true, render: false, silent: true }),
+    save: (value) => ctx.run("saveIssue", { id: currentIssue.id, ...value }, { manualSave: true, render: false, silent: true }),
     onStatus: (status, meta) => {
       saveStatus.textContent = status;
       saveStatus.className = `save-status qc-ops-issue-save-status ${status === "Saved" ? "qc-ops-saved" : status === "Saving…" ? "qc-ops-save-pending" : status === "Save failed" ? "qc-ops-save-failed" : "qc-ops-unsaved"}`;
@@ -663,7 +656,7 @@ function openIssueDialog(issue, state, ctx) {
         evidence.setDisabled(true);
         discussionButton.disabled = true;
         closeButton.disabled = true;
-        const result = await runCommand(ctx, "closeIssue", { id: currentIssue.id }, { render: false });
+        const result = await ctx.run("closeIssue", { id: currentIssue.id }, { render: false });
         controls.forEach((input, index) => { input.disabled = wasDisabled[index]; });
         evidence.setDisabled(false);
         if (!result.ok) return;
@@ -701,7 +694,7 @@ function openIssueDialog(issue, state, ctx) {
           return;
         }
         markDraftForPreservation();
-        const response = await runCommand(ctx, "deleteIssue", { id: currentIssue.id }, { render: false });
+        const response = await ctx.run("deleteIssue", { id: currentIssue.id }, { render: false });
         if (!response.ok && !response.committed) {
           formError.textContent = errorText(response.error, "The issue could not be deleted.");
           return;
@@ -779,7 +772,7 @@ function openIssueDialog(issue, state, ctx) {
       }
       discussionButton.disabled = true;
       closeButton.disabled = true;
-      const response = await submitDiscussionEntry(ctx, currentIssue.id, entryText, authorName);
+      const response = await ctx.run("addDiscussion", { id: currentIssue.id, text: entryText, authorName }, { render: false });
       if (!response.ok) return;
       const latestState = response.state || currentState;
       const latestIssue = list(latestState.issues).find((entry) => entry.id === currentIssue.id);
@@ -891,7 +884,7 @@ export function openNewIssueDialog(state, ctx, options = {}) {
   const reportedByInput = el("input", { type: "text", required: true, maxLength: "200", name: "reportedBy", value: options.reportedBy || "" });
   const initialOwnerInput = el("input", { type: "text", maxLength: "200", name: "owner", value: options.owner || "" });
   const titleInput = el("input", {
-    type: "text", required: true, maxLength: "180", name: "title", placeholder: "Describe the issue", value: options.title || "",
+    type: "text", required: true, maxLength: "180", name: "title", placeholder: "Describe the issue", value: "",
   });
   const descriptionInput = el("textarea", { rows: "3", maxLength: "2000", name: "description" }, options.description || "");
   const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
@@ -933,7 +926,7 @@ export function openNewIssueDialog(state, ctx, options = {}) {
     if (reportedByInput.value.trim()) formError.textContent = "";
   });
 
-  const editableBatches = list(state.batches).filter((batch) => batch.kind !== "historical" && batch.status !== "released");
+  const editableBatches = list(state.batches).filter((batch) => batch.kind !== "historical" && batch.status !== "historical" && batch.status !== "released");
   const batchSelect = el("select", { name: "batchId" }, el("option", { value: "" }, "No batch link"), ...editableBatches.map((batch) => {
     const products = getBatchProducts(batch).map((product) => ({ ...product, variant: variantById(state).get(product.variantId) }));
     const summary = products.length ? productSummary(products, state) : text(variantById(state).get(batch.variantId)?.label, batch.variantId);
@@ -942,7 +935,7 @@ export function openNewIssueDialog(state, ctx, options = {}) {
   const rowSelect = el("select", { name: "rowId", disabled: true }, el("option", { value: "" }, "No inspection row"));
   const updateRows = () => {
     const batch = list(state.batches).find((entry) => entry.id === batchSelect.value);
-    const rows = list(batch?.rows).filter(rowHasSavedIssueResult);
+    const rows = list(batch?.rows);
     rowSelect.disabled = !batch || !rows.length;
     rowSelect.replaceChildren(el("option", { value: "" }, "No inspection row"), ...rows.map((row) => {
       const product = getBatchRowProduct(batch, row) || {};
@@ -1002,13 +995,14 @@ export function openNewIssueDialog(state, ctx, options = {}) {
       submit.disabled = false;
       return;
     }
-    const result = await runCommand(ctx, "createIssue", data);
+    const result = await ctx.run("createIssue", data);
     if (!result.ok) {
       formError.textContent = errorText(result.error);
       submit.disabled = false;
       return;
     }
     closeDialog(true);
+    if (options.stayOnBatch) return;
     const issueId = result.result?.entityId || result.result?.issueId;
     if (issueId) ctx.navigate("issues", issueId, true);
     else ctx.navigate("issues", null, true);

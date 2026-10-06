@@ -775,14 +775,19 @@ function validateIssues(state, batches, variants, assets) {
         }
         requirePositiveInteger(sourceRow.no, "Issue source inspection item number");
         requireNonNegativeInteger(sourceRow.inspectedQty, "Issue source inspection quantity");
-        assert(sourceRow.defectiveQty !== null && Number.isSafeInteger(sourceRow.defectiveQty) && sourceRow.defectiveQty >= 0 && sourceRow.defectiveQty <= sourceRow.inspectedQty, `Issue ${issue.number} source snapshot has an invalid defective quantity.`);
+        assert(sourceRow.defectiveQty === null || (Number.isSafeInteger(sourceRow.defectiveQty) && sourceRow.defectiveQty >= 0 && sourceRow.defectiveQty <= sourceRow.inspectedQty), `Issue ${issue.number} source snapshot has an invalid defective quantity.`);
         if (Object.hasOwn(sourceRow, "actualTimeSeconds")) {
-          assert(typeof sourceRow.actualTimeSeconds === "number" && Number.isFinite(sourceRow.actualTimeSeconds) && sourceRow.actualTimeSeconds >= 0,
+          assert(sourceRow.actualTimeSeconds === null || (typeof sourceRow.actualTimeSeconds === "number" && Number.isFinite(sourceRow.actualTimeSeconds) && sourceRow.actualTimeSeconds >= 0),
             `Issue ${issue.number} source snapshot has an invalid actual inspection time.`);
         }
-        requireTimestamp(sourceRow.savedAt, "Issue source row saved time");
+        const complete = sourceRow.defectiveQty !== null &&
+          (!Object.hasOwn(sourceRow, "actualTimeSeconds") || sourceRow.actualTimeSeconds !== null);
+        assert((sourceRow.savedAt !== null) === complete, `Issue ${issue.number} source snapshot has an inconsistent saved time.`);
+        if (sourceRow.savedAt !== null) requireTimestamp(sourceRow.savedAt, "Issue source row saved time");
         assertText(sourceRow.remarks, "Issue source row remarks", { maxLength: 5000, allowBlank: true });
-        const expectedRate = sourceRow.inspectedQty === 0 ? null : Number(((sourceRow.defectiveQty / sourceRow.inspectedQty) * 100).toFixed(2));
+        const expectedRate = sourceRow.defectiveQty === null || sourceRow.inspectedQty === 0
+          ? null
+          : Number(((sourceRow.defectiveQty / sourceRow.inspectedQty) * 100).toFixed(2));
         assert(sourceRow.defectiveRate === expectedRate, `Issue ${issue.number} source snapshot has an invalid defective rate.`);
         const photoIds = sourceRow.photoIds;
         assert(Array.isArray(photoIds), `Issue ${issue.number} snapshot photo references must be a list.`);

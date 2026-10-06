@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   hasRequiredIssuePhoto,
   remainingIssueDraftAfterDiscussion,
-  submitDiscussionEntry,
 } from "../qc-issue-drafts.js";
 
 test("issue creation requires a selected photo, including one chosen through the general file chooser", () => {
@@ -28,15 +27,4 @@ test("successful discussion clears unchanged submitted fields but preserves text
     discussionAuthorName: "",
     discussionText: "Another issue to discuss.",
   });
-});
-
-test("posting discussion requests a data refresh without rerendering the Issue dialog", async () => {
-  let command;
-  const ctx = { run: (...args) => { command = args; return Promise.resolve({ ok: true }); } };
-  await submitDiscussionEntry(ctx, "issue-7", "Found a defect.", "Avery");
-  assert.deepEqual(command, [
-    "addDiscussion",
-    { id: "issue-7", text: "Found a defect.", authorName: "Avery" },
-    { render: false },
-  ]);
 });

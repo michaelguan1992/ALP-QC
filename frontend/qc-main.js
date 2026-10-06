@@ -16,6 +16,7 @@ let renderNumber = 0;
 let channel = null;
 let activeManualSaveController = null;
 const manualSaveControllers = [];
+let automaticExitActionVersion = 0;
 let commandQueue = Promise.resolve();
 let needsAuthoritativeRefresh = false;
 let commandInFlight = 0;
@@ -79,6 +80,18 @@ async function resolveManualChanges(actionLabel, action) {
   const controller = activeManualSaveController;
   if (!controller?.hasPending?.()) return action();
 
+  if (controller.saveOnExit && typeof controller.saveBeforeExit === "function") {
+    const actionVersion = ++automaticExitActionVersion;
+    const saved = await controller.saveBeforeExit();
+    if (actionVersion !== automaticExitActionVersion || activeManualSaveController !== controller) return false;
+    if (!saved) {
+      const reason = controller.getLastError?.()?.message || "Check the highlighted changes and try again.";
+      notify(`This page remains open because the changes could not be saved: ${reason}`, true);
+      return false;
+    }
+    return action();
+  }
+
   const snapshot = saveDialogSnapshot();
   const message = el("p", { className: "qc-ops-manual-exit-message", role: "status" },
     `Save your changes before you ${actionLabel}, discard them, or cancel.`);
@@ -141,27 +154,12 @@ function routeHash(route, id) {
 }
 
 function promptToDiscard(actionLabel, action) {
-  const forms = dirtyForms();
-  const preserved = forms.length > 0 && forms.every((form) => form.dataset.preserveDrafts === "true");
-  const hasPreservedDrafts = forms.some((form) => form.dataset.preserveDrafts === "true");
-  const reloadsLatest = actionLabel === "reload latest data";
-  const continueLabel = preserved
-    ? reloadsLatest ? "Clear drafts and reload latest data" : `Continue and ${actionLabel} with drafts`
-    : `Discard and ${actionLabel}`;
-  const message = preserved
-    ? reloadsLatest
-      ? "This page has unsaved inspection edits. Reloading replaces the visible records, so clear this tab’s drafts before loading the latest data."
-      : "This page has unsaved inspection edits. They will remain in this tab and be available when you return."
-    : "This page has unsaved changes. Save them before leaving, or discard them and continue.";
-  showDialog(preserved ? "Unsaved inspection edits" : "Unsaved changes", el("div", { className: "discard-prompt" },
-    el("p", {}, message),
+  showDialog("Unsaved changes", el("div", { className: "discard-prompt" },
+    el("p", {}, "This page has unsaved changes. Save them before leaving, or discard them and continue."),
     el("div", { className: "button-row" },
       button("Stay on this page", () => closeDialog(true), "button-secondary"),
-      button(continueLabel, () => {
+      button(`Discard and ${actionLabel}`, () => {
         closeDialog(true);
-        if (hasPreservedDrafts && (!preserved || reloadsLatest)) {
-          window.dispatchEvent(new CustomEvent("masterqc:discard-operation-drafts"));
-        }
         action();
       }, "button-danger"),
     ),
@@ -191,6 +189,10 @@ async function readLatestState() {
 
 async function requestRefresh() {
   if (activeManualSaveController?.hasPending?.()) {
+    if (activeManualSaveController.saveOnExit) {
+      await refreshLatest();
+      return;
+    }
     await resolveManualChanges("reload the latest data", () => refreshLatest());
     return;
   }
@@ -213,8 +215,10 @@ async function refreshLatest() {
 
 async function navigate(route, id = null, force = false) {
   if (!routes.has(route)) return false;
+  const targetId = id ?? null;
+  if (route === currentRoute && targetId === selectedId) return false;
   if (!force && activeManualSaveController?.hasPending?.()) {
-    await resolveManualChanges(`leave for ${route === "batch-report" ? "the report" : route}`, () => navigate(route, id, true));
+    await resolveManualChanges(`leave for ${route === "batch-report" ? "the report" : route}`, () => navigate(route, targetId, true));
     return false;
   }
   if (!closeDialog()) return false;
@@ -223,8 +227,8 @@ async function navigate(route, id = null, force = false) {
     return false;
   }
   currentRoute = route;
-  selectedId = id;
-  history.pushState({ route, id }, "", routeHash(route, id));
+  selectedId = targetId;
+  history.pushState({ route, id: targetId }, "", routeHash(route, targetId));
   renderApp();
   return true;
 }
@@ -459,6 +463,10 @@ window.addEventListener("popstate", () => {
   void (async () => {
     const restoreCurrentUrl = () => history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
     const openNextRoute = () => {
+      if (!closeDialog()) {
+        restoreCurrentUrl();
+        return false;
+      }
       currentRoute = next.route;
       selectedId = next.id;
       history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));

@@ -13,7 +13,3 @@ export function remainingIssueDraftAfterDiscussion(currentDraft, submittedDraft)
       : currentDraft.discussionText,
   };
 }
-
-export function submitDiscussionEntry(ctx, issueId, text, authorName) {
-  return ctx.run("addDiscussion", { id: issueId, text, authorName }, { render: false });
-}

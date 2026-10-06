@@ -1,5 +1,22 @@
 # Local App Acceptance
 
+### Quiet batch save status (2026-10-06)
+
+- Removed routine Saved and Unsaved changes labels from batch headers/details and inspection rows. Saving progress and persistent save failures remain visible; save-on-departure and draft tracking are unchanged.
+- Verified the user's refreshed Mac in-app batch page contains neither label after normal in-app departure saved the existing pending edits. Syntax and diff checks passed. Screenshot: `/private/tmp/masterqc-batch-status-labels-removed.jpg`. Windows was not run.
+
+### Batch saving on in-app departure (2026-10-06)
+
+- Removed the batch Save changes button. Verified in the Mac in-app browser with an independent SQLite workspace on port 4189: typing, field changes, and Create issue did not save; opening View report saved row results and batch notes together before rendering the report. Back and opening a linked Issue also saved before departure.
+- Invalid results and a stale revision kept the batch route and draft open with an explanatory error. Reload latest data preserved the pending row edit, incorporated another client's saved result, and allowed the next departure to save successfully. Back protected an unfinished Create issue dialog; Keep editing restored its title draft. Issue disposition retained manual Save/Discard/Cancel behavior.
+- Release with pending rows saved those results, then preserved the existing open-Issue release blocker. Native browser unload warnings remain; refresh and tab closing do not initiate saves.
+- Focused save-controller tests passed 11/11 and the full suite passed 172/172, including acknowledgment, validation/service failures, newer typing during saving, and overlapping departure requests. Syntax and diff checks passed. Windows was not run. No production business command was submitted, and the user's open tab and pending edits were preserved. Error screenshot: `/private/tmp/masterqc-save-on-exit-error.jpg`.
+
+### Blank new Issue title (2026-10-06)
+
+- Verified batch-row Create issue and standalone New issue in the Mac in-app browser: Issue title starts empty and remains required; manual title entry works.
+- Checked both changed frontend modules with `node --check` and ran `git diff --check`. No Issue was submitted during verification. The user's active tab and unsaved Results were preserved; it requires a refresh after handling those drafts to load the updated frontend. Windows was not run.
+
 ## Original PDF ingestion verification (2026-09-29)
 
 - Source inventory: 30 original PDFs across S1 and S15, 147 total pages, 22,394,625 original bytes, and 30 distinct SHA-256 identities. Source baseline: `tmp/pdf-import/source-baseline.json`.
@@ -331,3 +348,15 @@ The user authorized removing Browser migration and Reference pages from Backup a
 ### Main-branch integration and always-visible metrics (2026-10-05)
 
 Workspace metrics now stay visible below export and restore, without a disclosure title or toggle. The running app on port 4173 was refreshed after applying the same frontend changes and showed all four metrics directly. Its Backup and restore layout files match the integrated source. The full suite passed 166 tests after integrating main's batch-number and import-control changes. Syntax and diff-whitespace checks passed. Production database files remain outside these commits; Windows was not run.
+
+## Issue creation before saving Results (2026-10-05)
+
+Create issue is available for every editable operational row, including blank, partial, and unsaved Results. The Issue snapshot captures persisted results without saving batch drafts. Creation from a batch row keeps the batch open.
+
+- The full automated suite passed 167 tests. Regression coverage checks blank, partial, and complete snapshots, unchanged persisted results, immutable snapshots after later row saves, idempotent retries, malformed-backup rejection, validated restore, and SQLite close/reopen. JavaScript syntax and diff-whitespace checks passed.
+- Mac in-app-browser acceptance used synthetic records in `/private/tmp/masterqc-issue-browser-data-kGVEtH` on port 4189. All four blank rows offered Create issue. Entering an unsaved defective quantity with blank Time allowed the dialog to open; Cancel retained the draft. Creating an Issue with a reporter and uploaded photo stayed on the batch, displayed its link, and retained the unsaved quantity. Reverting the test draft and refreshing retained the Issue and blank persisted Results. Issue detail showed blank snapshot defects/rate and “Not saved at issue creation,” with its uploaded photo. Screenshot: `/private/tmp/masterqc-issue-with-unsaved-results.jpg`.
+- The fixture server was stopped after verification. The existing port-4173 service runs another checkout and was not interrupted. No production business commands or database edits were performed. Windows was not run.
+
+### Current checkout service switch (2026-10-05)
+
+At the user's request, stopped the old port-4173 service and started this checkout's `launcher/server.mjs` with `MASTERQC_DATA_DIR=/Users/michael/.codex/worktrees/1920/MasterQC-Web/data/workspace`, preserving the running app's exact database directory. Recovery copies were saved under `/private/tmp/masterqc-before-checkout-switch-j8fdc646` while the old service was stopped. Read-only comparisons after startup and browser refresh confirmed identical revision-5 main business state and attachment payload rows, unchanged demo state, and SQLite integrity `ok` for both databases. The existing batch tab was refreshed without pending edits and showed enabled Create issue buttons with blank Results. No business commands were submitted. Screenshot: `/private/tmp/masterqc-current-checkout-running.jpg`.

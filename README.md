@@ -32,7 +32,7 @@ The app starts with two inspection families and normal/Yellow product variants. 
 
 See [User Guide](docs/user-guide.md) for the complete workflow and [Local App Acceptance](docs/app-acceptance.md) for actual verification and outstanding limits.
 
-- Batches lock applicable standards and calculate inspection quantities automatically. Choose **Save changes** to save all modified results and batch details together; field editing does not autosave. Issue disposition also uses **Save changes**. Unsaved exits offer Save, Discard, or Cancel.
+- Batches lock applicable standards and calculate inspection quantities automatically. Leaving inspection within the app automatically saves all modified results and batch details together; field editing does not autosave. Failed saves keep the page open with an explanatory error. Issue disposition uses **Save changes**. Unsaved Issue exits offer Save, Discard, or Cancel. Browser refresh and tab closing warn about unsaved edits without saving.
 - Each inspection row can own one video, procedure file, and log file. Rows list every linked Issue; Issues preserve a source snapshot and support multiple photo and general-file attachments. Discussion stays separate from formal disposition.
 - Manual issue closure requires an owner, disposition, and three entered confirmation names. These names are not authenticated signatures.
 - Every new OQC batch counts each product's full quantity toward its PO line after explicit release; IQC and historical records do not contribute.

@@ -43,7 +43,6 @@
 .qc-ops-attachment-item small { color: var(--muted, #626a64); font-size: 10px; }
 .qc-ops-attachment-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 4px; }
 .qc-ops-attachment-actions .qc-ops-small-button { min-height: 28px; padding: 4px 6px; font-size: 10px; }
-.qc-ops-attachment-link { color: #1854a5; font-size: 11px; font-weight: 650; }
 .qc-ops-attachment-preview { display: grid; gap: 10px; }
 .qc-ops-attachment-preview-pdf { display: block; width: min(100%, 1040px); height: min(72vh, 820px); border: 1px solid var(--line, #d1d8d2); background: #f5f7f5; }
 .qc-ops-attachment-preview-image { display: block; max-width: min(100%, 1040px); max-height: 72vh; margin: 0 auto; object-fit: contain; background: #f5f7f5; }
@@ -75,9 +74,7 @@
 .qc-ops-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 11px; }
 .qc-ops-section-heading h2 { margin: 0; font-size: 16px; font-weight: 650; }
 .qc-ops-section-heading p { margin: 4px 0 0; color: var(--muted, #626a64); font-size: 12px; line-height: 1.4; }
-.qc-ops-lock-label, .qc-ops-edit-label, .qc-ops-note-pill { flex: 0 0 auto; border: 1px solid #c7d0c8; border-radius: 5px; padding: 3px 7px; color: #4d5951; font-size: 10px; }
-.qc-ops-lock-label { border-color: #a9c5ad; color: #245b38; background: #eff7ef; }
-.qc-ops-edit-label { background: #fafbfa; }
+.qc-ops-note-pill { flex: 0 0 auto; border: 1px solid #c7d0c8; border-radius: 5px; padding: 3px 7px; color: #4d5951; font-size: 10px; }
 .qc-ops-note-pill { border-color: #a9c5ad; color: #245b38; background: #eff7ef; }
 .qc-ops-batch-meta { display: grid; grid-template-columns: minmax(145px, .75fr) minmax(190px, .9fr) minmax(260px, 1.6fr) auto; align-items: end; gap: 10px; }
 .qc-ops-batch-meta .field { min-width: 0; }
@@ -87,7 +84,6 @@
 .qc-ops-batch-facts { display: flex; flex-wrap: wrap; gap: 7px 20px; margin-top: 11px; border-top: 1px solid var(--line, #d1d8d2); padding-top: 9px; color: #38423b; font-size: 11px; }
 .qc-ops-batch-facts span { display: inline-flex; gap: 5px; }
 .qc-ops-batch-facts strong { color: var(--muted, #626a64); font-weight: 600; }
-.qc-ops-table-note { margin: 0 0 8px; border: 1px solid #d5ded6; padding: 7px 9px; color: #3f4e42; background: #f7faf7; font-size: 11px; line-height: 1.4; }
 .qc-ops-inspection-table { width: 1306px; min-width: 1306px; table-layout: fixed; border-collapse: collapse; color: #202521; font: 10px/1.28 Arial, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif; }
 .qc-ops-inspection-table th, .qc-ops-inspection-table td { border: 1px solid #292d29; padding: 4px; text-align: center; vertical-align: middle; overflow-wrap: anywhere; }
 .qc-ops-inspection-table thead { background: #fff; }
@@ -125,14 +121,8 @@
 .qc-ops-legacy-photo-list li > span { min-width: 0; flex: 1 1 100%; overflow-wrap: anywhere; color: #39463d; }
 .qc-ops-legacy-photo-list .qc-ops-small-button { padding: 2px 0; font-size: 9px; }
 .qc-ops-unsaved { color: #8b4b16; font-size: 8px; font-weight: 700; }
-.qc-ops-photo-list { display: flex; min-height: 35px; flex-wrap: wrap; justify-content: flex-start; gap: 4px; }
-.qc-ops-photo-thumb { width: 38px; height: 38px; overflow: hidden; border: 1px solid #909a92; padding: 0; background: #f7f8f7; cursor: zoom-in; }
-.qc-ops-photo-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .qc-ops-empty-photo { display: block; padding: 10px 0 5px; color: #68716a; font-size: 9px; }
-.qc-ops-photo-actions { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
 .qc-ops-hidden-file { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); }
-.qc-ops-photo-preview img { display: block; max-width: min(680px, 80vw); max-height: 65vh; margin: 0 auto; object-fit: contain; background: #f0f2f0; }
-.qc-ops-photo-preview p { margin: 8px 0 0; overflow-wrap: anywhere; color: var(--muted, #626a64); font-size: 12px; }
 .qc-ops-dialog-content { display: grid; gap: 12px; }
 .qc-ops-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .qc-ops-delete-confirmation { display: grid; gap: 8px; border: 1px solid #e6c6c1; border-radius: 9px; padding: 10px; background: #fff7f5; }
@@ -141,7 +131,7 @@
 .qc-ops-delete-confirmation .button-row { justify-content: flex-end; }
 .qc-ops-form { display: grid; gap: 11px; }
 .qc-ops-form .field { min-width: 0; }
-.qc-ops-form input:not([type="checkbox"]), .qc-ops-form select, .qc-ops-form textarea, .qc-ops-derived-output { width: 100%; }
+.qc-ops-form input:not([type="checkbox"]), .qc-ops-form select, .qc-ops-form textarea { width: 100%; }
 .qc-ops-form textarea { resize: vertical; }
 .qc-ops-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .qc-ops-product-entry-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: -5px; color: #35443a; font-size: 12px; }
@@ -151,7 +141,6 @@
 .qc-ops-product-entry-fields .field { min-width: 0; }
 .qc-ops-product-entry-fields input, .qc-ops-product-entry-fields select { width: 100%; min-width: 0; }
 .qc-ops-product-entry > .button { flex: 0 0 auto; margin-bottom: 1px; }
-.qc-ops-list-products span { display: block; white-space: pre-wrap; }
 .qc-ops-product-context strong { display: block; font-size: 9px; }
 .qc-ops-product-context small { display: block; margin-top: 3px; color: #68716a; font-size: 8px; }
 .qc-ops-mixed-product-table { width: 1424px; min-width: 1424px; }
@@ -159,16 +148,11 @@
 .qc-ops-report-products dt { color: var(--muted, #626a64); font-size: 10px; font-weight: 700; }
 .qc-ops-report-products dd { margin: 4px 0 0; }
 .qc-ops-report-products ul { display: grid; gap: 3px; margin: 0; padding-left: 17px; font-size: 11px; }
-.qc-ops-checkbox-field { display: flex; align-items: flex-start; gap: 9px; border: 1px solid #d2d9d3; border-radius: var(--radius, 6px); padding: 10px; background: #f8faf8; font-size: 12px; }
-.qc-ops-checkbox-field input { margin-top: 2px; }
 .qc-ops-form-error { margin: 0; color: var(--danger, #9a3328); font-size: 12px; }
 .qc-ops-form-error:empty { display: none; }
-.qc-ops-derived-output { display: block; min-height: 36px; border: 1px solid var(--line, #d1d8d2); border-radius: var(--radius, 6px); padding: 8px 10px; color: #303932; background: var(--surface-soft, #f5f7f5); }
 .qc-ops-release-card { border-color: #c9d4ca; }
 .qc-ops-release-card .qc-ops-section-heading { align-items: center; margin-bottom: 0; }
-.qc-ops-blockers { border-top: 1px solid var(--line, #d1d8d2); margin-top: 12px; padding-top: 10px; color: #793722; font-size: 12px; }
 .qc-ops-blocker-list { margin: 6px 0 0; padding-left: 20px; line-height: 1.5; }
-.qc-ops-ready { margin: 12px 0 0; border-top: 1px solid var(--line, #d1d8d2); padding-top: 10px; color: #245b38; font-size: 12px; }
 .qc-ops-subline { display: block; margin-top: 3px; color: var(--muted, #626a64); font-size: 10px; }
 .qc-ops-source-card { min-width: 0; border: 1px solid var(--line, #d1d8d2); border-radius: 10px; padding: 13px; background: #f8faf8; }
 .qc-ops-source-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -198,7 +182,6 @@
 .qc-ops-discussion-list p { margin: 0 0 3px; color: #26332a; white-space: pre-wrap; }
 .qc-ops-discussion-author { color: #34483a; font-weight: 700; }
 .qc-ops-discussion-list time { color: var(--muted, #626a64); font-size: 9px; }
-.qc-ops-closure-help { margin: 0; color: #5b655d; font-size: 11px; line-height: 1.4; }
 
 @media (max-width: 1100px) {
   .qc-ops-historical-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -275,7 +258,6 @@
 .qc-ops-operational-details dd { min-width: 0; margin: 0; color: #303c33; }
 .qc-ops-operational-details dd small { display: block; color: #69766c; font-size: 10px; }
 .qc-ops-operational-details a { color: #1854a5; }
-.qc-ops-row-history { margin: 0; padding-left: 15px; }
 .qc-ops-result-history { display: grid; gap: 3px; border-top: 1px solid #e1e7e2; padding-top: 4px; color: #69766c; font-size: 10px; }
 .qc-ops-result-history-list { display: grid; gap: 3px; margin: 0; padding-left: 14px; color: #35453a; }
 .qc-ops-result-history-list li { padding-left: 1px; }
@@ -297,16 +279,14 @@
 .qc-ops-unsaved, .qc-ops-saved { border-radius: 4px; padding: 3px 7px; font-size: 10px; font-weight: 700; }
 .qc-ops-unsaved { color: #80510f; background: #fff2d7; }
 .qc-ops-saved { color: #28623a; background: #eaf5ec; }
-.qc-ops-save-pending, .qc-ops-incomplete, .qc-ops-save-failed { border-radius: 4px; padding: 3px 7px; font-size: 10px; font-weight: 700; }
+.qc-ops-save-pending, .qc-ops-save-failed { border-radius: 4px; padding: 3px 7px; font-size: 10px; font-weight: 700; }
 .qc-ops-save-pending { color: #315c77; background: #eaf4fa; }
-.qc-ops-incomplete { color: #80510f; background: #fff2d7; }
 .qc-ops-save-failed { color: #8a3026; background: #fcebea; }
 .qc-ops-operational-table .qc-ops-row-attachments { vertical-align: middle; }
 .qc-ops-row-attachment-slot { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 5px; min-width: 0; border-bottom: 1px solid #e1e7e2; padding: 4px 0; }
 .qc-ops-row-attachment-slot:last-child { border-bottom: 0; }
 .qc-ops-row-attachment-slot > strong { flex: 0 0 65px; color: #526157; font-size: 10px; }
 .qc-ops-row-attachment-name { min-width: 0; flex: 1 1 100%; overflow-wrap: anywhere; color: #303c33; font-size: 9px; }
-.qc-ops-row-attachment-empty { color: #89918b; font-size: 9px; }
 .qc-ops-row-attachment-slot .qc-ops-small-button { width: auto; min-height: 26px; padding: 4px 7px; font-size: 10px; }
 .qc-ops-attachment-remove { padding: 2px 0; color: #8a3026; font-size: 9px; }
 .qc-ops-row-attachments-readonly .qc-ops-row-attachment-slot { align-items: flex-start; }
@@ -332,7 +312,6 @@
 .qc-ops-issue-attachment-name, .qc-ops-selected-issue-file-list li > span { min-width: 0; flex: 1 1 100%; overflow-wrap: anywhere; color: #2f3b33; font-size: 11px; }
 .qc-ops-issue-attachment-list small, .qc-ops-selected-issue-file-list small { color: var(--muted, #626a64); font-size: 9px; }
 .qc-ops-issue-attachment-list .qc-ops-small-button, .qc-ops-selected-issue-file-list .qc-ops-small-button { padding: 2px 0; font-size: 10px; }
-.qc-ops-empty-issue-attachments { margin: 0; color: var(--muted, #626a64); font-size: 11px; }
 .qc-ops-issue-attachment-preview-host .qc-ops-attachment-preview { margin-top: 5px; border: 1px solid #d1d8d2; border-radius: 6px; padding: 8px; }
 .qc-ops-issue-attachment-preview-host .qc-ops-attachment-preview-image { max-height: 48vh; }
 .qc-ops-selected-issue-files:empty { display: none; }

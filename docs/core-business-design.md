@@ -47,7 +47,7 @@ The table below preserves the original design vocabulary. The implemented entry 
 | `createBatch(...)` | Validate context, resolve one shared version label for every selected product family, and persist each product's locked inspection basis with the batch |
 | `getBatchWorkspace(...)` | Return the locked requirements, current results, evidence references, and issue summary needed by the page |
 | `saveInspection(...)` | Validate and save defects, entered numeric time, and remarks for a specific batch item |
-| `autosaveInspection(...)` | Persist valid partial or complete row results, including cleared nullable fields; complete rows alone qualify for issue snapshots, comparisons, and release |
+| `autosaveInspection(...)` | Persist valid partial or complete row results, including cleared nullable fields; complete rows alone qualify for comparisons and release; issue snapshots may preserve blank or partial persisted results |
 | `deleteBatch(...)` | Delete a draft operational batch after dependency checks while preserving shared documents and independent records |
 | `createIssueFromInspection(...)` | Create or return the existing issue for the agreed source identity |
 | `closeIssue(...)` | Check owner, formal disposition, and three confirmations before recording manual closure |

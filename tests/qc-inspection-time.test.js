@@ -286,7 +286,25 @@ test("inspection autosave persists partial rows, completes and clears results, a
   assert.equal(restoredPartial.actualTimeSeconds, null);
   assert.equal(restoredPartial.remarks, "Check this defect");
   assert.equal(restoredPartial.savedAt, null);
-  await assert.rejects(service.command("createIssue", { reportedBy: "Inspector", title: "Incomplete result", batchId: batch.id, rowId: row.id }, state.revision), /save the inspection row/i);
+  const incompleteIssueResult = await service.command("createIssue", {
+    reportedBy: "Inspector",
+    title: "Incomplete result",
+    batchId: batch.id,
+    rowId: row.id,
+    files: [{ name: "partial-result.png", mimeType: "image/png", dataUrl: PNG_URL, category: "photo" }],
+  }, state.revision);
+  state = await service.getState();
+  const incompleteIssue = state.issues.find((issue) => issue.id === incompleteIssueResult.entityId);
+  assert.deepEqual({
+    defectiveQty: incompleteIssue.sourceSnapshot.row.defectiveQty,
+    defectiveRate: incompleteIssue.sourceSnapshot.row.defectiveRate,
+    actualTimeSeconds: incompleteIssue.sourceSnapshot.row.actualTimeSeconds,
+    savedAt: incompleteIssue.sourceSnapshot.row.savedAt,
+  }, { defectiveQty: 1, defectiveRate: oneDefectRate, actualTimeSeconds: null, savedAt: null });
+  const issueSourceRow = state.batches.find((candidate) => candidate.id === batch.id).rows.find((candidate) => candidate.id === row.id);
+  assert.deepEqual({ defectiveQty: issueSourceRow.defectiveQty, actualTimeSeconds: issueSourceRow.actualTimeSeconds, savedAt: issueSourceRow.savedAt }, {
+    defectiveQty: 1, actualTimeSeconds: null, savedAt: null,
+  }, "creating an issue does not alter partial saved results");
   await assert.rejects(service.command("releaseBatch", { id: batch.id }, state.revision), /Complete all .* inspection rows.*remain incomplete/i);
 
   const repeated = await service.command("autosaveInspection", partialPayload, state.revision);
@@ -407,6 +425,115 @@ test("inspection autosave persists partial rows, completes and clears results, a
     actualTimeSeconds: 0,
     remarks: "Historical edit",
   }), /historical.*read-only/i);
+});
+
+test("blank and partial issue snapshots survive retries, backups, and SQLite reopen", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "masterqc-issue-partial-sqlite-test-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const databasePath = path.join(directory, "workspace.sqlite");
+  let service = makeService(createSQLiteQCAdapter({ databasePath }));
+  const { batch } = await prepareBatch(service, { batchNumber: "B-ISSUE-PARTIAL", orderNumber: "PO-ISSUE-PARTIAL" });
+  const row = (await service.getBatchWorkspace(batch.id)).rows[0];
+  const photo = { name: "issue-photo.png", mimeType: "image/png", dataUrl: PNG_URL, category: "photo" };
+  const blankRequest = {
+    reportedBy: "Inspector",
+    title: "Blank row issue",
+    requestId: "88888888-8888-4888-8888-888888888888",
+    batchId: batch.id,
+    rowId: row.id,
+    files: [photo],
+  };
+  let state = await service.getState();
+  const beforeBlankCreate = structuredClone(state.batches.find((candidate) => candidate.id === batch.id).rows.find((candidate) => candidate.id === row.id));
+  const blankResult = await service.command("createIssue", blankRequest, state.revision);
+  state = await service.getState();
+  const blankIssue = state.issues.find((issue) => issue.id === blankResult.entityId);
+  assert.deepEqual({
+    defectiveQty: blankIssue.sourceSnapshot.row.defectiveQty,
+    defectiveRate: blankIssue.sourceSnapshot.row.defectiveRate,
+    actualTimeSeconds: blankIssue.sourceSnapshot.row.actualTimeSeconds,
+    savedAt: blankIssue.sourceSnapshot.row.savedAt,
+  }, { defectiveQty: null, defectiveRate: null, actualTimeSeconds: null, savedAt: null });
+  assert.deepEqual(
+    state.batches.find((candidate) => candidate.id === batch.id).rows.find((candidate) => candidate.id === row.id),
+    beforeBlankCreate,
+    "creating an issue leaves blank persisted results unchanged",
+  );
+  const blankRetry = await service.command("createIssue", blankRequest, state.revision);
+  assert.equal(blankRetry.entityId, blankResult.entityId);
+  assert.equal(blankRetry.revision, state.revision);
+
+  await service.command("saveBatchChanges", {
+    batchId: batch.id,
+    rows: [{ rowId: row.id, defectiveQty: 2, actualTimeSeconds: null, remarks: "Defect recorded; time pending." }],
+  }, (await service.getState()).revision);
+  state = await service.getState();
+  const partialRequest = {
+    ...blankRequest,
+    title: "Partial row issue",
+    requestId: "99999999-9999-4999-8999-999999999999",
+  };
+  const partialResult = await service.command("createIssue", partialRequest, state.revision);
+  state = await service.getState();
+  const partialIssue = state.issues.find((issue) => issue.id === partialResult.entityId);
+  const expectedRate = Number(((2 / row.inspectedQty) * 100).toFixed(2));
+  assert.deepEqual({
+    defectiveQty: partialIssue.sourceSnapshot.row.defectiveQty,
+    defectiveRate: partialIssue.sourceSnapshot.row.defectiveRate,
+    actualTimeSeconds: partialIssue.sourceSnapshot.row.actualTimeSeconds,
+    savedAt: partialIssue.sourceSnapshot.row.savedAt,
+  }, { defectiveQty: 2, defectiveRate: expectedRate, actualTimeSeconds: null, savedAt: null });
+
+  await service.command("saveBatchChanges", {
+    batchId: batch.id,
+    rows: [{ rowId: row.id, defectiveQty: 2, actualTimeSeconds: 0, remarks: "Complete later." }],
+  }, (await service.getState()).revision);
+  state = await service.getState();
+  assert.equal(state.batches.find((candidate) => candidate.id === batch.id).rows.find((candidate) => candidate.id === row.id).savedAt !== null, true);
+  assert.equal(state.issues.find((issue) => issue.id === partialResult.entityId).sourceSnapshot.row.actualTimeSeconds, null);
+  assert.equal(state.issues.find((issue) => issue.id === partialResult.entityId).sourceSnapshot.row.savedAt, null);
+  const partialRetry = await service.command("createIssue", partialRequest, state.revision);
+  assert.equal(partialRetry.entityId, partialResult.entityId);
+  assert.equal(partialRetry.revision, state.revision);
+  const completeRequest = {
+    ...partialRequest,
+    title: "Complete row issue",
+    requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  };
+  const completeResult = await service.command("createIssue", completeRequest, (await service.getState()).revision);
+  state = await service.getState();
+  const completeIssue = state.issues.find((issue) => issue.id === completeResult.entityId);
+  assert.notEqual(completeIssue.sourceSnapshot.row.savedAt, null);
+
+  const backup = await service.exportBackup();
+  validateBackup(backup);
+  const invalidRateBackup = structuredClone(backup);
+  invalidRateBackup.state.issues.find((issue) => issue.id === partialResult.entityId).sourceSnapshot.row.defectiveRate = 0;
+  assert.throws(() => validateBackup(invalidRateBackup), /invalid defective rate/i);
+  const invalidTimeBackup = structuredClone(backup);
+  invalidTimeBackup.state.issues.find((issue) => issue.id === partialResult.entityId).sourceSnapshot.row.actualTimeSeconds = -1;
+  assert.throws(() => validateBackup(invalidTimeBackup), /invalid actual inspection time/i);
+  const invalidTimestampBackup = structuredClone(backup);
+  invalidTimestampBackup.state.issues.find((issue) => issue.id === completeResult.entityId).sourceSnapshot.row.savedAt = "not-a-timestamp";
+  assert.throws(() => validateBackup(invalidTimestampBackup), /issue source row saved time/i);
+
+  const restored = makeService();
+  await restored.initialize();
+  await restored.importBackup(backup, 0);
+  const restoredIssues = (await restored.getState()).issues;
+  assert.deepEqual(restoredIssues.find((issue) => issue.id === blankResult.entityId).sourceSnapshot.row, blankIssue.sourceSnapshot.row);
+  assert.deepEqual(restoredIssues.find((issue) => issue.id === partialResult.entityId).sourceSnapshot.row, partialIssue.sourceSnapshot.row);
+  assert.deepEqual(restoredIssues.find((issue) => issue.id === completeResult.entityId).sourceSnapshot.row, completeIssue.sourceSnapshot.row);
+
+  await service.close();
+  service = makeService(createSQLiteQCAdapter({ databasePath }));
+  await service.initialize();
+  const reopenedIssues = (await service.getState()).issues;
+  assert.deepEqual(reopenedIssues.find((issue) => issue.id === blankResult.entityId).sourceSnapshot.row, blankIssue.sourceSnapshot.row);
+  assert.deepEqual(reopenedIssues.find((issue) => issue.id === partialResult.entityId).sourceSnapshot.row, partialIssue.sourceSnapshot.row);
+  assert.deepEqual(reopenedIssues.find((issue) => issue.id === completeResult.entityId).sourceSnapshot.row, completeIssue.sourceSnapshot.row);
+  await service.close();
+  await restored.close();
 });
 
 test("actual inspection time survives SQLite close and reopen and returns in the refreshed workspace", async (t) => {

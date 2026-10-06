@@ -1,4 +1,4 @@
-import { button, downloadFile, el, notify, readFileAsDataURL, showDialog } from "./qc-ui.js";
+import { blobFromDataUrl, button, downloadFile, el, notify, readFileAsDataURL, showDialog } from "./qc-ui.js";
 
 export const MEBIBYTE = 1024 * 1024;
 
@@ -56,23 +56,6 @@ export async function readAttachmentFile(file, { maxBytes = null, category = nul
     mimeType,
     dataUrl: `data:${mimeType}${encoding},${rawDataUrl.slice(comma + 1)}`,
   };
-}
-
-function blobFromDataUrl(dataUrl, fallbackMimeType = "application/octet-stream") {
-  if (typeof dataUrl !== "string") throw new Error("The stored file data is invalid.");
-  const comma = dataUrl.indexOf(",");
-  if (comma < 0) throw new Error("The stored file data is invalid.");
-  const metadata = dataUrl.slice(0, comma);
-  const payload = dataUrl.slice(comma + 1);
-  const mimeType = metadata.match(/^data:([^;,]+)/)?.[1] || fallbackMimeType;
-  let bytes;
-  if (/;base64/i.test(metadata)) {
-    const binary = atob(payload);
-    bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-  } else {
-    bytes = new TextEncoder().encode(decodeURIComponent(payload));
-  }
-  return new Blob([bytes], { type: mimeType });
 }
 
 function textFromDataUrl(dataUrl) {

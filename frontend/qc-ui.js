@@ -168,24 +168,29 @@ function safeFilename(value) {
   return cleaned && cleaned !== "." && cleaned !== ".." ? cleaned : "download";
 }
 
+export function blobFromDataUrl(dataUrl, fallbackMimeType = "application/octet-stream") {
+  if (typeof dataUrl !== "string") throw new Error("The stored file data is invalid.");
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) throw new Error("The stored file data is invalid.");
+  const metadata = dataUrl.slice(0, comma);
+  const payload = dataUrl.slice(comma + 1);
+  const mimeType = metadata.match(/^data:([^;,]+)/)?.[1] || fallbackMimeType;
+  let bytes;
+  if (/;base64/i.test(metadata)) {
+    const binary = atob(payload);
+    bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  } else {
+    bytes = new TextEncoder().encode(decodeURIComponent(payload));
+  }
+  return new Blob([bytes], { type: mimeType });
+}
+
 export async function downloadFile(name, contents, mimeType = "application/octet-stream") {
   let blob;
   if (contents instanceof Blob) {
     blob = contents;
   } else if (typeof contents === "string" && contents.startsWith("data:")) {
-    const comma = contents.indexOf(",");
-    if (comma < 0) throw new Error("The stored file data is invalid.");
-    const metadata = contents.slice(0, comma);
-    const payload = contents.slice(comma + 1);
-    const mediaType = metadata.match(/^data:([^;,]+)/)?.[1] || mimeType;
-    let bytes;
-    if (/;base64/i.test(metadata)) {
-      const binary = atob(payload);
-      bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    } else {
-      bytes = new TextEncoder().encode(decodeURIComponent(payload));
-    }
-    blob = new Blob([bytes], { type: mediaType });
+    blob = blobFromDataUrl(contents, mimeType);
   } else {
     blob = new Blob([contents], { type: mimeType });
   }

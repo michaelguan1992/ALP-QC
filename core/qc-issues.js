@@ -149,7 +149,6 @@ export function createIssue(state, data, context) {
       if (!row) fail("That inspection row is not part of the selected batch.");
       rowProduct = getBatchRowProduct(batch, row);
       if (!rowProduct) fail("That inspection row has no locked product allocation.");
-      if (row.savedAt === null) fail("Save the inspection row before creating an issue from it.");
       if (requestId === null) {
         const existing = state.issues.find((issue) => issue.batchId === batchId && issue.rowId === rowId);
         if (existing) return { entityId: existing.id, changed: false, action: "createIssue", summary: `Issue ${existing.number} already exists for this inspection row.` };

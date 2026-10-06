@@ -97,10 +97,6 @@ export function safeFilename(value, fallback = "masterqc-export") {
   return safe || fallback;
 }
 
-export function runCommand(ctx, type, data, options) {
-  return ctx.run(type, data, options);
-}
-
 export function safeProcedureUrl(value) {
   if (!value) return null;
   try {

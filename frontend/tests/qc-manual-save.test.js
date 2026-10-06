@@ -30,11 +30,131 @@ test("manual save waits for an explicit save and reports acknowledgment", async 
   draft = "edited";
   controller.noteChanges();
   assert.deepEqual(calls, []);
+  assert.equal(controller.saveOnExit, false);
+  assert.equal(controller.saveBeforeExit, undefined);
   assert.equal(controller.getStatus(), "Unsaved changes");
   assert.equal(await controller.saveAll(), true);
   assert.deepEqual(calls, [{ value: "edited" }]);
   assert.equal(controller.getStatus(), "Saved");
   assert.ok(statuses.includes("Saving…"));
+});
+
+test("exit saving starts only when requested and waits for service acknowledgment", async () => {
+  let draft = "saved";
+  let acknowledged = "saved";
+  const gate = deferred();
+  let calls = 0;
+  let leftPage = false;
+  const controller = createManualSaveController({
+    hasChanges: () => draft !== acknowledged,
+    readSnapshot: () => ({ value: draft }),
+    save: () => { calls += 1; return gate.promise; },
+    onSaved: (snapshot) => { acknowledged = snapshot.value; },
+    saveOnExit: true,
+  });
+
+  draft = "edited";
+  controller.noteChanges();
+  assert.equal(calls, 0);
+  const leaving = controller.saveBeforeExit().then((saved) => {
+    if (saved) leftPage = true;
+    return saved;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(calls, 1);
+  assert.equal(leftPage, false);
+
+  gate.resolve({ ok: true });
+  assert.equal(await leaving, true);
+  assert.equal(leftPage, true);
+  assert.equal(controller.hasPending(), false);
+});
+
+test("invalid exit save keeps the draft and exposes the validation reason", async () => {
+  let draft = "invalid";
+  let calls = 0;
+  const controller = createManualSaveController({
+    hasChanges: () => draft !== "saved",
+    readSnapshot: () => ({ value: draft }),
+    validate: (snapshot) => snapshot.value === "valid" ? true : "Correct the inspection value first.",
+    save: async () => { calls += 1; return { ok: true }; },
+    saveOnExit: true,
+  });
+
+  assert.equal(await controller.saveBeforeExit(), false);
+  assert.equal(calls, 0);
+  assert.equal(draft, "invalid");
+  assert.equal(controller.hasPending(), true);
+  assert.equal(controller.getLastError().message, "Correct the inspection value first.");
+});
+
+test("service failure during exit keeps the draft and exposes the stale reason", async () => {
+  let draft = "edited";
+  const controller = createManualSaveController({
+    hasChanges: () => draft !== "saved",
+    readSnapshot: () => ({ value: draft }),
+    save: async () => ({ ok: false, error: new Error("stale revision; reload the latest data") }),
+    saveOnExit: true,
+  });
+
+  assert.equal(await controller.saveBeforeExit(), false);
+  assert.equal(draft, "edited");
+  assert.equal(controller.hasPending(), true);
+  assert.equal(controller.getLastError().message, "stale revision; reload the latest data");
+});
+
+test("exit flush saves typing made during the first save before resolving", async () => {
+  let draft = "first";
+  let acknowledged = "saved";
+  const gates = [deferred(), deferred()];
+  const calls = [];
+  const controller = createManualSaveController({
+    hasChanges: () => draft !== acknowledged,
+    readSnapshot: () => ({ value: draft }),
+    save: (snapshot) => {
+      calls.push(snapshot.value);
+      return gates[calls.length - 1].promise;
+    },
+    onSaved: (snapshot) => { acknowledged = snapshot.value; },
+    saveOnExit: true,
+  });
+
+  const leaving = controller.saveBeforeExit();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(calls, ["first"]);
+  draft = "typed during save";
+  controller.noteChanges();
+  gates[0].resolve({ ok: true });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(calls, ["first", "typed during save"]);
+  gates[1].resolve({ ok: true });
+
+  assert.equal(await leaving, true);
+  assert.equal(controller.hasPending(), false);
+  assert.equal(acknowledged, "typed during save");
+});
+
+test("overlapping exit flushes share one write", async () => {
+  let draft = "edited";
+  let acknowledged = "saved";
+  const gate = deferred();
+  let calls = 0;
+  const controller = createManualSaveController({
+    hasChanges: () => draft !== acknowledged,
+    readSnapshot: () => ({ value: draft }),
+    save: () => { calls += 1; return gate.promise; },
+    onSaved: (snapshot) => { acknowledged = snapshot.value; },
+    saveOnExit: true,
+  });
+
+  const first = controller.saveBeforeExit();
+  const second = controller.saveBeforeExit();
+  assert.strictEqual(second, first);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(calls, 1);
+  gate.resolve({ ok: true });
+  assert.deepEqual(await Promise.all([first, second]), [true, true]);
+  assert.equal(calls, 1);
 });
 
 test("a failed save keeps the draft and reports failure", async () => {

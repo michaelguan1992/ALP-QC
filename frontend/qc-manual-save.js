@@ -11,6 +11,7 @@ export function createManualSaveController({
   onSaved = () => {},
   onError = () => {},
   onDiscard = () => {},
+  saveOnExit = false,
 } = {}) {
   if (typeof hasChanges !== "function" || typeof readSnapshot !== "function" || typeof save !== "function") {
     throw new TypeError("Manual save controllers require hasChanges, readSnapshot, and save functions.");
@@ -18,6 +19,8 @@ export function createManualSaveController({
 
   let disposed = false;
   let inFlight = null;
+  let exitFlush = null;
+  let lastError = null;
   let status = hasChanges() ? "Unsaved changes" : "Saved";
 
   function publish(nextStatus) {
@@ -31,6 +34,7 @@ export function createManualSaveController({
 
   function noteChanges() {
     if (disposed) return;
+    lastError = null;
     if (inFlight) {
       publish("Saving…");
       return;
@@ -55,6 +59,7 @@ export function createManualSaveController({
     }
     if (validation !== true) {
       const error = new Error(typeof validation === "string" ? validation : "Correct the highlighted changes before saving.");
+      lastError = error;
       try { onError(error, { validation: true, snapshot }); } catch {}
       publish("Save failed");
       return false;
@@ -69,6 +74,7 @@ export function createManualSaveController({
           onSaved(clone(snapshot), response);
         } catch (error) {
           failed = true;
+          lastError = error;
           try { onError(error, { acknowledged: true, snapshot, response }); } catch {}
           publish("Save failed");
           return false;
@@ -78,6 +84,7 @@ export function createManualSaveController({
       })
       .catch((error) => {
         failed = true;
+        lastError = error;
         try { onError(error, { snapshot }); } catch {}
         publish("Save failed");
         return false;
@@ -91,6 +98,32 @@ export function createManualSaveController({
     return inFlight;
   }
 
+  function saveBeforeExit() {
+    if (!saveOnExit) return Promise.resolve(false);
+    if (disposed) return Promise.resolve(true);
+    if (exitFlush) return exitFlush;
+
+    const flush = async () => {
+      while (!disposed) {
+        if (inFlight) {
+          if (!await inFlight) return false;
+          continue;
+        }
+        if (!hasChanges()) {
+          publish("Saved");
+          return true;
+        }
+        if (!await saveAll()) return false;
+      }
+      return true;
+    };
+
+    exitFlush = flush().finally(() => {
+      exitFlush = null;
+    });
+    return exitFlush;
+  }
+
   function discardAll() {
     if (disposed || inFlight) return false;
     try { onDiscard(); } catch {}
@@ -101,10 +134,13 @@ export function createManualSaveController({
   publish(status);
   return {
     saveAll,
+    saveOnExit: Boolean(saveOnExit),
+    ...(saveOnExit ? { saveBeforeExit } : {}),
     noteChanges,
     hasPending: () => !disposed && (inFlight !== null || hasChanges()),
     isSaving: () => inFlight !== null,
     getStatus: () => status,
+    getLastError: () => lastError,
     discardAll,
     dispose() { disposed = true; },
   };
