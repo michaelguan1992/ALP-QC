@@ -142,33 +142,46 @@ test("automatic numbers count each selected model once across colors and suffix 
   let state = await initializeWithRecordedVersions(harness);
   const s11Red = state.variants.find((variant) => variant.model === "S11" && variant.color === "Red");
   const s11Yellow = state.variants.find((variant) => variant.model === "S11" && variant.color === "Yellow");
+  const s12Red = state.variants.find((variant) => variant.model === "S12" && variant.color === "Red");
+  const s13Red = state.variants.find((variant) => variant.model === "S13" && variant.color === "Red");
+  const s14Red = state.variants.find((variant) => variant.model === "S14" && variant.color === "Red");
   const s15Red = state.variants.find((variant) => variant.model === "S15" && variant.color === "Red");
-  const order = await createOrder(harness, [s15Red, s11Yellow, s11Red]);
+  const order = await createOrder(harness, [s15Red, s14Red, s13Red, s12Red, s11Yellow, s11Red]);
 
   const singleProduct = batchCommand(state, order, [s11Red]);
   const singleResult = await harness.command("createBatch", singleProduct);
   state = await harness.state();
-  assert.equal(state.batches.find((batch) => batch.id === singleResult.entityId).number, "S11-20261001-AP-OQC");
+  assert.equal(state.batches.find((batch) => batch.id === singleResult.entityId).number, "S1-20261001-AP-OQC");
 
   const twoColors = batchCommand(state, order, [s11Red, s11Yellow], { number: "  " });
   const twoColorsResult = await harness.command("createBatch", twoColors);
   state = await harness.state();
-  assert.equal(state.batches.find((batch) => batch.id === twoColorsResult.entityId).number, "S11-20261001-AP-OQC-01");
+  assert.equal(state.batches.find((batch) => batch.id === twoColorsResult.entityId).number, "S1-20261001-AP-OQC-01");
 
   const repeat = batchCommand(state, order, [s11Red, s11Yellow], { number: "" });
   const repeatResult = await harness.command("createBatch", repeat);
   state = await harness.state();
-  assert.equal(state.batches.find((batch) => batch.id === repeatResult.entityId).number, "S11-20261001-AP-OQC-02");
+  assert.equal(state.batches.find((batch) => batch.id === repeatResult.entityId).number, "S1-20261001-AP-OQC-02");
 
   const thirdCollision = batchCommand(state, order, [s11Red, s11Yellow]);
   const thirdResult = await harness.command("createBatch", thirdCollision);
   state = await harness.state();
-  assert.equal(state.batches.find((batch) => batch.id === thirdResult.entityId).number, "S11-20261001-AP-OQC-03");
+  assert.equal(state.batches.find((batch) => batch.id === thirdResult.entityId).number, "S1-20261001-AP-OQC-03");
 
   const nextDate = batchCommand(state, order, [s11Red, s11Yellow], { date: "2026-10-02" });
   const nextDateResult = await harness.command("createBatch", nextDate);
   state = await harness.state();
-  assert.equal(state.batches.find((batch) => batch.id === nextDateResult.entityId).number, "S11-20261002-AP-OQC");
+  assert.equal(state.batches.find((batch) => batch.id === nextDateResult.entityId).number, "S1-20261002-AP-OQC");
+
+  for (const [model, variant, date] of [
+    ["S12", s12Red, "2026-10-03"],
+    ["S13", s13Red, "2026-10-04"],
+    ["S14", s14Red, "2026-10-05"],
+  ]) {
+    const result = await harness.command("createBatch", batchCommand(state, order, [variant], { date }));
+    state = await harness.state();
+    assert.equal(state.batches.find((batch) => batch.id === result.entityId).number, `S1-${date.replaceAll("-", "")}-AP-OQC`, `${model} should use the S1 prefix`);
+  }
 
   const beforeMixedModel = await harness.state();
   await assert.rejects(harness.command("createBatch", batchCommand(beforeMixedModel, order, [s11Red, s15Red])), /one model only/i);
@@ -212,8 +225,12 @@ test("legacy explicit numbers are preserved and duplicate names reject atomicall
   const explicitBaseResult = await harness.command("createBatch", explicitGeneratedBase);
   saved = await harness.state();
   assert.equal(saved.batches.find((batch) => batch.id === explicitBaseResult.entityId).number, "s11-20261001-ap-oqc");
+  await assert.rejects(
+    harness.command("createBatch", batchCommand(saved, order, [s11], { number: "S12-20261001-AP-OQC" })),
+    /Batch number must be unique/i,
+  );
   const automaticAfterCaseCollision = await harness.command("createBatch", batchCommand(saved, order, [s11]));
-  assert.equal((await harness.state()).batches.find((batch) => batch.id === automaticAfterCaseCollision.entityId).number, "S11-20261001-AP-OQC-01");
+  assert.equal((await harness.state()).batches.find((batch) => batch.id === automaticAfterCaseCollision.entityId).number, "S1-20261001-AP-OQC-01");
 
   const beforeInvalid = await harness.state();
   await assert.rejects(
@@ -237,7 +254,7 @@ test("automatic and explicit numbers avoid resolved historical display names", a
   const order = await createOrder(harness, [s11], "PO-HISTORICAL-COLLISION");
   const historical = state.batches.find((batch) => batch.kind === "historical");
   const displayedHistoricalName = resolveBatchDisplayNumbers(state).get(historical.id);
-  assert.equal(displayedHistoricalName, "S11-20261001-AP-OQC");
+  assert.equal(displayedHistoricalName, "S1-20261001-AP-OQC");
 
   const beforeExplicitCollision = await harness.state();
   await assert.rejects(
@@ -249,4 +266,25 @@ test("automatic and explicit numbers avoid resolved historical display names", a
   const result = await harness.command("createBatch", batchCommand(beforeExplicitCollision, order, [s11]));
   state = await harness.state();
   assert.equal(state.batches.find((batch) => batch.id === result.entityId).number, `${displayedHistoricalName}-01`);
+});
+
+test("automatic names reserve legacy raw numbers and all canonical operational displays", async () => {
+  const harness = makeHarness();
+  const state = await initializeWithRecordedVersions(harness);
+  const s11 = state.variants.find((variant) => variant.model === "S11" && variant.color === "Red");
+  const s12 = state.variants.find((variant) => variant.model === "S12" && variant.color === "Red");
+  const order = await createOrder(harness, [s11, s12], "PO-LEGACY-DISPLAY-COLLISION");
+
+  await harness.command("createBatch", batchCommand(state, order, [s11], { number: "S11-20261001-AP-OQC" }));
+  let saved = await harness.state();
+  await harness.command("createBatch", batchCommand(saved, order, [s12], { number: "S1-20261001-AP-OQC-01" }));
+  saved = await harness.state();
+
+  const result = await harness.command("createBatch", batchCommand(saved, order, [s11]));
+  const finalState = await harness.state();
+  assert.equal(finalState.batches.find((batch) => batch.id === result.entityId).number, "S1-20261001-AP-OQC-02");
+  assert.deepEqual(
+    finalState.batches.filter((batch) => batch.kind !== "historical").slice(0, 2).map((batch) => batch.number),
+    ["S11-20261001-AP-OQC", "S1-20261001-AP-OQC-01"],
+  );
 });

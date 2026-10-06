@@ -27,6 +27,7 @@ import {
   readAttachmentFile,
 } from "./qc-attachments.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
+import { resolveBatchDisplayNumber } from "../core/qc-batch-display.js";
 import { hasRequiredIssuePhoto, remainingIssueDraftAfterDiscussion, submitDiscussionEntry } from "./qc-issue-drafts.js";
 
 const issueDrafts = new Map();
@@ -114,7 +115,8 @@ function sourceSnapshot(issue) {
 function sourceBatch(issue, state) {
   const snapshot = sourceSnapshot(issue);
   const fromSnapshot = snapshot.batch || {};
-  return snapshot.batchNumber || fromSnapshot.number || fromSnapshot.batchNumber || batchById(state).get(issue.batchId || fromSnapshot.id)?.number || "Standalone issue";
+  const fallback = snapshot.batchNumber || fromSnapshot.number || fromSnapshot.batchNumber || "";
+  return resolveBatchDisplayNumber(state, issue.batchId || fromSnapshot.id, fallback) || "Standalone issue";
 }
 
 function sourceRow(issue) {
@@ -428,7 +430,7 @@ function sourceCard(issue, state, ctx) {
   const rowProductQuantity = row?.productQuantity ?? rowProduct?.productQuantity ?? rowProduct?.quantity;
   const rowVersion = row?.versionLabel || rowProduct?.versionLabel || rowProduct?.version?.label;
   const otherProducts = otherBatchProducts(products, row, rowProduct, state);
-  const linkedBatchNumber = snapshot.batchNumber || batch.number || batch.batchNumber || batchById(state).get(issue.batchId || batch.id)?.number;
+  const linkedBatchNumber = resolveBatchDisplayNumber(state, issue.batchId || batch.id, snapshot.batchNumber || batch.number || batch.batchNumber || "");
   const factory = snapshot.factory || batch.factory;
   const stage = snapshot.stage || batch.stage;
   const batchDate = snapshot.date || batch.date;
@@ -935,7 +937,7 @@ export function openNewIssueDialog(state, ctx, options = {}) {
   const batchSelect = el("select", { name: "batchId" }, el("option", { value: "" }, "No batch link"), ...editableBatches.map((batch) => {
     const products = getBatchProducts(batch).map((product) => ({ ...product, variant: variantById(state).get(product.variantId) }));
     const summary = products.length ? productSummary(products, state) : text(variantById(state).get(batch.variantId)?.label, batch.variantId);
-    return el("option", { value: batch.id }, `${text(batch.number)} · ${summary} · ${text(batch.factory)} ${text(batch.stage)}`);
+    return el("option", { value: batch.id }, `${text(resolveBatchDisplayNumber(state, batch.id, batch.number))} · ${summary} · ${text(batch.factory)} ${text(batch.stage)}`);
   }));
   const rowSelect = el("select", { name: "rowId", disabled: true }, el("option", { value: "" }, "No inspection row"));
   const updateRows = () => {
@@ -955,7 +957,7 @@ export function openNewIssueDialog(state, ctx, options = {}) {
   batchSelect.addEventListener("change", updateRows);
 
   const fixedContext = fixedBatch
-    ? el("p", { className: "qc-ops-fixed-issue-source" }, `${text(fixedBatch.number)} · ${text(fixedRow?.no)} · ${text(fixedRow?.title)}`)
+    ? el("p", { className: "qc-ops-fixed-issue-source" }, `${text(resolveBatchDisplayNumber(state, fixedBatch.id, fixedBatch.number))} · ${text(fixedRow?.no)} · ${text(fixedRow?.title)}`)
     : null;
   const associationFields = fixedBatch
     ? fixedContext

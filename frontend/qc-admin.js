@@ -1,6 +1,7 @@
 import { ASSET_TOTAL_MAX_BYTES, BACKUP_MAX_BYTES, DOCUMENT_MAX_BYTES } from "../core/qc-service.js";
 import { rawLarkVersionFields } from "../core/qc-lark-versions.js";
 import { getPurchaseOrderProgress } from "../core/qc-purchasing.js";
+import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { formatNumberedDescription } from "./qc-source-description.js";
 import { downloadAttachment, loadAssetContent } from "./qc-attachments.js";
 import { button, closeDialog, downloadFile, el, field, notify, readFileAsDataURL, showDialog } from "./qc-ui.js";
@@ -521,6 +522,7 @@ async function renderOrders(root, ctx) {
     root.append(emptyState("No purchase orders yet", ""));
     return;
   }
+  const displayNumbers = resolveBatchDisplayNumbers(ctx.state);
   const results = ctx.state.orders.map((order) => ({ order, progress: getPurchaseOrderProgress(ctx.state, order.id), error: null }));
   root.append(h("div", { className: "admin-grid" }, results.map(({ order, progress, error }) => h("details", { className: "admin-card admin-card-wide card purchase-order-card" },
     h("summary", { className: "purchase-order-summary" },
@@ -542,7 +544,7 @@ async function renderOrders(root, ctx) {
           h("tbody", {}, (progress?.lines ?? []).map((line) => h("tr", {},
             h("td", {}, h("strong", {}, line.variant?.label ?? variantName(ctx, line.variantId))),
             h("td", {}, text(line.orderedQty, "0")), h("td", {}, text(line.releasedQty, "0")), h("td", {}, text(line.remainingQty, "0")), h("td", {}, text(line.excessQty, "0")),
-            h("td", {}, (line.batches ?? []).length ? h("div", { className: "stack" }, line.batches.map((batch) => h("span", { className: "readonly-label" }, `${batch.number}: ${batch.quantity} released`))) : "—"),
+            h("td", {}, (line.batches ?? []).length ? h("div", { className: "stack" }, line.batches.map((batch) => h("span", { className: "readonly-label" }, `${displayNumbers.get(batch.id) ?? batch.number}: ${batch.quantity} released`))) : "—"),
           ))),
         )),
     ),
@@ -853,20 +855,6 @@ function renderBackup(root, ctx) {
       notify(error instanceof Error ? error.message : "The backup could not be restored.", true);
     }
   });
-  const migrationButton = !ctx.isDemo ? button("Migrate data from this browser", async () => {
-    try {
-      const backup = await ctx.exportLegacyBrowserBackup();
-      const result = await ctx.service.importBackup(backup, ctx.state.revision);
-      ctx.announceChange?.(result.revision);
-      const counts = result.counts ?? {};
-      const added = Object.values(counts.added ?? {}).reduce((sum, count) => sum + count, 0);
-      const skipped = Object.values(counts.skipped ?? {}).reduce((sum, count) => sum + count, 0);
-      notify(`Migration complete: ${added} records added; ${skipped} identical records skipped. The original browser data remains available.`);
-      ctx.refresh();
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "Browser data could not be migrated.", true);
-    }
-  }, "button-primary") : null;
   const assetBytes = ctx.state.assets.reduce((sum, asset) => sum + bytesForAsset(asset), 0);
   const metrics = h("div", { className: "progress-grid" },
     h("div", { className: "progress-stat" }, h("span", {}, "Design versions"), h("strong", {}, String(ctx.state.versions.length))),
@@ -877,20 +865,9 @@ function renderBackup(root, ctx) {
   root.append(h("div", { className: "admin-grid backup-grid" },
     h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("h3", {}, "Export")), exportButton),
     h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("h3", {}, "Restore")), form),
-    !ctx.isDemo ? h("details", { className: "admin-card admin-card-wide card backup-disclosure" },
-      h("summary", {}, "Browser migration"),
-      migrationButton,
-    ) : null,
     h("details", { className: "admin-card admin-card-wide card backup-disclosure" },
       h("summary", {}, ctx.isDemo ? "Demo workspace details" : "Shared workspace details"),
       metrics,
-    ),
-    h("details", { className: "admin-card admin-card-wide card backup-disclosure" },
-      h("summary", {}, "Reference pages"),
-      h("div", { className: "stack" },
-        h("a", { href: "/frontend/initialization.html" }, "Initialization draft"),
-        h("a", { href: "/frontend/prototype.html" }, "AP table prototype"),
-      ),
     ),
   ));
 }
