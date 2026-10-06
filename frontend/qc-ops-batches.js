@@ -19,8 +19,7 @@ import {
 import { closeDialog, showDialog } from "./qc-ui.js";
 import { attachmentCanPreview, downloadAttachment, MEBIBYTE, previewAttachment, readAttachmentFile } from "./qc-attachments.js";
 import { openNewIssueDialog } from "./qc-ops-issues.js";
-import { historicalBatchImportControl } from "./qc-history.js";
-import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
+import { resolveBatchDisplayNumber, resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { getBatchVersionItems, getBatchVersions, getBatchVersionReadiness, getSharedBatchVersionChoices } from "../core/qc-batch-versions.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
 import { createManualSaveController } from "./qc-manual-save.js";
@@ -99,7 +98,7 @@ function rowProduct(row, batch, state, workspace = null) {
 function batchLabel(batch, state) {
   const order = orderById(state).get(batch.orderId);
   const products = batchProductNames(batch, state).join(", ");
-  return `${text(batch.number, "Batch")} · ${text(products, batch.variantId)} · ${text(order?.number, batch.orderId)}`;
+  return `${text(resolveBatchDisplayNumber(state, batch.id, batch.number), "Batch")} · ${text(products, batch.variantId)} · ${text(order?.number, batch.orderId)}`;
 }
 
 function isHistoricalBatch(batch) {
@@ -324,7 +323,7 @@ function renderRowAttachmentCell(row, workspace, state, ctx, readOnly) {
   return cell;
 }
 
-function renderInspectionRow(row, index, workspace, state, ctx, manualSaveController, onDraftChange = null) {
+function renderInspectionRow(row, index, workspace, state, ctx, manualSaveController, onDraftChange = null, displayNumbers = null) {
   const readOnly = workspace.batch.status === "released";
   const draft = stateForRow(row, workspace.batch.id);
   const key = rowKey(workspace.batch.id, row.id);
@@ -385,7 +384,7 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
   const historyValue = history.length
     ? el("ul", { className: "qc-ops-result-history-list" }, ...history.slice(0, 4).map((entry, historyIndex) => el("li", {},
       el("strong", {}, `Prior ${historyIndex + 1}: ${rateLabel(entry.rate ?? entry.defectiveRate)}`),
-      el("small", {}, text(entry.batchNumber || entry.number || entry.batchId)),
+      el("small", {}, text(displayNumbers?.get(entry.batchId) ?? resolveBatchDisplayNumber(state, entry.batchId, entry.batchNumber || entry.number || entry.batchId))),
       el("small", {}, dateLabel(entry.date)),
     )))
     : el("span", { className: "qc-ops-empty-history" }, "—");
@@ -595,15 +594,16 @@ function renderHistoricalInspectionRow(row, index, workspace, state, ctx) {
   return tr;
 }
 
-function renderRows(workspace, state, ctx, onDraftChange) {
+function renderRows(workspace, state, ctx, onDraftChange, displayNumbers) {
   const body = el("tbody", { className: "qc-ops-table-body" });
   list(workspace.rows).forEach((row, index) => body.append(isHistoricalBatch(workspace.batch)
     ? renderHistoricalInspectionRow(row, index, workspace, state, ctx)
-    : renderInspectionRow(row, index, workspace, state, ctx, null, onDraftChange)));
+    : renderInspectionRow(row, index, workspace, state, ctx, null, onDraftChange, displayNumbers)));
   return body;
 }
 
 function makeInspectionTable(workspace, state, ctx, onDraftChange) {
+  const displayNumbers = resolveBatchDisplayNumbers(state);
   const multipleProducts = !isHistoricalBatch(workspace.batch) && batchProducts(workspace.batch, state, workspace).length > 1;
   const table = el("table", { className: `qc-ops-inspection-table${multipleProducts ? " qc-ops-mixed-product-table" : ""}` });
   const colgroup = el("colgroup");
@@ -634,12 +634,13 @@ function makeInspectionTable(workspace, state, ctx, onDraftChange) {
       ...[1, 2, 3, 4].map((index) => el("th", { scope: "col" }, `Prior ${index}`, el("br"), el("span", { lang: "zh" }, `历史 ${index}`)))
     )
   );
-  table.append(colgroup, thead, renderRows(workspace, state, ctx, onDraftChange));
+  table.append(colgroup, thead, renderRows(workspace, state, ctx, onDraftChange, displayNumbers));
   return el("div", { className: "qc-ops-table-scroll", tabindex: "0", "aria-label": "Batch inspection table; scroll horizontally to see all columns" }, table);
 }
 
 function renderOperationalRows(workspace, state, ctx, manualSaveController, onDraftChange) {
   const body = el("tbody", { className: "qc-ops-operational-body" });
+  const displayNumbers = resolveBatchDisplayNumbers(state);
   const products = batchProducts(workspace.batch, state, workspace);
   const multipleProducts = products.length > 1;
   let previousProductKey = null;
@@ -659,7 +660,7 @@ function renderOperationalRows(workspace, state, ctx, manualSaveController, onDr
       ));
     }
     previousProductKey = productKey;
-    body.append(renderInspectionRow(row, index, workspace, state, ctx, manualSaveController, onDraftChange));
+    body.append(renderInspectionRow(row, index, workspace, state, ctx, manualSaveController, onDraftChange, displayNumbers));
   });
   return body;
 }
@@ -1111,7 +1112,7 @@ function renderBatchDetail(root, ctx) {
     const sharedVersionAtBatchLevel = typeof batch.versionLabel === "string" && batch.versionLabel.trim() !== "" &&
       products.every((product) => product.versionLabel === batch.versionLabel);
     const deleteBatchButton = button("Delete", async () => {
-      if (!window.confirm(`Delete batch ${text(batch.number, "Batch")}? This action cannot be undone.`)) return;
+      if (!window.confirm(`Delete batch ${text(workspace.displayNumber ?? resolveBatchDisplayNumber(state, batch.id, batch.number), "Batch")}? This action cannot be undone.`)) return;
       const deleteSavedBatch = async () => {
         const response = await runCommand(ctx, "deleteBatch", { id: batch.id });
         if (!response.ok) return;
@@ -1161,7 +1162,7 @@ function renderBatchDetail(root, ctx) {
       makeOperationalInspectionTable(workspace, state, ctx, manualSaveController, onRowDraftChange)
     );
     root.replaceChildren(
-      pageHeading(text(batch.number, "Batch"), "", headerActions),
+      pageHeading(text(workspace.displayNumber ?? resolveBatchDisplayNumber(state, batch.id, batch.number), "Batch"), "", headerActions),
       metadata,
       intro,
       renderBatchAttachments({ ...workspace, attachments: Array.isArray(workspace.attachments) ? workspace.attachments : batchAttachments(batch, state) }, state, ctx, { compact: true }),
@@ -1441,7 +1442,7 @@ function renderBatchList(root, ctx) {
   const createButton = button("New batch", () => openNewBatchDialog(state, ctx), "button button-primary");
   const orderLines = orderedLines(state);
   const createableLines = orderLines.filter((entry) => hasReadyVersionForModel(state, entry.variant.familyId, entry.variant.model));
-  const actions = [createButton, historicalBatchImportControl(ctx)];
+  const actions = [createButton];
   const toolbar = el("div", { className: "qc-ops-list-toolbar" });
   const search = el("input", { type: "search", placeholder: "Search batch, product, PO, source file, or version", "aria-label": "Search batches" });
   const familyById = new Map(list(state.families).map((family) => [family.id, family]));
@@ -1546,7 +1547,7 @@ function renderBatchList(root, ctx) {
       el("p", {}, `${rowDrafts.size} inspection row(s) and ${batchDetailDrafts.size} batch detail set(s) need saving.`),
       ...Array.from(pendingBatchIds).map((batchId) => {
         const batch = batches.find((item) => item.id === batchId);
-        return batch ? button(`Resume ${text(batch.number)}`, () => ctx.navigate("batches", batchId, true), "button button-secondary qc-ops-small-button") : null;
+        return batch ? button(`Resume ${text(displayNumbers.get(batch.id) ?? batch.number)}`, () => ctx.navigate("batches", batchId, true), "button button-secondary qc-ops-small-button") : null;
       })
     ));
   }

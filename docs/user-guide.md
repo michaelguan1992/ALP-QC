@@ -52,7 +52,7 @@ Historical source values are read-only. A separate formula comparison may differ
 
 These historical sheets do not count toward purchase-order fulfillment. They may contain mixed models, partial shipments, or no complete order information. The AP `25.10.29` PDFs remain linked to their matching recorded standards entries; their removed operational duplicates are retained in optional backup merge evidence, not as selectable versions. See [Original PDF Import](pdf-import.md) for the evidence rules.
 
-The historical batch import action in Batches accepts a prepared source package, validates its documents and records, and skips identical records on repeat import. Existing imports automatically appear in Batches after the application upgrade; no re-import is needed. Use full backup and restore to move the complete workspace, including historical batches and their attachments, to another computer. Browsers on this computer already share the local service workspace.
+Existing historical records appear in Batches automatically; no source-package re-import is needed. Use **Backup and restore** to move the complete workspace, including historical batches and their attachments, to another computer. Browsers on this computer already share the local service workspace.
 
 ## Backup and recovery
 

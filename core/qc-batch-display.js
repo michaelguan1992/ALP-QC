@@ -8,6 +8,17 @@ function normalized(value) {
   return text(value).normalize("NFKC").toLowerCase();
 }
 
+/** Map legacy S11–S14 batch prefixes to the current staff-facing S1 prefix. */
+export function normalizeBatchDisplayNumber(value) {
+  if (typeof value !== "string") return "";
+  return value.replace(/^(\s*)(?:S11[-–—]S14|S(?:11|12|13|14)(?:[+/]S(?:11|12|13|14))*)(?=$|[-\s])/iu, "$1S1");
+}
+
+function withSuffix(value, ordinal) {
+  const match = /^(.*?)(\s*)$/.exec(value);
+  return `${match[1]}-${String(ordinal).padStart(2, "0")}${match[2]}`;
+}
+
 function modelCode(value) {
   const candidate = text(value).toUpperCase();
   return MODELS.has(candidate) ? candidate : null;
@@ -53,7 +64,7 @@ function historicalBaseName(batch, state) {
   const inspection = sourceInspection(state, batch);
   // Only this explicitly named source field is an original batch number; raw transcription and filenames are provenance.
   const originalBatchNumber = text(inspection?.originalBatchNumber);
-  if (originalBatchNumber) return originalBatchNumber;
+  if (originalBatchNumber) return normalizeBatchDisplayNumber(originalBatchNumber);
 
   let product = historicalProduct(batch, inspection, state);
   const color = text(inspection?.color) || text(batch.color);
@@ -64,7 +75,7 @@ function historicalBaseName(batch, state) {
   const date = compactDate(text(batch.date) || inspection?.date);
   const factory = text(batch.factory) || text(inspection?.factory) || "Unknown factory";
   const stage = text(batch.stage) || text(inspection?.stage) || "Unknown stage";
-  return `${product}-${date}-${factory}-${stage}`;
+  return normalizeBatchDisplayNumber(`${product}-${date}-${factory}-${stage}`);
 }
 
 function compareIds(left, right) {
@@ -78,16 +89,62 @@ export function resolveBatchDisplayNumbers(state) {
   const batches = Array.isArray(state?.batches) ? state.batches : [];
   const result = new Map();
   const historical = [];
-  const operationalNames = new Set();
+  const operational = [];
+  const rawOperationalNames = new Set();
 
   for (const batch of batches) {
     if (batch.kind === "historical") {
       historical.push({ batch, base: historicalBaseName(batch, state) });
     } else {
       const number = typeof batch.number === "string" ? batch.number : "";
-      result.set(batch.id, number || "Unknown batch");
-      if (number) operationalNames.add(normalized(number));
+      if (number) rawOperationalNames.add(normalized(number));
+      operational.push({ batch, number, base: normalizeBatchDisplayNumber(number), changed: normalizeBatchDisplayNumber(number) !== number });
     }
+  }
+
+  // Preserve native and custom operational numbers exactly. Legacy model prefixes are projected
+  // to S1, with collisions allocated in ID order and existing raw/suffixed names reserved.
+  const usedNames = new Set(rawOperationalNames);
+  const projectedOperational = operational.filter((entry) => entry.number && !entry.changed);
+  for (const entry of projectedOperational) {
+    result.set(entry.batch.id, entry.number);
+  }
+
+  const changedGroups = new Map();
+  for (const entry of operational.filter((candidate) => candidate.number && candidate.changed)) {
+    const key = normalized(entry.base);
+    if (!changedGroups.has(key)) changedGroups.set(key, []);
+    changedGroups.get(key).push(entry);
+  }
+  const reservedCanonicalBases = new Set([...changedGroups.keys()]);
+  for (const entries of changedGroups.values()) {
+    entries.sort(compareIds);
+    const baseKey = normalized(entries[0].base);
+    const baseIsAvailable = !usedNames.has(baseKey);
+    let nextOrdinal = 1;
+    for (const [index, entry] of entries.entries()) {
+      if (index === 0 && baseIsAvailable) {
+        result.set(entry.batch.id, entry.base);
+        usedNames.add(baseKey);
+        continue;
+      }
+      let displayNumber;
+      do {
+        displayNumber = withSuffix(entry.base, nextOrdinal);
+        nextOrdinal += 1;
+      } while (usedNames.has(normalized(displayNumber)) || reservedCanonicalBases.has(normalized(displayNumber)));
+      result.set(entry.batch.id, displayNumber);
+      usedNames.add(normalized(displayNumber));
+    }
+  }
+  for (const entry of operational) {
+    if (!entry.number) result.set(entry.batch.id, "Unknown batch");
+  }
+
+  // Canonical operational display names also reserve their names for historical projections.
+  for (const entry of operational) {
+    const displayNumber = result.get(entry.batch.id);
+    if (displayNumber) usedNames.add(normalized(displayNumber));
   }
 
   const groups = new Map();
@@ -97,10 +154,9 @@ export function resolveBatchDisplayNumbers(state) {
     groups.get(key).push(entry);
   }
 
-  const usedNames = new Set(operationalNames);
   const colliding = [];
   for (const entries of groups.values()) {
-    if (entries.length > 1 || operationalNames.has(normalized(entries[0].base))) {
+    if (entries.length > 1 || usedNames.has(normalized(entries[0].base))) {
       entries.sort(compareIds);
       colliding.push(...entries.map((entry, index) => ({ ...entry, ordinal: index + 1 })));
       continue;
@@ -114,7 +170,7 @@ export function resolveBatchDisplayNumbers(state) {
     let ordinal = entry.ordinal;
     let displayNumber;
     do {
-      displayNumber = `${entry.base}-${String(ordinal).padStart(2, "0")}`;
+      displayNumber = withSuffix(entry.base, ordinal);
       ordinal += 1;
     } while (usedNames.has(normalized(displayNumber)));
     result.set(entry.batch.id, displayNumber);
@@ -122,4 +178,10 @@ export function resolveBatchDisplayNumbers(state) {
   }
 
   return result;
+}
+
+/** Resolve a batch ID when available, and normalize a preserved fallback otherwise. */
+export function resolveBatchDisplayNumber(state, batchId, fallback = "") {
+  const resolved = resolveBatchDisplayNumbers(state).get(batchId);
+  return resolved ?? normalizeBatchDisplayNumber(fallback);
 }

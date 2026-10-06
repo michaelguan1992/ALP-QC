@@ -34,7 +34,6 @@
 .qc-ops-list-table tbody .qc-ops-issue-row:focus-visible { outline: 2px solid var(--green, #26735b); outline-offset: -2px; background: var(--surface-soft, #f5f7f5); }
 .qc-ops-batch-list-table tbody .qc-ops-batch-row { cursor: pointer; }
 .qc-ops-batch-list-table tbody .qc-ops-batch-row:focus-visible { outline: 2px solid var(--green, #26735b); outline-offset: -2px; background: var(--surface-soft, #f5f7f5); }
-.qc-ops-import-control { display: inline-flex; }
 .qc-ops-attachments-card { overflow: hidden; padding: 12px 16px; }
 .qc-ops-attachments-card .qc-ops-section-heading { align-items: center; flex-direction: row; margin-bottom: 8px; }
 .qc-ops-attachment-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }

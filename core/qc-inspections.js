@@ -16,7 +16,7 @@ import {
 import { normalizeStandardItems, selectApplicableItems } from "./qc-standards.js";
 import { getBatchVersionItems, getBatchVersionReadiness, getBatchVersions, getSharedBatchVersionChoices } from "./qc-batch-versions.js";
 import { getBatchProducts, getBatchRowProduct } from "./qc-batch-products.js";
-import { resolveBatchDisplayNumbers } from "./qc-batch-display.js";
+import { normalizeBatchDisplayNumber, resolveBatchDisplayNumbers } from "./qc-batch-display.js";
 import { resolveInspectionImportance } from "./qc-inspection-importance.js";
 
 export function requireBatch(state, batchId) {
@@ -62,7 +62,7 @@ export function batchReleaseBlockers(state, batch) {
       candidate.status === "released" && candidate.countForPO === true &&
       typeof candidate.lotNumber === "string" && candidate.lotNumber.trim().toLocaleLowerCase() === lotKey &&
       getBatchProducts(candidate).some((product) => variants.has(product.variantId)));
-    if (duplicate) blockers.push(`Lot ${batch.lotNumber} is already counted in released batch ${duplicate.number}.`);
+    if (duplicate) blockers.push(`Lot ${batch.lotNumber} is already counted in released batch ${resolveBatchDisplayNumbers(state).get(duplicate.id) ?? duplicate.number}.`);
   }
   return blockers;
 }
@@ -107,9 +107,7 @@ function usedBatchDisplayNumbers(state) {
     const key = batchNumberKey(batch.number);
     if (key) used.add(key);
   }
-  const historicalIds = new Set(state.batches.filter((batch) => batch.kind === "historical").map((batch) => batch.id));
-  for (const [batchId, displayNumber] of resolveBatchDisplayNumbers(state)) {
-    if (!historicalIds.has(batchId)) continue;
+  for (const displayNumber of resolveBatchDisplayNumbers(state).values()) {
     const key = batchNumberKey(displayNumber);
     if (key) used.add(key);
   }
@@ -122,11 +120,14 @@ function resolveNewBatchNumber(state, requestedNumber, products, date, factory, 
     : requireString(requestedNumber, "Batch number", { maxLength: 160, allowBlank: true });
   const usedNumbers = usedBatchDisplayNumbers(state);
   if (explicitNumber) {
-    if (usedNumbers.has(batchNumberKey(explicitNumber))) fail("Batch number must be unique.");
+    if (usedNumbers.has(batchNumberKey(explicitNumber)) ||
+        usedNumbers.has(batchNumberKey(normalizeBatchDisplayNumber(explicitNumber)))) {
+      fail("Batch number must be unique.");
+    }
     return explicitNumber;
   }
 
-  const models = [...new Set(products.map((product) => product.variant.model.trim()))]
+  const models = [...new Set(products.map((product) => normalizeBatchDisplayNumber(product.variant.model.trim())))]
     .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
   const base = `${models.join("+")}-${date.replaceAll("-", "")}-${factory}-${stage}`;
   if (!usedNumbers.has(batchNumberKey(base))) return requireString(base, "Batch number", { maxLength: 160 });
@@ -468,6 +469,7 @@ export function releaseBatch(state, data, context) {
 
 export function getBatchWorkspace(state, batchId, { includeAssetContent = true } = {}) {
   const batch = requireBatch(state, batchId);
+  const displayNumbers = resolveBatchDisplayNumbers(state);
   const variant = state.variants.find((candidate) => candidate.id === batch.variantId);
   const version = state.versions.find((candidate) => candidate.id === batch.versionId);
   const order = state.orders.find((candidate) => candidate.id === batch.orderId);
@@ -527,7 +529,7 @@ export function getBatchWorkspace(state, batchId, { includeAssetContent = true }
         const historicalProduct = getBatchRowProduct(candidate, historicalRow);
         return [{
           batchId: candidate.id,
-          batchNumber: candidate.number,
+          batchNumber: displayNumbers.get(candidate.id) ?? normalizeBatchDisplayNumber(candidate.number),
           date: candidate.date,
           versionLabel: historicalProduct?.versionLabel ?? null,
           inspectedQty: historicalRow.inspectedQty,
@@ -567,7 +569,7 @@ export function getBatchWorkspace(state, batchId, { includeAssetContent = true }
     .map((asset) => ({ ...assetMetadata(asset, includeAssetContent), sourcePdf: asset.id === sourceAssetId }));
   return {
     batch: structuredClone(batch),
-    displayNumber: resolveBatchDisplayNumbers(state).get(batch.id),
+    displayNumber: displayNumbers.get(batch.id),
     variant: variant ? structuredClone(variant) : null,
     version: version ? structuredClone(version) : null,
     order: order ? structuredClone(order) : null,

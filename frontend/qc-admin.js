@@ -1,6 +1,7 @@
 import { ASSET_TOTAL_MAX_BYTES, BACKUP_MAX_BYTES, DOCUMENT_MAX_BYTES } from "../core/qc-service.js";
 import { rawLarkVersionFields } from "../core/qc-lark-versions.js";
 import { getPurchaseOrderProgress } from "../core/qc-purchasing.js";
+import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { formatNumberedDescription } from "./qc-source-description.js";
 import { downloadAttachment, loadAssetContent } from "./qc-attachments.js";
 import { button, closeDialog, downloadFile, el, field, notify, readFileAsDataURL, showDialog } from "./qc-ui.js";
@@ -521,6 +522,7 @@ async function renderOrders(root, ctx) {
     root.append(emptyState("No purchase orders yet", ""));
     return;
   }
+  const displayNumbers = resolveBatchDisplayNumbers(ctx.state);
   const results = ctx.state.orders.map((order) => ({ order, progress: getPurchaseOrderProgress(ctx.state, order.id), error: null }));
   root.append(h("div", { className: "admin-grid" }, results.map(({ order, progress, error }) => h("details", { className: "admin-card admin-card-wide card purchase-order-card" },
     h("summary", { className: "purchase-order-summary" },
@@ -542,7 +544,7 @@ async function renderOrders(root, ctx) {
           h("tbody", {}, (progress?.lines ?? []).map((line) => h("tr", {},
             h("td", {}, h("strong", {}, line.variant?.label ?? variantName(ctx, line.variantId))),
             h("td", {}, text(line.orderedQty, "0")), h("td", {}, text(line.releasedQty, "0")), h("td", {}, text(line.remainingQty, "0")), h("td", {}, text(line.excessQty, "0")),
-            h("td", {}, (line.batches ?? []).length ? h("div", { className: "stack" }, line.batches.map((batch) => h("span", { className: "readonly-label" }, `${batch.number}: ${batch.quantity} released`))) : "—"),
+            h("td", {}, (line.batches ?? []).length ? h("div", { className: "stack" }, line.batches.map((batch) => h("span", { className: "readonly-label" }, `${displayNumbers.get(batch.id) ?? batch.number}: ${batch.quantity} released`))) : "—"),
           ))),
         )),
     ),

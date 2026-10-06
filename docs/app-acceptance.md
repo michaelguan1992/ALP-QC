@@ -327,3 +327,7 @@ The user authorized removing Browser migration and Reference pages from Backup a
 - The full automated suite passed 163 tests; JavaScript syntax and diff-whitespace checks passed. Server tests verify 404 responses for both retired page URLs and the retired Dexie resource. Resolving those paths against the actual checkout also returned no file.
 - Mac built-in-browser verification used an empty temporary SQLite workspace on port 4188. Backup and restore displayed export, restore, and workspace details without migration or reference-page controls. Screenshot: `/private/tmp/masterqc-backup-without-reference-pages.jpg`.
 - The existing service on port 4173 runs a different checkout and was not interrupted. No production business commands or database edits were performed. Windows was not run.
+
+### Main-branch integration and always-visible metrics (2026-10-05)
+
+Workspace metrics now stay visible below export and restore, without a disclosure title or toggle. The running app on port 4173 was refreshed after applying the same frontend changes and showed all four metrics directly. Its Backup and restore layout files match the integrated source. The full suite passed 166 tests after integrating main's batch-number and import-control changes. Syntax and diff-whitespace checks passed. Production database files remain outside these commits; Windows was not run.

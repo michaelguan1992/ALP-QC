@@ -3,7 +3,7 @@ import {
 } from "./qc-ops-common.js";
 import { downloadFile, notify } from "./qc-ui.js";
 import { attachmentCanPreview, attachmentDownload, loadAssetImage, previewAttachment } from "./qc-attachments.js";
-import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
+import { normalizeBatchDisplayNumber, resolveBatchDisplayNumber, resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
 
 const h = el;
@@ -202,6 +202,7 @@ function rowProduct(workspace, row, state) {
 
 function makeReadOnlyTable(workspace, state, ctx) {
   const historical = isHistoricalBatch(workspace.batch);
+  const displayNumbers = resolveBatchDisplayNumbers(state);
   const multipleProducts = !historical && reportProducts(workspace, state).length > 1;
   const table = h("table", { className: `qc-ops-inspection-table qc-ops-report-table${multipleProducts ? " qc-ops-mixed-product-table" : ""}` });
   const widths = ["34px", ...(multipleProducts ? ["118px"] : []), "100px", "185px", "80px", "60px", "76px", "55px", "55px", "52px", "52px", "52px", "52px", "52px", "44px", "64px", "165px", "154px"];
@@ -271,7 +272,7 @@ function makeReadOnlyTable(workspace, state, ctx) {
     for (let historyIndex = 0; historyIndex < 4; historyIndex += 1) {
       const entry = history[historyIndex];
       const cell = h("td", { className: "qc-ops-history" });
-      if (entry) cell.append(h("strong", {}, percent(entry.rate)), h("small", {}, text(entry.batchNumber, entry.batchId)), h("small", {}, dateLabel(entry.date)));
+      if (entry) cell.append(h("strong", {}, percent(entry.rate)), h("small", {}, text(displayNumbers.get(entry.batchId) ?? resolveBatchDisplayNumber(state, entry.batchId, entry.batchNumber || entry.number || entry.batchId))), h("small", {}, dateLabel(entry.date)));
       else cell.append(h("span", { className: "qc-ops-empty-history" }, "—"));
       tr.append(cell);
     }
@@ -327,7 +328,7 @@ function reportMetadata(workspace, state) {
 function exportRows(workspace, state) {
   const batch = workspace.batch;
   const displayNumbers = resolveBatchDisplayNumbers(state);
-  const displayNumber = workspace.displayNumber ?? displayNumbers.get(batch.id) ?? batch.number;
+  const displayNumber = workspace.displayNumber ?? displayNumbers.get(batch.id) ?? normalizeBatchDisplayNumber(batch.number);
   const historical = isHistoricalBatch(batch);
   const order = workspace.order || lookupOrder(state, batch);
   const variant = workspace.variant || lookupVariant(state, batch);
@@ -346,7 +347,7 @@ function exportRows(workspace, state) {
     const histories = list(row.history);
     const priorValues = [0, 1, 2, 3].map((index) => {
       const entry = histories[index];
-      const priorBatchNumber = entry ? displayNumbers.get(entry.batchId) ?? entry.batchNumber ?? entry.batchId : "";
+      const priorBatchNumber = entry ? displayNumbers.get(entry.batchId) ?? resolveBatchDisplayNumber(state, entry.batchId, entry.batchNumber || entry.number || entry.batchId) : "";
       return entry ? `${text(priorBatchNumber, entry.batchId)} · ${dateLabel(entry.date)} · ${percent(entry.rate)}` : "";
     });
     const issueRows = list(row.issues);
@@ -405,7 +406,7 @@ async function renderReportDetail(root, ctx) {
   const batch = workspace.batch;
   const state = ctx.state || {};
   const historical = isHistoricalBatch(batch);
-  const reportTitle = text(workspace.displayNumber ?? batch.number, "Batch");
+  const reportTitle = text(workspace.displayNumber ?? resolveBatchDisplayNumber(state, batch.id, batch.number), "Batch");
   const incompleteRows = historical ? 0 : list(workspace.rows).filter((row) => !row.savedAt || row.defectiveQty === null || row.defectiveQty === undefined || row.actualTimeSeconds === null || row.actualTimeSeconds === undefined || row.actualTimeSeconds === "").length;
   const scope = h("article", { className: "print-scope qc-ops-report" },
     h("header", { className: "qc-ops-report-document-heading" },
@@ -426,7 +427,7 @@ async function renderReportDetail(root, ctx) {
     button("Download CSV", async () => {
       try {
         const csv = exportRows(workspace, state);
-        await downloadFile(`${safeFilename(workspace.displayNumber ?? batch.number, "qc-batch")}-report.csv`, csv, "text/csv;charset=utf-8");
+        await downloadFile(`${safeFilename(workspace.displayNumber ?? resolveBatchDisplayNumber(state, batch.id, batch.number), "qc-batch")}-report.csv`, csv, "text/csv;charset=utf-8");
         notify("CSV report downloaded.");
       } catch (error) {
         notify(error instanceof Error ? error.message : "The CSV report could not be downloaded.", true);

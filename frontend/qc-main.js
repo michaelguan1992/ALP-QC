@@ -370,24 +370,6 @@ function getContext() {
         }
       });
     },
-    importHistory: async (historyPackage) => {
-      if (!state) return { ok: false, error: new Error("The local workspace is not ready.") };
-      try {
-        const result = await service.importHistory(historyPackage, state.revision);
-        state = await service.getState({ mode: "lightweight" });
-        staleMessage = "";
-        channel?.postMessage({ revision: state.revision });
-        renderApp();
-        return { ok: true, result };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "The history package could not be imported.";
-        if (/revision|stale|reload|changed in another/i.test(message)) {
-          setStale("Another tab changed this workspace. Reload the latest data before importing again.");
-        }
-        notify(message, true);
-        return { ok: false, error };
-      }
-    },
   };
 }
 
