@@ -17,7 +17,7 @@ import {
   TEXT_EXTENSIONS,
   VIDEO_MIMES,
 } from "./qc-domain.js";
-import { requireBatch, requireEditableBatch } from "./qc-inspections.js";
+import { requireBatch, requireEditableBatch, requireEditableInspectionRowBatch } from "./qc-inspections.js";
 
 function extensionOf(name) {
   const index = name.lastIndexOf(".");
@@ -110,7 +110,7 @@ export function appendIssueEvidence(state, issue, files, context) {
 export function setRowAttachment(state, data, context) {
   const input = requireRecord(data, "Inspection row attachment");
   const batch = requireBatch(state, input.batchId);
-  requireEditableBatch(batch);
+  requireEditableInspectionRowBatch(batch);
   const rowId = requireString(input.rowId, "Inspection row ID", { maxLength: 120 });
   const row = batch.rows.find((candidate) => candidate.id === rowId);
   if (!row) fail("That inspection row is not part of this batch.");
@@ -146,7 +146,7 @@ export function setRowAttachment(state, data, context) {
 export function removeRowAttachment(state, data) {
   const input = requireRecord(data, "Inspection row attachment removal");
   const batch = requireBatch(state, input.batchId);
-  requireEditableBatch(batch);
+  requireEditableInspectionRowBatch(batch);
   const rowId = requireString(input.rowId, "Inspection row ID", { maxLength: 120 });
   const row = batch.rows.find((candidate) => candidate.id === rowId);
   if (!row) fail("That inspection row is not part of this batch.");

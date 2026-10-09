@@ -18,6 +18,7 @@ import { getBatchVersionItems, getBatchVersionReadiness, getBatchVersions, getSh
 import { getBatchProducts, getBatchRowProduct } from "./qc-batch-products.js";
 import { normalizeBatchDisplayNumber, resolveBatchDisplayNumbers } from "./qc-batch-display.js";
 import { resolveInspectionImportance } from "./qc-inspection-importance.js";
+import { findHistoricalSourceRow, historicalResultValues, historicalSourceResultValues } from "./qc-historical-batches.js";
 
 export function requireBatch(state, batchId) {
   const id = requireString(batchId, "Batch ID", { maxLength: 160 });
@@ -29,6 +30,11 @@ export function requireBatch(state, batchId) {
 export function requireEditableBatch(batch) {
   if (batch.kind === "historical") fail("Historical inspection records are read-only.");
   if (batch.status === "released") fail("This batch is released and its records are read-only.");
+}
+
+export function requireEditableInspectionRowBatch(batch) {
+  if (batch.kind === "historical" && batch.status === "historical") return;
+  requireEditableBatch(batch);
 }
 
 const ASSET_METADATA_FIELDS = [
@@ -319,7 +325,12 @@ export function saveBatchDetails(state, data) {
 
 export function saveBatchChanges(state, data, context) {
   const batch = requireBatch(state, data.batchId);
-  requireEditableBatch(batch);
+  const historical = batch.kind === "historical";
+  if (historical) {
+    if (Object.hasOwn(data, "details")) fail("Historical batch details come from preserved source evidence and cannot be edited.");
+  } else {
+    requireEditableBatch(batch);
+  }
   const rowInputs = requireArray(data.rows, "Inspection row changes");
   if (rowInputs.length > batch.rows.length) fail("A batch save cannot include more rows than the batch contains.");
 
@@ -342,7 +353,9 @@ export function saveBatchChanges(state, data, context) {
     const rowId = requireString(rowInput.rowId, `Inspection row change ${index + 1} ID`, { maxLength: 120 });
     if (seenRowIds.has(rowId)) fail("A batch save cannot include the same inspection row more than once.");
     seenRowIds.add(rowId);
-    const outcome = autosaveInspection(state, { ...rowInput, batchId: batch.id, rowId }, context);
+    const outcome = historical
+      ? autosaveHistoricalInspection(state, batch, { ...rowInput, batchId: batch.id, rowId })
+      : autosaveInspection(state, { ...rowInput, batchId: batch.id, rowId }, context);
     if (outcome.changed !== false) changedRows += 1;
   }
 
@@ -454,6 +467,44 @@ export function autosaveInspection(state, data, context) {
   return { entityId: batch.id, action: "autosaveInspection", summary: `Autosaved inspection row ${row.title} for batch ${batch.number}.` };
 }
 
+function autosaveHistoricalInspection(state, batch, data) {
+  const rowId = requireString(data.rowId, "Inspection row ID", { maxLength: 120 });
+  const row = batch.rows.find((candidate) => candidate.id === rowId);
+  if (!row) fail("That inspection row is not part of this batch.");
+  for (const field of ["inspectedQty", "defectiveQty", "actualTimeSeconds"]) {
+    if (!Object.hasOwn(data, field)) fail(`Historical inspection save requires ${field}.`);
+  }
+
+  const inspectedQty = data.inspectedQty;
+  const defectiveQty = data.defectiveQty;
+  const actualTimeSeconds = data.actualTimeSeconds;
+  if (inspectedQty !== null) requireNonNegativeInteger(inspectedQty, "Inspection quantity");
+  if (defectiveQty !== null) requireNonNegativeInteger(defectiveQty, "Defective quantity");
+  if (actualTimeSeconds !== null && (typeof actualTimeSeconds !== "number" || !Number.isFinite(actualTimeSeconds) || actualTimeSeconds < 0)) {
+    fail("Actual inspection time must be finite and zero or more seconds, or blank.");
+  }
+
+  const sourceRow = findHistoricalSourceRow(state, batch, row);
+  if (!sourceRow) fail("The historical inspection source row is missing.");
+  const current = historicalResultValues(row, sourceRow);
+  const source = historicalSourceResultValues(sourceRow);
+  const countsChanged = current.inspectedQty !== inspectedQty || current.defectiveQty !== defectiveQty;
+  if (countsChanged && inspectedQty !== null && defectiveQty !== null && defectiveQty > inspectedQty) {
+    fail("Defective quantity cannot exceed inspection quantity.");
+  }
+  if (!countsChanged && current.actualTimeSeconds === actualTimeSeconds) {
+    return { entityId: batch.id, changed: false, action: "saveBatchChanges", summary: `Historical inspection row ${row.title} for batch ${batch.number} was already up to date.` };
+  }
+
+  if (inspectedQty === source.inspectedQty) delete row.inspectedQty;
+  else row.inspectedQty = inspectedQty;
+  if (defectiveQty === source.defectiveQty) row.defectiveQty = sourceRow.defectiveQty;
+  else row.defectiveQty = defectiveQty;
+  if (actualTimeSeconds === source.actualTimeSeconds) delete row.actualTimeSeconds;
+  else row.actualTimeSeconds = actualTimeSeconds;
+  return { entityId: batch.id, action: "saveBatchChanges", summary: `Saved historical inspection results for ${row.title} in batch ${batch.number}.` };
+}
+
 export function releaseBatch(state, data, context) {
   const batch = requireBatch(state, data.id);
   if (batch.kind === "historical") fail("Historical inspection records cannot be released.");
@@ -491,11 +542,26 @@ export function getBatchWorkspace(state, batchId, { includeAssetContent = true }
       return [category, asset ? assetMetadata(asset, includeAssetContent) : null];
     }));
     if (historical) {
+      const sourceRow = findHistoricalSourceRow(state, batch, row);
+      const resultValues = historicalResultValues(row, sourceRow);
+      const defectiveRate = resultValues.defectiveQty == null || resultValues.inspectedQty === 0 || resultValues.inspectedQty === null
+        ? null
+        : Number(((resultValues.defectiveQty / resultValues.inspectedQty) * 100).toFixed(2));
+      const photos = (row.photoIds ?? []).map((assetId) => state.assets.find((asset) => asset.id === assetId)).filter(Boolean).map((asset) => assetMetadata(asset, includeAssetContent));
+      const issues = state.issues.filter((issue) => issue.batchId === batch.id && issue.rowId === row.id).map((issue) => ({
+        ...structuredClone(issue),
+        attachments: (issue.attachmentIds ?? [])
+          .map((assetId) => state.assets.find((asset) => asset.id === assetId))
+          .filter(Boolean)
+          .map((asset) => assetMetadata(asset, includeAssetContent)),
+      }));
       return {
         ...structuredClone(row),
-        photos: [],
+        ...resultValues,
+        defectiveRate,
+        photos,
         attachments,
-        issues: [],
+        issues,
         history: [],
       };
     }

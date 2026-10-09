@@ -230,7 +230,7 @@ test("deleteIssue removes only owned evidence, preserves batch facts, and never 
   await service.close();
 });
 
-test("deleteIssue rejects released and historical batch links without mutation", async () => {
+test("deleteIssue rejects released links and permits historical Issue cleanup", async () => {
   const service = makeService();
   const { batch, rows } = await prepareDraftBatch(service, "B-ISSUE-DELETE-LOCK", "PO-ISSUE-DELETE-LOCK");
   const issue = await createIssue(service, { title: "Protected issue", batchId: batch.id });
@@ -254,8 +254,10 @@ test("deleteIssue rejects released and historical batch links without mutation",
     batches: [{ id: "batch-historical", kind: "historical", status: "historical" }],
     assets: [],
   };
-  const historicalBefore = structuredClone(historicalState);
-  assert.throws(() => deleteIssue(historicalState, { id: "issue-historical" }), /historical batches cannot be deleted/i);
-  assert.deepEqual(historicalState, historicalBefore);
+  const historicalBatchBefore = structuredClone(historicalState.batches);
+  assert.equal(deleteIssue(historicalState, { id: "issue-historical" }).entityId, "issue-historical");
+  assert.deepEqual(historicalState.issues, []);
+  assert.deepEqual(historicalState.batches, historicalBatchBefore);
+  assert.deepEqual(historicalState.assets, []);
   await service.close();
 });

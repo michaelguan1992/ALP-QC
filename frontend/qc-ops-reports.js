@@ -5,6 +5,7 @@ import { downloadFile, notify } from "./qc-ui.js";
 import { attachmentCanPreview, attachmentDownload, loadAssetImage, previewAttachment } from "./qc-attachments.js";
 import { normalizeBatchDisplayNumber, resolveBatchDisplayNumber, resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
+import { findHistoricalSourceRow } from "../core/qc-historical-batches.js";
 
 const h = el;
 
@@ -34,13 +35,12 @@ function batchInspection(stage, factory) {
   return [factory, stage].filter((value) => value !== null && value !== undefined && value !== "").join(" · ") || "—";
 }
 
-function reportTimeSeconds(row, historical) {
-  if (historical) return row.timeSeconds;
+function reportTimeSeconds(row) {
   return row.actualTimeSeconds;
 }
 
 function reportTimeLabel(row, historical) {
-  const value = reportTimeSeconds(row, historical);
+  const value = reportTimeSeconds(row);
   return value === null || value === undefined || value === "" ? historical ? "—" : "Incomplete" : `${value}s`;
 }
 
@@ -164,14 +164,52 @@ function reportRowAttachmentCell(row, state, ctx) {
 
 function historicalPhotosCell(row, state, ctx) {
   const photos = legacyPhotoAssets(row, state);
-  if (!photos.length) return h("td", { className: "qc-ops-photos qc-ops-report-photos" }, h("span", { className: "qc-ops-empty-photo" }, "—"));
-  return h("td", { className: "qc-ops-photos qc-ops-report-photos" },
-    h("div", { className: "qc-ops-report-photo-gallery" }, photos.map((photo) => {
+  const attachments = rowAttachments(row, state);
+  const attachmentNodes = [
+    ["Videos", attachments.videos], ["Procedures", attachments.procedures], ["Log", attachments.log],
+  ].filter(([, asset]) => asset).map(([label, asset]) => h("div", { className: "qc-ops-report-attachment" },
+    h("strong", {}, `${label}:`), h("span", {}, text(asset.name, "Attachment")), attachmentActions(asset, ctx.service),
+  ));
+  const photoNodes = photos.map((photo) => {
       const image = h("img", { ...(photo.dataUrl ? { src: photo.dataUrl } : {}), alt: photo.name || `Photo for ${text(row.title)}`, loading: "lazy" });
       void loadAssetImage(image, photo, ctx.service);
       return h("figure", { className: "qc-ops-report-photo" }, image,
         h("figcaption", {}, text(photo.name, "Inspection photo")), attachmentActions(photo, ctx.service));
-    })),
+  });
+  if (!attachmentNodes.length && !photoNodes.length) return h("td", { className: "qc-ops-attachments qc-ops-report-attachments" }, h("span", { className: "qc-ops-empty-photo" }, "—"));
+  return h("td", { className: "qc-ops-attachments qc-ops-report-attachments" },
+    ...attachmentNodes,
+    photoNodes.length ? h("div", { className: "qc-ops-report-photo-gallery" }, photoNodes) : null,
+  );
+}
+
+function reportBatchAttachments(workspace, ctx) {
+  const attachments = list(workspace.attachments);
+  if (!attachments.length) return null;
+  return h("section", { className: "qc-ops-report-batch-attachments" },
+    h("h3", {}, "Batch attachments"),
+    h("ul", {}, attachments.map((asset) => h("li", {},
+      h("strong", {}, asset.sourcePdf ? "Original source PDF: " : "Attachment: "),
+      h("span", {}, text(asset.name, "Attachment")),
+      attachmentActions(asset, ctx.service),
+    ))),
+  );
+}
+
+function historicalSourceDisclosure(batch, row, state) {
+  const sourceRow = findHistoricalSourceRow(state, batch, row);
+  if (!sourceRow) return null;
+  const anomalies = list(sourceRow.anomalies);
+  return h("details", { className: "qc-ops-report-source-details" },
+    h("summary", {}, "Printed source values"),
+    h("dl", {},
+      h("dt", {}, "Inspection qty"), h("dd", {}, sourceText(sourceRow.sourceInspectedQty)),
+      h("dt", {}, "Defective qty"), h("dd", {}, sourceText(sourceRow.defectiveQty)),
+      h("dt", {}, "Defective rate"), h("dd", {}, sourcePercent(sourceRow.sourceDefectiveRate)),
+      h("dt", {}, "Time (seconds)"), h("dd", {}, sourceText(sourceRow.timeSeconds)),
+    ),
+    anomalies.length ? h("ul", {}, anomalies.map((anomaly) => h("li", {}, typeof anomaly === "string" ? anomaly : JSON.stringify(anomaly)))) : null,
+    sourceRow.raw ? h("details", {}, h("summary", {}, "Preserved source fields"), h("pre", {}, JSON.stringify(sourceRow.raw, null, 2))) : null,
   );
 }
 
@@ -221,7 +259,7 @@ function makeReadOnlyTable(workspace, state, ctx) {
       h("th", { rowSpan: "2", scope: "col" }, "Time", h("br"), h("span", { lang: "zh" }, "时数 (sec)")),
       h("th", { rowSpan: "2", scope: "col" }, "Procedure / link", h("br"), h("span", { lang: "zh" }, "视频 / 程序 / 报告")),
       h("th", { rowSpan: "2", scope: "col" }, "Remarks / issues", h("br"), h("span", { lang: "zh" }, "备注 / 问题")),
-      h("th", { rowSpan: "2", scope: "col" }, historical ? "Photos" : "Attachments", h("br"), h("span", { lang: "zh" }, historical ? "照片" : "附件")),
+      h("th", { rowSpan: "2", scope: "col" }, "Attachments / evidence", h("br"), h("span", { lang: "zh" }, "附件 / 证据")),
     ),
     h("tr", { className: "qc-ops-sub-head" },
       h("th", { scope: "col" }, "Inspection qty", h("br"), h("span", { lang: "zh" }, "检验数量")),
@@ -247,6 +285,7 @@ function makeReadOnlyTable(workspace, state, ctx) {
       title.append(h("span", { className: "qc-ops-historical-badge" }, "Missing from source"));
       if (row.missingEvidence) title.append(h("small", { className: "qc-ops-historical-evidence" }, row.missingEvidence));
     }
+    if (historical) title.append(historicalSourceDisclosure(workspace.batch, row, state));
     tr.append(title);
     const specification = h("td", { className: "qc-ops-spec" });
     displayTitle(specification, row.specification, row.specificationZh);
@@ -257,16 +296,19 @@ function makeReadOnlyTable(workspace, state, ctx) {
       h("td", { className: "qc-ops-frequency" }, historical ? sourcePercent(row.samplingPercent) : `${text(row.samplingPercent, "0")}%`),
       h("td", { className: "qc-ops-recording" }, text(row.recordingRule)),
       (() => {
-        const cell = h("td", { className: "qc-ops-number" }, historical ? sourceText(row.sourceInspectedQty) : quantity(row.inspectedQty));
+        const cell = h("td", { className: "qc-ops-number" }, historical
+          ? row.inspectedQty === null || row.inspectedQty === undefined ? "—" : quantity(row.inspectedQty)
+          : quantity(row.inspectedQty));
         const computed = historical ? computedSourceQuantity(workspace.batch, row) : null;
         if (computed !== null) cell.append(h("small", { className: "qc-ops-historical-comparison" }, `Web formula: ${quantity(computed)}`));
         return cell;
       })(),
       h("td", { className: "qc-ops-number" }, historical
-        ? sourceText(row.defectiveQty)
+        ? row.defectiveQty === null || row.defectiveQty === undefined ? "—" : quantity(row.defectiveQty)
         : row.defectiveQty === null || row.defectiveQty === undefined ? "Incomplete" : quantity(row.defectiveQty)),
-      h("td", { className: "qc-ops-number qc-ops-rate" }, historical ? sourcePercent(row.sourceDefectiveRate) :
-        row.defectiveQty === null || row.defectiveQty === undefined ? "Incomplete" : percent(row.defectiveRate)),
+      h("td", { className: "qc-ops-number qc-ops-rate" }, historical
+        ? row.defectiveRate === null || row.defectiveRate === undefined ? "—" : percent(row.defectiveRate)
+        : row.defectiveQty === null || row.defectiveQty === undefined ? "Incomplete" : percent(row.defectiveRate)),
     );
     const history = list(row.history);
     for (let historyIndex = 0; historyIndex < 4; historyIndex += 1) {
@@ -283,8 +325,9 @@ function makeReadOnlyTable(workspace, state, ctx) {
     tr.append(procedureCell);
     const issues = list(row.issues);
     const remarks = h("td", { className: "qc-ops-remarks qc-ops-report-remarks" },
-      historical ? text(row.remarks) : reportIssueEvidence(issues, state, ctx),
-      historical ? null : legacyEvidence(row, state, ctx),
+      historical ? text(row.remarks) : null,
+      reportIssueEvidence(issues, state, ctx),
+      legacyEvidence(row, state, ctx),
     );
     tr.append(remarks, historical ? historicalPhotosCell(row, state, ctx) : reportRowAttachmentCell(row, state, ctx));
     return tr;
@@ -340,6 +383,7 @@ function exportRows(workspace, state) {
     "Batch number", "Batch date", "Status", "Batch products summary", "Purchase order", "Factory", "Stage", "Total batch quantity", "PO progress",
     "No.", "Product", "Product quantity", "PO line ordered quantity", "Design version",
     "Inspection title", "检验项目", "Specification", "检验标准", "Devices", "Sampling percent", "Recording rule", "Inspected quantity", "Defective quantity", "Defective rate",
+    "Printed inspected quantity", "Printed defective quantity", "Printed defective rate", "Printed time seconds",
     "Prior 1", "Prior 2", "Prior 3", "Prior 4", "Time seconds", "Procedure URL", "Remarks", "Linked issues", "Issue descriptions", "Issue evidence file names", "Row attachment file names", "Photo file names",
   ];
   const rows = [csvRow(headers.map((value) => ({ value, textField: false })))];
@@ -366,14 +410,17 @@ function exportRows(workspace, state) {
     const ownerVersion = historical ? workspace.version?.label || batch.versionLabel : row.versionLabel || ownerProduct?.version?.label || ownerProduct?.versionLabel;
     const orderLine = ownerProduct ? list(order?.lines).find((line) => line.id === ownerProduct.lineId) : lookupOrderLine(order, batch);
     const reportDefectiveQty = row.defectiveQty;
-    const reportDefectiveRate = historical ? row.sourceDefectiveRate : row.defectiveRate === null || row.defectiveRate === undefined ? "" : percent(row.defectiveRate);
-    const reportActualTime = reportTimeSeconds(row, historical) ?? "";
+    const reportDefectiveRate = row.defectiveRate === null || row.defectiveRate === undefined ? "" : percent(row.defectiveRate);
+    const reportActualTime = reportTimeSeconds(row) ?? "";
+    const sourceRow = historical ? findHistoricalSourceRow(state, batch, row) : null;
     const values = [
       [displayNumber, true], [batch.date, false], [historical ? "" : batch.status, false], [productsSummary, true], [order?.number, true], [batch.factory, true], [batch.stage, true],
       [historical ? batch.quantity : totalBatchQuantity(workspace, state), false], [historical ? "Excluded · historical record" : batch.countForPO ? "Counts after release" : "Not counted", true],
       [row.no, true], [ownerLabel, true], [ownerQuantity, false], [orderLine?.orderedQty, false], [ownerVersion, true], [row.title, true], [row.titleZh, true],
       [row.specification, true], [row.specificationZh, true], [row.devices, true], [row.samplingPercent, false], [row.recordingRule, true],
-      [historical ? row.sourceInspectedQty : row.inspectedQty, false], [reportDefectiveQty, false], [reportDefectiveRate, false],
+      [row.inspectedQty, false], [reportDefectiveQty, false], [reportDefectiveRate, false],
+      [historical ? sourceRow?.sourceInspectedQty : "", false], [historical ? sourceRow?.defectiveQty : "", false],
+      [historical ? sourceRow?.sourceDefectiveRate : "", false], [historical ? sourceRow?.timeSeconds : "", false],
       ...priorValues.map((value) => [value, true]), [reportActualTime, false], [row.procedureUrl, true], [row.remarks, true], [issues, true], [issueDescriptions, true], [issueEvidenceNames, true], [rowAttachmentNames, true], [photos, true],
     ];
     rows.push(csvRow(values.map(([value, textField]) => ({ value, textField }))));
@@ -421,6 +468,7 @@ async function renderReportDetail(root, ctx) {
       h("div", { className: "qc-ops-section-heading" }, h("h2", {}, "Batch inspection table")),
       makeReadOnlyTable(workspace, state, ctx),
     ),
+    reportBatchAttachments(workspace, ctx),
   );
   const header = pageHeading("Batch report", "", [
     button("Back to batch", () => ctx.navigate("batches", batch.id, true), "button button-secondary"),
