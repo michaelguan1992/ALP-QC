@@ -8,6 +8,7 @@ import {
 import { appendIssueEvidence, prepareIssueEvidenceFiles } from "./qc-assets.js";
 import { getBatchProducts, getBatchRowProduct } from "./qc-batch-products.js";
 import { requireBatch, requireEditableBatch } from "./qc-inspections.js";
+import { findHistoricalSourceRow, historicalResultValues } from "./qc-historical-batches.js";
 
 function makeIssueNumber(id) {
   const suffix = id.replace(/[^a-z0-9]/gi, "").slice(-8).toUpperCase();
@@ -15,7 +16,7 @@ function makeIssueNumber(id) {
 }
 
 function rowRate(row) {
-  return row.defectiveQty == null || row.inspectedQty === 0
+  return row.defectiveQty == null || row.inspectedQty == null || row.inspectedQty === 0
     ? null
     : Number(((row.defectiveQty / row.inspectedQty) * 100).toFixed(2));
 }
@@ -36,6 +37,10 @@ function makeSourceSnapshot(state, batch, row = null, rowProduct = null) {
   const rowVariant = rowProduct
     ? state.variants.find((candidate) => candidate.id === rowProduct.variantId)
     : null;
+  const historicalResults = row && batch.kind === "historical"
+    ? historicalResultValues(row, findHistoricalSourceRow(state, batch, row))
+    : null;
+  const resultRow = historicalResults ? { ...row, ...historicalResults } : row;
   return {
     batchId: batch.id,
     batchNumber: batch.number,
@@ -43,15 +48,17 @@ function makeSourceSnapshot(state, batch, row = null, rowProduct = null) {
     lineId: product?.lineId ?? null,
     variantId: product?.variantId ?? null,
     variantLabel: product?.variantLabel ?? null,
-    familyId: products.length === 1 ? getBatchProducts(batch)[0]?.familyId ?? null : null,
+    familyId: batch.kind === "historical"
+      ? batch.familyId
+      : products.length === 1 ? getBatchProducts(batch)[0]?.familyId ?? null : null,
     factory: batch.factory,
     stage: batch.stage,
     date: batch.date,
     versionId: product?.versionId ?? null,
-    versionLabel: product?.versionLabel ?? null,
+    versionLabel: batch.kind === "historical" ? batch.versionLabel : product?.versionLabel ?? null,
     products,
-    row: row ? {
-      id: row.id,
+    row: resultRow ? {
+      id: resultRow.id,
       productLineId: rowProduct?.lineId ?? null,
       variantId: rowProduct?.variantId ?? null,
       variantLabel: rowVariant?.label ?? null,
@@ -59,19 +66,21 @@ function makeSourceSnapshot(state, batch, row = null, rowProduct = null) {
       versionId: rowProduct?.versionId ?? null,
       versionLabel: rowProduct?.versionLabel ?? null,
       productQuantity: rowProduct?.quantity ?? null,
-      key: row.key,
-      no: row.no,
-      title: row.title,
-      titleZh: row.titleZh,
-      specification: row.specification,
-      specificationZh: row.specificationZh,
-      inspectedQty: row.inspectedQty,
-      defectiveQty: row.defectiveQty,
-      defectiveRate: rowRate(row),
-      remarks: row.remarks,
-      savedAt: row.savedAt,
-      ...(Object.hasOwn(row, "actualTimeSeconds") ? { actualTimeSeconds: row.actualTimeSeconds } : {}),
-      photoIds: [...row.photoIds],
+      key: resultRow.key,
+      no: resultRow.no,
+      title: resultRow.title,
+      titleZh: resultRow.titleZh,
+      specification: resultRow.specification,
+      specificationZh: resultRow.specificationZh,
+      inspectedQty: resultRow.inspectedQty,
+      defectiveQty: resultRow.defectiveQty,
+      defectiveRate: rowRate(resultRow),
+      remarks: resultRow.remarks ?? "",
+      savedAt: resultRow.savedAt ?? null,
+      ...(batch.kind === "historical" || Object.hasOwn(resultRow, "actualTimeSeconds")
+        ? { actualTimeSeconds: resultRow.actualTimeSeconds ?? null }
+        : {}),
+      photoIds: [...(resultRow.photoIds ?? [])],
     } : null,
   };
 }
@@ -141,14 +150,15 @@ export function createIssue(state, data, context) {
 
   if (batchIdInput !== null) {
     batch = requireBatch(state, batchIdInput);
-    requireEditableBatch(batch);
+    if (batch.status === "released") fail("Released batch issues are read-only.");
+    if (batch.kind !== "historical") requireEditableBatch(batch);
     batchId = batch.id;
     if (rowIdInput !== null) {
       rowId = rowIdInput;
       row = batch.rows.find((candidate) => candidate.id === rowId);
       if (!row) fail("That inspection row is not part of the selected batch.");
       rowProduct = getBatchRowProduct(batch, row);
-      if (!rowProduct) fail("That inspection row has no locked product allocation.");
+      if (!rowProduct && batch.kind !== "historical") fail("That inspection row has no locked product allocation.");
       if (requestId === null) {
         const existing = state.issues.find((issue) => issue.batchId === batchId && issue.rowId === rowId);
         if (existing) return { entityId: existing.id, changed: false, action: "createIssue", summary: `Issue ${existing.number} already exists for this inspection row.` };
@@ -202,9 +212,6 @@ export function deleteIssue(state, data) {
   const issue = state.issues[issueIndex];
   if (issue.batchId !== null) {
     const batch = requireBatch(state, issue.batchId);
-    if (batch.kind === "historical" || batch.status === "historical") {
-      fail("Issues linked to historical batches cannot be deleted.");
-    }
     if (batch.status === "released") {
       fail("Issues linked to released batches cannot be deleted.");
     }

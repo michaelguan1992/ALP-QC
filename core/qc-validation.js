@@ -31,7 +31,7 @@ import { normalizeStandardItems, selectApplicableItems } from "./qc-standards.js
 import { getBatchVersionItems, getBatchVersionReadiness } from "./qc-batch-versions.js";
 import { getBatchProducts, getBatchRowProduct } from "./qc-batch-products.js";
 import { validateHistoryState } from "./qc-history.js";
-import { createHistoricalBatch } from "./qc-historical-batches.js";
+import { createHistoricalBatch, historicalResultValues, historicalSourceResultValues } from "./qc-historical-batches.js";
 import { validateVersionMergeEvidence } from "./qc-version-merge.js";
 
 const MAX_ASSET_VALIDATION_CACHE_CHARS = Math.ceil(ASSET_TOTAL_MAX_BYTES * 4 / 3) + 1024;
@@ -327,14 +327,63 @@ function validateHistoricalBatch(state, batch, assets) {
   const source = state.history.sources.find((candidate) => candidate.id === inspection.sourceId);
   assert(source, `Historical batch ${batch.number} refers to missing PDF evidence.`);
   const expected = createHistoricalBatch(inspection, source, batch.createdAt);
-  const actualWithoutGeneratedFields = { ...batch };
-  const expectedWithoutGeneratedFields = { ...expected };
+  const actualWithoutGeneratedFields = structuredClone(batch);
+  const expectedWithoutGeneratedFields = structuredClone(expected);
   delete actualWithoutGeneratedFields.createdAt;
   delete expectedWithoutGeneratedFields.createdAt;
   delete actualWithoutGeneratedFields.attachmentIds;
   delete expectedWithoutGeneratedFields.attachmentIds;
+  for (const projection of [actualWithoutGeneratedFields, expectedWithoutGeneratedFields]) {
+    for (const row of projection.rows ?? []) {
+      delete row.inspectedQty;
+      delete row.defectiveQty;
+      delete row.actualTimeSeconds;
+      delete row.attachmentIds;
+    }
+  }
   assert(stableStringify(actualWithoutGeneratedFields) === stableStringify(expectedWithoutGeneratedFields),
     `Historical batch ${batch.number} disagrees with its preserved source inspection evidence.`);
+  for (const [index, row] of batch.rows.entries()) {
+    const sourceRow = inspection.rows[index];
+    const resultValues = historicalResultValues(row, sourceRow);
+    const sourceResultValues = historicalSourceResultValues(sourceRow);
+    const countsEdited = resultValues.inspectedQty !== sourceResultValues.inspectedQty ||
+      resultValues.defectiveQty !== sourceResultValues.defectiveQty;
+    if (Object.hasOwn(row, "inspectedQty")) {
+      assert(row.inspectedQty === null || (Number.isSafeInteger(row.inspectedQty) && row.inspectedQty >= 0),
+        `Historical batch ${batch.number} has an invalid edited inspection quantity.`);
+    }
+    if (!Object.is(row.defectiveQty, sourceRow.defectiveQty)) {
+      assert(row.defectiveQty === null || (Number.isSafeInteger(row.defectiveQty) && row.defectiveQty >= 0),
+        `Historical batch ${batch.number} has an invalid edited defective quantity.`);
+    }
+    if (Object.hasOwn(row, "actualTimeSeconds")) {
+      assert(row.actualTimeSeconds === null || (typeof row.actualTimeSeconds === "number" && Number.isFinite(row.actualTimeSeconds) && row.actualTimeSeconds >= 0),
+        `Historical batch ${batch.number} has an invalid edited inspection time.`);
+    }
+    if (countsEdited && resultValues.inspectedQty !== null && resultValues.defectiveQty !== null) {
+      assert(resultValues.defectiveQty <= resultValues.inspectedQty,
+        `Historical batch ${batch.number} has edited defective quantity above inspection quantity.`);
+    }
+    if (Object.hasOwn(row, "attachmentIds")) {
+      requireRecord(row.attachmentIds, `Attachments on historical inspection row ${row.id}`);
+      assert(Object.keys(row.attachmentIds).every((category) => ROW_ATTACHMENT_CATEGORIES.has(category)),
+        `Historical inspection row ${row.id} has an unsupported attachment category.`);
+      const attachmentIds = [];
+      for (const category of ROW_ATTACHMENT_CATEGORIES) {
+        assert(Object.hasOwn(row.attachmentIds, category), `Historical inspection row ${row.id} must preserve its ${category} attachment slot.`);
+        const assetId = row.attachmentIds[category];
+        assert(assetId === null || (typeof assetId === "string" && assetId.trim()),
+          `Historical inspection row ${row.id} ${category} attachment ID must be null or text.`);
+        if (assetId === null) continue;
+        const asset = assets.get(assetId);
+        assert(asset && asset.kind === "rowAttachment" && asset.batchId === batch.id && asset.rowId === row.id && asset.category === category,
+          `Attachment ${assetId} is not owned by historical inspection row ${row.id}.`);
+        attachmentIds.push(assetId);
+      }
+      ensureUnique(attachmentIds, `Attachments on historical inspection row ${row.id}`);
+    }
+  }
   requireTimestamp(batch.createdAt, "Historical batch created time");
   assert(Array.isArray(batch.attachmentIds) && batch.attachmentIds.includes(source.assetId),
     `Historical batch ${batch.number} must retain its original PDF attachment.`);
@@ -712,7 +761,6 @@ function validateIssues(state, batches, variants, assets) {
     } else {
       const batch = batches.get(issue.batchId);
       assert(batch, `Issue ${issue.number} refers to an unknown batch.`);
-      assert(batch.kind !== "historical", `Issue ${issue.number} cannot be linked to a historical batch.`);
       assert(issue.sourceSnapshot && issue.sourceSnapshot.batchId === batch.id && issue.sourceSnapshot.batchNumber === batch.number, `Issue ${issue.number} has an invalid batch source snapshot.`);
       const source = issue.sourceSnapshot;
       const products = getBatchProducts(batch);
@@ -726,19 +774,26 @@ function validateIssues(state, batches, variants, assets) {
       }));
       assert(source.orderId === batch.orderId, `Issue ${issue.number} source snapshot references the wrong order.`);
       assert(source.factory === batch.factory && source.stage === batch.stage, `Issue ${issue.number} source snapshot has an invalid factory or stage.`);
-      requireDate(source.date, "Issue source batch date");
+      const historicalBatch = batch.kind === "historical";
+      if (historicalBatch) {
+        assert(source.date === batch.date && source.products.length === 0 && source.lineId === null && source.variantId === null &&
+          source.variantLabel === null && source.familyId === batch.familyId && source.versionId === null && source.versionLabel === batch.versionLabel,
+        `Issue ${issue.number} has an invalid historical batch snapshot.`);
+      } else {
+        requireDate(source.date, "Issue source batch date");
+      }
       if (Array.isArray(source.products)) {
         assert(stableStringify(source.products) === stableStringify(expectedProducts),
           `Issue ${issue.number} source snapshot changed its locked product allocations or versions.`);
         const single = expectedProducts.length === 1 ? expectedProducts[0] : null;
-        const singleFamilyId = products.length === 1 ? products[0].familyId : null;
+        const singleFamilyId = historicalBatch ? batch.familyId : products.length === 1 ? products[0].familyId : null;
         for (const [field, expected] of Object.entries({
           lineId: single?.lineId ?? null,
           variantId: single?.variantId ?? null,
           variantLabel: single?.variantLabel ?? null,
           familyId: singleFamilyId,
           versionId: single?.versionId ?? null,
-          versionLabel: single?.versionLabel ?? null,
+          versionLabel: historicalBatch ? batch.versionLabel : single?.versionLabel ?? null,
         })) {
           const detail = field === "versionId" || field === "versionLabel"
             ? "invalid design version product projection"
@@ -763,29 +818,42 @@ function validateIssues(state, batches, variants, assets) {
         const rowVariant = rowProduct ? variants.get(rowProduct.variantId) : null;
         const sourceRow = issue.sourceSnapshot.row;
         assert(row && sourceRow && sourceRow.id === row.id, `Issue ${issue.number} has an invalid inspection row link.`);
-        if (sourceRow.productLineId !== undefined || Array.isArray(batch.products)) {
+        if (!historicalBatch && (sourceRow.productLineId !== undefined || Array.isArray(batch.products))) {
           assert(rowProduct && sourceRow.productLineId === rowProduct.lineId &&
             sourceRow.variantId === rowProduct.variantId && sourceRow.variantLabel === rowVariant?.label &&
             sourceRow.familyId === rowProduct.familyId && sourceRow.versionId === rowProduct.versionId &&
             sourceRow.versionLabel === rowProduct.versionLabel && sourceRow.productQuantity === rowProduct.quantity,
           `Issue ${issue.number} source row snapshot has an invalid product or design version.`);
         }
-        for (const field of ["key", "no", "title", "titleZh", "specification", "specificationZh", "inspectedQty"]) {
+        const immutableRowFields = historicalBatch
+          ? ["key", "no", "title", "titleZh", "specification", "specificationZh"]
+          : ["key", "no", "title", "titleZh", "specification", "specificationZh", "inspectedQty"];
+        for (const field of immutableRowFields) {
           assert(sourceRow[field] === row[field], `Issue ${issue.number} source snapshot changed locked row field ${field}.`);
         }
         requirePositiveInteger(sourceRow.no, "Issue source inspection item number");
-        requireNonNegativeInteger(sourceRow.inspectedQty, "Issue source inspection quantity");
-        assert(sourceRow.defectiveQty === null || (Number.isSafeInteger(sourceRow.defectiveQty) && sourceRow.defectiveQty >= 0 && sourceRow.defectiveQty <= sourceRow.inspectedQty), `Issue ${issue.number} source snapshot has an invalid defective quantity.`);
+        if (historicalBatch) {
+          assert(sourceRow.inspectedQty === null || (Number.isSafeInteger(sourceRow.inspectedQty) && sourceRow.inspectedQty >= 0),
+            `Issue ${issue.number} source snapshot has an invalid inspection quantity.`);
+        } else {
+          requireNonNegativeInteger(sourceRow.inspectedQty, "Issue source inspection quantity");
+        }
+        assert(sourceRow.defectiveQty === null || (Number.isSafeInteger(sourceRow.defectiveQty) && sourceRow.defectiveQty >= 0 &&
+          (historicalBatch || sourceRow.defectiveQty <= sourceRow.inspectedQty)), `Issue ${issue.number} source snapshot has an invalid defective quantity.`);
         if (Object.hasOwn(sourceRow, "actualTimeSeconds")) {
           assert(sourceRow.actualTimeSeconds === null || (typeof sourceRow.actualTimeSeconds === "number" && Number.isFinite(sourceRow.actualTimeSeconds) && sourceRow.actualTimeSeconds >= 0),
             `Issue ${issue.number} source snapshot has an invalid actual inspection time.`);
         }
         const complete = sourceRow.defectiveQty !== null &&
           (!Object.hasOwn(sourceRow, "actualTimeSeconds") || sourceRow.actualTimeSeconds !== null);
-        assert((sourceRow.savedAt !== null) === complete, `Issue ${issue.number} source snapshot has an inconsistent saved time.`);
+        if (historicalBatch) {
+          assert(sourceRow.savedAt === null, `Issue ${issue.number} historical source snapshot cannot claim an operational save time.`);
+        } else {
+          assert((sourceRow.savedAt !== null) === complete, `Issue ${issue.number} source snapshot has an inconsistent saved time.`);
+        }
         if (sourceRow.savedAt !== null) requireTimestamp(sourceRow.savedAt, "Issue source row saved time");
         assertText(sourceRow.remarks, "Issue source row remarks", { maxLength: 5000, allowBlank: true });
-        const expectedRate = sourceRow.defectiveQty === null || sourceRow.inspectedQty === 0
+        const expectedRate = sourceRow.defectiveQty === null || sourceRow.inspectedQty == null || sourceRow.inspectedQty === 0
           ? null
           : Number(((sourceRow.defectiveQty / sourceRow.inspectedQty) * 100).toFixed(2));
         assert(sourceRow.defectiveRate === expectedRate, `Issue ${issue.number} source snapshot has an invalid defective rate.`);

@@ -680,8 +680,7 @@ function openIssueDialog(issue, state, ctx) {
   closeButton.disabled = readOnly;
 
   const linkedBatch = list(currentState.batches).find((batch) => batch.id === currentIssue.batchId);
-  const protectedBatchIssue = Boolean(linkedBatch &&
-    (linkedBatch.kind === "historical" || linkedBatch.status === "historical" || linkedBatch.status === "released"));
+  const protectedBatchIssue = Boolean(linkedBatch && linkedBatch.status === "released");
   const runIssueDeletion = async () => {
     if (deleteSubmitting || closeSubmitting || discussionSubmitting || runtime?.busy || protectedBatchIssue) return;
     deleteSubmitting = true;
@@ -748,7 +747,7 @@ function openIssueDialog(issue, state, ctx) {
     cancelDeleteButton.focus();
   }, "button button-danger");
   deleteButton.disabled = protectedBatchIssue;
-  if (protectedBatchIssue) deleteButton.title = "Issues linked to released or historical batches cannot be deleted.";
+  if (protectedBatchIssue) deleteButton.title = "Issues linked to released batches cannot be deleted.";
 
   discussionButton = button("Add discussion entry", async () => {
     if (discussionSubmitting || closeSubmitting) return;
@@ -926,10 +925,14 @@ export function openNewIssueDialog(state, ctx, options = {}) {
     if (reportedByInput.value.trim()) formError.textContent = "";
   });
 
-  const editableBatches = list(state.batches).filter((batch) => batch.kind !== "historical" && batch.status !== "historical" && batch.status !== "released");
+  const editableBatches = list(state.batches).filter((batch) => batch.status !== "released");
   const batchSelect = el("select", { name: "batchId" }, el("option", { value: "" }, "No batch link"), ...editableBatches.map((batch) => {
     const products = getBatchProducts(batch).map((product) => ({ ...product, variant: variantById(state).get(product.variantId) }));
-    const summary = products.length ? productSummary(products, state) : text(variantById(state).get(batch.variantId)?.label, batch.variantId);
+    const summary = products.length
+      ? productSummary(products, state)
+      : batch.kind === "historical"
+        ? `${text(batch.productLabel || batch.model || batch.familyId, "Historical product")} · ${batch.quantity === null || batch.quantity === undefined ? "quantity unknown" : `${quantity(batch.quantity)} units`}${batch.versionLabel ? ` · Version ${batch.versionLabel}` : ""}`
+        : text(variantById(state).get(batch.variantId)?.label, batch.variantId);
     return el("option", { value: batch.id }, `${text(resolveBatchDisplayNumber(state, batch.id, batch.number))} · ${summary} · ${text(batch.factory)} ${text(batch.stage)}`);
   }));
   const rowSelect = el("select", { name: "rowId", disabled: true }, el("option", { value: "" }, "No inspection row"));

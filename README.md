@@ -37,7 +37,7 @@ See [User Guide](docs/user-guide.md) for the complete workflow and [Local App Ac
 - Manual issue closure requires an owner, disposition, and three entered confirmation names. These names are not authenticated signatures.
 - Every new OQC batch counts each product's full quantity toward its PO line after explicit release; IQC and historical records do not contribute.
 - Backup exports contain records and attachments. Restore validates the entire backup and rejects conflicting records without partial import.
-- Batches includes imported historical inspections and newly entered batches. Optional batch attachments retain original PDFs; historical quantities, printed versions, and missing-check provenance stay intact without inventing release or PO accounting. See [Original PDF Import](docs/pdf-import.md).
+- Batches includes imported historical inspections and newly entered batches. Historical inspection quantities, defect counts, and actual elapsed seconds can be corrected; rates are derived, while printed values, standard time, original PDFs, and missing-check provenance stay intact. Historical records remain excluded from release and PO fulfillment. See [Original PDF Import](docs/pdf-import.md).
 
 Use the fixed local address. All browsers on this computer connect to the same selected workspace. Export backups regularly and before moving computers or changing the service data directory. Attachments allow up to 5 MiB per photo and 10 MiB per video or general file, with 30 MiB total attachment content and 50 MiB per complete JSON backup.
 

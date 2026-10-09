@@ -1,11 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { createMemoryQCAdapter } from "../storage/memory-qc-adapter.js";
+import { createSQLiteQCAdapter } from "../storage/sqlite-qc-adapter.mjs";
 import { createQCService } from "../core/qc-service.js";
+import { validateBackup } from "../core/qc-validation.js";
 
 const PDF_BYTES = Buffer.from("%PDF-1.4\n", "utf8");
 const PDF_DATA_URL = `data:application/pdf;base64,${PDF_BYTES.toString("base64")}`;
+const PNG_DATA_URL = "data:image/png;base64,iVBORw0KGgo=";
+const LOG_DATA_URL = "data:text/plain;base64,YXVkaXQ=";
 const PDF_SHA256 = createHash("sha256").update(PDF_BYTES).digest("hex");
 const TIMESTAMP = "2026-09-29T12:00:00.000Z";
 
@@ -117,9 +124,9 @@ function makePackage() {
   };
 }
 
-function makeHarness(initialState = null) {
+function makeHarness(initialState = null, adapter = createMemoryQCAdapter({ initialState })) {
   let sequence = 0;
-  const service = createQCService(createMemoryQCAdapter({ initialState }), {
+  const service = createQCService(adapter, {
     idFactory: () => `history-test-${String(++sequence).padStart(4, "0")}`,
     now: () => TIMESTAMP,
   });
@@ -183,12 +190,15 @@ test("history import preserves evidence in canonical batches without creating PO
   assert.equal(workspace.version, null);
   assert.equal(workspace.order, null);
   assert.equal(workspace.rows[0].sourceDefectiveRate, 0);
-  assert.equal(Object.hasOwn(workspace.rows[0], "defectiveRate"), false);
+  assert.equal(workspace.rows[0].inspectedQty, 5000);
+  assert.equal(workspace.rows[0].defectiveQty, 0);
+  assert.equal(workspace.rows[0].defectiveRate, 0);
+  assert.equal(workspace.rows[0].actualTimeSeconds, null);
   assert.equal(workspace.attachments[0].sourcePdf, true);
   assert.equal(workspace.releaseBlockers.length, 1);
   await assert.rejects(service.command("releaseBatch", { id: batch.id }), /historical.*cannot be released/i);
   await assert.rejects(service.command("saveInspection", { batchId: batch.id, rowId: workspace.rows[0].id, defectiveQty: 0 }), /historical.*read-only/i);
-  await assert.rejects(service.command("createIssue", { reportedBy: "Inspector", title: "Historical issue", batchId: batch.id, rowId: workspace.rows[0].id }), /historical.*read-only/i);
+  await assert.rejects(service.command("deleteBatch", { id: batch.id }), /historical.*cannot be deleted/i);
 
   const s15 = state.variants.find((variant) => variant.model === "S15" && variant.color === "Red");
   const order = await service.command("createOrder", {
@@ -433,4 +443,212 @@ test("historical batch fields are validated against source evidence and release 
   const state = await target.getState();
   assert.equal(state.revision, 0);
   assert.equal(state.batches.length, 0);
+});
+
+test("historical results, row attachments, Issues, backups, and deletion preserve imported source evidence", async () => {
+  const service = makeHarness();
+  await service.initialize();
+  await service.importHistory(makePackage(), 0);
+  let state = await service.getState();
+  const batch = state.batches[0];
+  const row = batch.rows[0];
+  const originalHistory = structuredClone(state.history);
+  const originalPdf = state.assets.find((asset) => asset.id === state.history.sources[0].assetId);
+
+  await assert.rejects(service.command("saveBatchChanges", {
+    batchId: batch.id,
+    rows: [{ rowId: row.id, inspectedQty: 2, defectiveQty: 3, actualTimeSeconds: 1 }],
+  }, state.revision), /cannot exceed inspection quantity/i);
+  assert.deepEqual(await service.getState(), state, "invalid count edits reject atomically");
+
+  const save = await service.command("saveBatchChanges", {
+    batchId: batch.id,
+    rows: [
+      { rowId: row.id, inspectedQty: 100, defectiveQty: 2, actualTimeSeconds: 3.75 },
+      { rowId: batch.rows[1].id, inspectedQty: null, defectiveQty: null, actualTimeSeconds: 2.5 },
+    ],
+  }, state.revision);
+  state = await service.getState();
+  const savedWorkspace = await service.getBatchWorkspace(batch.id);
+  const savedRow = savedWorkspace.rows.find((candidate) => candidate.id === row.id);
+  assert.equal(save.revision, state.revision);
+  assert.equal(save.changes.audit.length, 1);
+  assert.equal(save.changes.audit[0].action, "saveBatchChanges");
+  assert.equal(savedRow.inspectedQty, 100);
+  assert.equal(savedRow.defectiveQty, 2);
+  assert.equal(savedRow.defectiveRate, 2);
+  assert.equal(savedRow.actualTimeSeconds, 3.75);
+  assert.equal(savedRow.timeSeconds, null, "printed standard time remains separate from actual elapsed time");
+  assert.equal(savedRow.sourceInspectedQty, 5000);
+  assert.equal(savedRow.sourceDefectiveRate, 0);
+  assert.equal(savedWorkspace.rows[1].inspectedQty, null);
+  assert.equal(savedWorkspace.rows[1].defectiveQty, null);
+  assert.equal(savedWorkspace.rows[1].actualTimeSeconds, 2.5);
+  assert.deepEqual(state.history, originalHistory);
+  assert.equal(state.assets.find((asset) => asset.id === originalPdf.id).dataUrl, PDF_DATA_URL);
+
+  await service.command("setRowAttachment", {
+    batchId: batch.id,
+    rowId: row.id,
+    category: "log",
+    file: { name: "inspection.log", mimeType: "text/plain", dataUrl: LOG_DATA_URL },
+  });
+  state = await service.getState();
+  let attachmentId = state.batches[0].rows[0].attachmentIds.log;
+  assert.ok(state.assets.some((asset) => asset.id === attachmentId && asset.kind === "rowAttachment"));
+
+  await assert.rejects(service.command("createIssue", {
+    title: "Historical issue",
+    batchId: batch.id,
+    rowId: row.id,
+    files: [{ name: "issue.png", mimeType: "image/png", dataUrl: PNG_DATA_URL, category: "photo" }],
+  }, state.revision), /reported by is required/i);
+  await assert.rejects(service.command("createIssue", {
+    reportedBy: "Inspector",
+    title: "Historical issue",
+    batchId: batch.id,
+    rowId: row.id,
+  }, state.revision), /uploaded photo is required/i);
+  state = await service.getState();
+  const created = await service.command("createIssue", {
+    reportedBy: "Inspector",
+    title: "Historical issue",
+    description: "Current result needs review.",
+    batchId: batch.id,
+    rowId: row.id,
+    files: [{ name: "issue.png", mimeType: "image/png", dataUrl: PNG_DATA_URL, category: "photo" }],
+  }, state.revision);
+  state = await service.getState();
+  const issue = state.issues.find((candidate) => candidate.id === created.entityId);
+  assert.equal(issue.sourceSnapshot.row.inspectedQty, 100);
+  assert.equal(issue.sourceSnapshot.row.defectiveQty, 2);
+  assert.equal(issue.sourceSnapshot.row.defectiveRate, 2);
+  assert.equal(issue.sourceSnapshot.row.actualTimeSeconds, 3.75);
+  assert.equal(issue.sourceSnapshot.row.savedAt, null);
+  await service.command("saveIssue", {
+    id: issue.id,
+    owner: "Quality lead",
+    disposition: "Review and recheck the affected units.",
+    confirmations: ["One", "Two", "Three"],
+  }, state.revision);
+  state = await service.getState();
+  await service.command("addDiscussion", { id: issue.id, authorName: "Quality lead", text: "Review started." }, state.revision);
+  state = await service.getState();
+
+  const backup = await service.exportBackup();
+  validateBackup(backup);
+  const badEditedCountBackup = structuredClone(backup);
+  const badCountRow = badEditedCountBackup.state.batches[0].rows[0];
+  badCountRow.inspectedQty = 1;
+  badCountRow.defectiveQty = 2;
+  assert.throws(() => validateBackup(badEditedCountBackup), /edited defective quantity above inspection quantity/i);
+
+  const restored = makeHarness();
+  await restored.initialize();
+  await restored.importBackup(backup, 0);
+  const restoredState = await restored.getState();
+  const restoredWorkspace = await restored.getBatchWorkspace(batch.id);
+  assert.equal(restoredWorkspace.rows[0].inspectedQty, 100);
+  assert.equal(restoredWorkspace.rows[0].defectiveQty, 2);
+  assert.equal(restoredWorkspace.rows[0].defectiveRate, 2);
+  assert.equal(restoredWorkspace.rows[0].actualTimeSeconds, 3.75);
+  assert.equal(restoredWorkspace.rows[0].timeSeconds, null);
+  assert.equal(restoredWorkspace.rows[0].attachments.log.name, "inspection.log");
+  assert.equal(restoredState.issues[0].sourceSnapshot.row.actualTimeSeconds, 3.75);
+  assert.equal(restoredState.issues[0].owner, "Quality lead");
+  assert.deepEqual(restoredState.history, originalHistory);
+  assert.equal(restoredState.assets.find((asset) => asset.id === originalPdf.id).dataUrl, PDF_DATA_URL);
+
+  const issueEvidenceId = issue.attachmentIds[0];
+  await service.command("deleteIssue", { id: issue.id }, state.revision);
+  const afterDelete = await service.getState();
+  assert.equal(afterDelete.issues.length, 0);
+  assert.equal(afterDelete.assets.some((asset) => asset.id === issueEvidenceId), false);
+  assert.ok(afterDelete.assets.some((asset) => asset.id === attachmentId));
+  assert.deepEqual(afterDelete.history, originalHistory);
+  assert.equal(afterDelete.assets.find((asset) => asset.id === originalPdf.id).dataUrl, PDF_DATA_URL);
+  assert.equal(afterDelete.audit.at(-1).action, "deleteIssue");
+  await assert.rejects(service.command("releaseBatch", { id: batch.id }), /historical.*cannot be released/i);
+  await assert.rejects(service.command("deleteBatch", { id: batch.id }), /historical.*cannot be deleted/i);
+
+  state = await service.getState();
+  const redVariant = state.variants.find((variant) => variant.model === "S15" && variant.color === "Red");
+  const orderResult = await service.command("createOrder", {
+    number: "PO-HISTORICAL-EDIT-NO-COUNT",
+    date: "2026-09-29",
+    supplier: "Supplier",
+    notes: "",
+    lines: [{ variantId: redVariant.id, orderedQty: 1000 }],
+  }, state.revision);
+  const progress = await service.getPurchaseOrderProgress(orderResult.entityId);
+  assert.equal(progress.lines[0].releasedQty, 0);
+  assert.deepEqual(progress.lines[0].batches, []);
+  await restored.close();
+  await service.close();
+});
+
+test("historical result edits survive SQLite close and reopen", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "masterqc-history-edit-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const databasePath = path.join(directory, "workspace.sqlite");
+  let service = makeHarness(null, createSQLiteQCAdapter({ databasePath }));
+  await service.initialize();
+  await service.importHistory(makePackage(), 0);
+  const before = await service.getState();
+  const batch = before.batches[0];
+  const row = batch.rows[0];
+  await service.command("saveBatchChanges", {
+    batchId: batch.id,
+    rows: [{ rowId: row.id, inspectedQty: 250, defectiveQty: 5, actualTimeSeconds: 0.875 }],
+  }, before.revision);
+  const expected = await service.getState();
+  const expectedHistory = structuredClone(expected.history);
+  await service.close();
+
+  service = makeHarness(null, createSQLiteQCAdapter({ databasePath }));
+  await service.initialize();
+  const reopened = await service.getState();
+  const workspace = await service.getBatchWorkspace(batch.id);
+  const reopenedRow = workspace.rows.find((candidate) => candidate.id === row.id);
+  assert.deepEqual(reopened, expected);
+  assert.equal(reopenedRow.inspectedQty, 250);
+  assert.equal(reopenedRow.defectiveQty, 5);
+  assert.equal(reopenedRow.defectiveRate, 2);
+  assert.equal(reopenedRow.actualTimeSeconds, 0.875);
+  assert.equal(reopenedRow.timeSeconds, null);
+  assert.deepEqual(reopened.history, expectedHistory);
+  assert.equal(reopened.assets.find((asset) => asset.id === reopened.history.sources[0].assetId).dataUrl, PDF_DATA_URL);
+  await service.close();
+});
+
+test("untouched anomalous historical counts allow elapsed-time edits and row evidence", async () => {
+  const service = makeHarness();
+  await service.initialize();
+  const packageData = makePackage();
+  packageData.inspections[0].rows[0].sourceInspectedQty = 1;
+  packageData.inspections[0].rows[0].defectiveQty = 2;
+  packageData.inspections[0].rows[0].sourceDefectiveRate = 200;
+  await service.importHistory(packageData, 0);
+  const before = await service.getState();
+  const batch = before.batches[0];
+  const row = batch.rows[0];
+  await service.command("setRowAttachment", {
+    batchId: batch.id,
+    rowId: row.id,
+    category: "log",
+    file: { name: "anomaly.log", mimeType: "text/plain", dataUrl: LOG_DATA_URL },
+  }, before.revision);
+  let state = await service.getState();
+  await service.command("saveBatchChanges", {
+    batchId: batch.id,
+    rows: [{ rowId: row.id, inspectedQty: 1, defectiveQty: 2, actualTimeSeconds: 1.25 }],
+  }, state.revision);
+  state = await service.getState();
+  const workspace = await service.getBatchWorkspace(batch.id);
+  assert.equal(workspace.rows[0].defectiveRate, 200);
+  assert.equal(workspace.rows[0].actualTimeSeconds, 1.25);
+  assert.equal(workspace.rows[0].attachments.log.name, "anomaly.log");
+  assert.equal(state.history.inspections[0].rows[0].sourceInspectedQty, 1);
+  assert.equal(state.history.inspections[0].rows[0].defectiveQty, 2);
+  await service.close();
 });

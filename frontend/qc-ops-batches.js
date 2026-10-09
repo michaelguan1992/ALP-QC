@@ -1,6 +1,5 @@
 import {
   button,
-  computedSourceQuantity,
   dateLabel,
   el,
   errorText,
@@ -9,7 +8,6 @@ import {
   notify,
   pageHeading,
   quantity,
-  safeProcedureUrl,
   setOptions,
   sourcePercent,
   statusPill,
@@ -23,6 +21,7 @@ import { getBatchVersionItems, getBatchVersions, getBatchVersionReadiness, getSh
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
 import { createManualSaveController } from "./qc-manual-save.js";
 import { batchReleaseBlockers } from "../core/qc-inspections.js";
+import { findHistoricalSourceRow, historicalResultValues } from "../core/qc-historical-batches.js";
 
 const rowDrafts = new Map();
 const batchDetailDrafts = new Map();
@@ -120,6 +119,7 @@ function sourceValue(value) {
 function stateForRow(row, batchId) {
   const key = rowKey(batchId, row.id);
   return rowDrafts.get(key) || {
+    inspectedQty: row.inspectedQty === null || row.inspectedQty === undefined ? "" : String(row.inspectedQty),
     defectiveQty: row.defectiveQty === null || row.defectiveQty === undefined ? "" : String(row.defectiveQty),
     actualTimeSeconds: row.actualTimeSeconds === null || row.actualTimeSeconds === undefined ? "" : String(row.actualTimeSeconds),
     remarks: String(row.remarks || "")
@@ -185,11 +185,14 @@ function rateLabel(value) {
   return `${rate.toFixed(2)}%`;
 }
 
-function currentRate(row, draft) {
+function currentRate(row, draft, allowUnchangedAnomaly = false) {
+  const inspectedValue = draft.inspectedQty === undefined ? row.inspectedQty : draft.inspectedQty;
+  if (inspectedValue === "" || inspectedValue === null || inspectedValue === undefined) return "—";
   if (draft.defectiveQty === "") return "—";
-  const inspected = Number(row.inspectedQty);
+  const inspected = Number(inspectedValue);
   const defective = Number(draft.defectiveQty);
-  if (!Number.isInteger(inspected) || !Number.isInteger(defective) || inspected < 0 || defective < 0 || defective > inspected) return "Check quantity";
+  if (!Number.isInteger(inspected) || !Number.isInteger(defective) || inspected < 0 || defective < 0) return "Check quantity";
+  if (defective > inspected && !(allowUnchangedAnomaly && inspected === row.inspectedQty && defective === row.defectiveQty)) return "Check quantity";
   return inspected === 0 ? "—" : `${((defective / inspected) * 100).toFixed(2)}%`;
 }
 
@@ -307,6 +310,7 @@ function renderRowAttachmentCell(row, workspace, state, ctx, readOnly) {
 }
 
 function renderInspectionRow(row, index, workspace, state, ctx, manualSaveController, onDraftChange = null, displayNumbers = null) {
+  const historical = isHistoricalBatch(workspace.batch);
   const readOnly = workspace.batch.status === "released";
   const draft = stateForRow(row, workspace.batch.id);
   const key = rowKey(workspace.batch.id, row.id);
@@ -318,6 +322,10 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
   task.setAttribute("aria-label", fullTitle);
   setBilingual(task, operationalTaskTitle(row, workspace, state), row.titleZh);
   if (important === true) task.append(el("span", { className: "qc-ops-important-badge" }, "Important"));
+  if (historical && row.status === "missing-from-source") {
+    task.append(el("span", { className: "qc-ops-historical-badge" }, "Missing from source"));
+    if (row.missingEvidence) task.append(el("small", { className: "qc-ops-historical-evidence" }, row.missingEvidence));
+  }
   const details = el("details", { className: "qc-ops-row-details", open: true }, el("summary", {}, "Details"));
   const specificationValue = el("span", {}, text(row.specification, "—"), row.specificationZh ? el("small", { lang: "zh" }, row.specificationZh) : null);
   const methodValue = el("span", {}, text(row.devices, "—"), row.devicesZh ? el("small", { lang: "zh" }, row.devicesZh) : null);
@@ -327,15 +335,32 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
     operationalDetailFact("Sampling", sourcePercent(row.samplingPercent)),
     operationalDetailFact("Recording", text(row.recordingRule, "—")),
   ));
+  if (historical) {
+    const sourceRow = findHistoricalSourceRow(state, workspace.batch, row);
+    const sourceFacts = el("dl", { className: "qc-ops-operational-details qc-ops-historical-source-results" },
+      operationalDetailFact("Printed inspection qty", sourceValue(sourceRow?.sourceInspectedQty)),
+      operationalDetailFact("Printed defective qty", sourceValue(sourceRow?.defectiveQty)),
+      operationalDetailFact("Printed defective rate", sourcePercent(sourceRow?.sourceDefectiveRate)),
+      operationalDetailFact("Printed time (seconds)", sourceValue(sourceRow?.timeSeconds)),
+    );
+    const sourceDetails = el("details", { className: "qc-ops-historical-raw" },
+      el("summary", {}, "Imported source values"),
+      sourceFacts,
+      row.anomalies?.length ? el("ul", {}, ...list(row.anomalies).map((anomaly) => el("li", {}, typeof anomaly === "string" ? anomaly : JSON.stringify(anomaly)))) : null,
+      row.raw && Object.keys(row.raw).length ? el("details", {}, el("summary", {}, "Preserved source fields"), el("pre", {}, JSON.stringify(row.raw, null, 2))) : null,
+    );
+    details.append(sourceDetails);
+  }
   task.append(details);
   const inspectedInput = el("input", {
     className: "qc-ops-inspected-input",
     type: "number",
     min: "0",
     step: "1",
-    value: String(row.inspectedQty ?? ""),
-    readOnly: true,
-    "aria-label": `Calculated inspection quantity for ${text(row.title)}`
+    value: historical ? draft.inspectedQty : String(row.inspectedQty ?? ""),
+    readOnly: !historical,
+    disabled: readOnly,
+    "aria-label": `${historical ? "Inspection quantity" : "Calculated inspection quantity"} for ${text(row.title)}`
   });
   const defectiveInput = el("input", {
     className: "qc-ops-defective-input",
@@ -362,7 +387,7 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
   const rowFormId = `qc-row-form-${workspace.batch.id}-${row.id}`.replace(/[^A-Za-z0-9_-]/g, "-");
   defectiveInput.setAttribute("form", rowFormId);
   actualTimeInput.setAttribute("form", rowFormId);
-  const liveRate = el("strong", { className: "qc-ops-live-rate" }, currentRate(row, draft));
+  const liveRate = el("strong", { className: "qc-ops-live-rate" }, currentRate(row, draft, historical));
   const history = list(row.history);
   const historyValue = history.length
     ? el("ul", { className: "qc-ops-result-history-list" }, ...history.slice(0, 4).map((entry, historyIndex) => el("li", {},
@@ -406,21 +431,28 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
   if (legacyEvidence) rowForm.append(legacyEvidence);
 
   const readRowValue = () => {
+    const inspected = historical ? nullableNumberFromInput(inspectedInput) : { value: row.inspectedQty, invalid: false };
     const defective = nullableNumberFromInput(defectiveInput);
     const actualTime = nullableNumberFromInput(actualTimeInput);
     return {
+      inspectedQty: inspected.value,
       defectiveQty: defective.value,
       actualTimeSeconds: legacyTimeOmitted && !actualTimeTouched ? undefined : actualTime.value,
       remarks: row.remarks ?? "",
+      invalidInspectedQty: inspected.invalid,
       invalidDefectiveQty: defective.invalid,
       invalidActualTimeSeconds: actualTime.invalid,
     };
   };
-  const valueForPersistence = (value) => ({
+  const valueForPersistence = (value) => historical ? {
+    inspectedQty: value.inspectedQty,
+    defectiveQty: value.defectiveQty,
+    actualTimeSeconds: value.actualTimeSeconds ?? null,
+  } : {
     defectiveQty: value.defectiveQty,
     ...(value.actualTimeSeconds === undefined ? {} : { actualTimeSeconds: value.actualTimeSeconds }),
     remarks: value.remarks,
-  });
+  };
   const updateRowStatus = (status = null) => {
     const visibleStatus = status === "Saving…" || status === "Save failed" ? status : "";
     rowState.textContent = visibleStatus;
@@ -430,20 +462,23 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
   };
   const rowInputState = {
     defectiveInput,
+    inspectedInput,
     actualTimeInput,
     actualTimeTouched: () => actualTimeTouched,
     read: readRowValue,
     createIssueButton,
     updateStatus: updateRowStatus,
     reset(savedRow) {
+      inspectedInput.value = savedRow?.inspectedQty === null || savedRow?.inspectedQty === undefined ? "" : String(savedRow.inspectedQty);
       defectiveInput.value = savedRow?.defectiveQty === null || savedRow?.defectiveQty === undefined ? "" : String(savedRow.defectiveQty);
       actualTimeInput.value = savedRow?.actualTimeSeconds === null || savedRow?.actualTimeSeconds === undefined ? "" : String(savedRow.actualTimeSeconds);
       actualTimeTouched = false;
       liveRate.textContent = currentRate(savedRow || row, {
+        inspectedQty: inspectedInput.value,
         defectiveQty: defectiveInput.value,
         actualTimeSeconds: actualTimeInput.value,
         remarks: savedRow?.remarks ?? "",
-      });
+      }, historical);
       createIssueButton.disabled = readOnly;
     },
   };
@@ -451,18 +486,25 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
   const markRowDraft = () => {
     const value = readRowValue();
     const nextDraft = {
+      ...(historical ? { inspectedQty: inspectedInput.value } : {}),
       defectiveQty: defectiveInput.value,
       actualTimeSeconds: legacyTimeOmitted && !actualTimeTouched ? undefined : actualTimeInput.value,
       remarks: row.remarks ?? "",
+      invalidInspectedQty: value.invalidInspectedQty,
       invalidDefectiveQty: value.invalidDefectiveQty,
       invalidActualTimeSeconds: value.invalidActualTimeSeconds,
     };
-    if (!value.invalidDefectiveQty && !value.invalidActualTimeSeconds && sameInspectionValues(row, valueForPersistence(value))) {
+    const isUnchanged = historical
+      ? !value.invalidInspectedQty && !value.invalidDefectiveQty && !value.invalidActualTimeSeconds &&
+        row.inspectedQty === valueForPersistence(value).inspectedQty && row.defectiveQty === valueForPersistence(value).defectiveQty &&
+        (row.actualTimeSeconds ?? null) === valueForPersistence(value).actualTimeSeconds
+      : !value.invalidDefectiveQty && !value.invalidActualTimeSeconds && sameInspectionValues(row, valueForPersistence(value));
+    if (isUnchanged) {
       rowDrafts.delete(key);
     } else {
       rowDrafts.set(key, nextDraft);
     }
-    liveRate.textContent = currentRate(row, rowDrafts.get(key) || nextDraft);
+    liveRate.textContent = currentRate(row, rowDrafts.get(key) || nextDraft, historical);
     updateRowStatus();
     createIssueButton.disabled = readOnly;
     manualSaveController?.noteChanges();
@@ -470,134 +512,12 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
   };
   actualTimeInput.addEventListener("input", () => { actualTimeTouched = true; });
   actualTimeInput.addEventListener("change", () => { actualTimeTouched = true; });
-  for (const input of [defectiveInput, actualTimeInput]) {
+  for (const input of historical ? [inspectedInput, defectiveInput, actualTimeInput] : [defectiveInput, actualTimeInput]) {
     input.addEventListener("input", markRowDraft);
     input.addEventListener("change", markRowDraft);
   }
   tr.append(task, results, el("td", { className: "qc-ops-remarks" }, rowForm), renderRowAttachmentCell(row, workspace, state, ctx, readOnly));
   return tr;
-}
-
-function renderHistoricalInspectionRow(row, index, workspace, state, ctx) {
-  const batch = workspace.batch;
-  const tr = el("tr", {
-    className: `${row.important === true ? "qc-ops-important-row" : ""}${row.status === "missing-from-source" ? " qc-ops-historical-missing-row" : ""}`.trim(),
-  });
-  tr.append(el("td", { className: "qc-ops-no" }, sourceValue(row.no ?? index + 1)));
-
-  const task = el("th", { scope: "row", className: "qc-ops-task" });
-  setBilingual(task, row.title, row.titleZh);
-  if (row.status === "missing-from-source") {
-    task.append(el("span", { className: "qc-ops-historical-badge" }, "Missing from source"));
-    if (row.missingEvidence) task.append(el("small", { className: "qc-ops-historical-evidence" }, row.missingEvidence));
-  }
-  if (row.raw && Object.keys(row.raw).length) {
-    task.append(el("details", { className: "qc-ops-historical-raw" }, el("summary", {}, "Source fields"), el("pre", {}, JSON.stringify(row.raw, null, 2))));
-  }
-  tr.append(task);
-
-  const specification = el("td", { className: "qc-ops-spec" });
-  setBilingual(specification, row.specification, row.specificationZh);
-  const method = el("td", { className: "qc-ops-method" });
-  setBilingual(method, row.devices, row.devicesZh || "");
-  tr.append(
-    specification,
-    method,
-    el("td", { className: "qc-ops-frequency" }, sourcePercent(row.samplingPercent)),
-    el("td", { className: "qc-ops-recording" }, sourceValue(row.recordingRule)),
-  );
-
-  const computed = computedSourceQuantity(batch, row);
-  const inspectionQuantity = el("td", { className: "qc-ops-number" }, sourceValue(row.sourceInspectedQty));
-  if (computed !== null) inspectionQuantity.append(el("small", { className: "qc-ops-historical-comparison" }, `Web formula: ${quantity(computed)}`));
-  const defective = row.defectiveQty === null || row.defectiveQty === undefined || row.defectiveQty === "" ? "—" : String(row.defectiveQty);
-  tr.append(
-    inspectionQuantity,
-    el("td", { className: "qc-ops-number" }, defective),
-    el("td", { className: "qc-ops-number qc-ops-rate" }, sourcePercent(row.sourceDefectiveRate)),
-  );
-  for (let historyIndex = 0; historyIndex < 4; historyIndex += 1) {
-    tr.append(el("td", { className: "qc-ops-history" }, el("span", { className: "qc-ops-empty-history" }, "—")));
-  }
-
-  const procedure = el("td", { className: "qc-ops-link" });
-  const procedureUrl = safeProcedureUrl(row.procedureUrl);
-  procedure.append(procedureUrl ? el("a", { href: procedureUrl, target: "_blank", rel: "noopener noreferrer" }, "Open procedure") : sourceValue(row.procedureUrl));
-  const remarks = el("td", { className: "qc-ops-remarks" }, legacyEvidenceDisclosure(row, workspace, state, ctx));
-  if (list(row.anomalies).length) {
-    remarks.append(el("details", { className: "qc-ops-historical-raw" },
-      el("summary", {}, "Source review notes"),
-      el("ul", {}, list(row.anomalies).map((anomaly) => el("li", {}, typeof anomaly === "string" ? anomaly : JSON.stringify(anomaly)))),
-    ));
-  }
-  const attachments = getRowAttachments(row, state);
-  const attachmentSlots = ROW_ATTACHMENT_CATEGORIES.flatMap(([category, label]) => {
-    const asset = attachments?.[category];
-    if (!asset) return [];
-    const slot = el("div", { className: "qc-ops-row-attachment-slot" },
-      el("strong", {}, label),
-      el("span", { className: "qc-ops-row-attachment-name", title: text(asset.name) }, text(asset.name, "Attachment")),
-      attachmentCanPreview(asset)
-        ? button("Preview", () => { void previewAttachment(asset, ctx.service, `${text(row.title)} · ${label}`); }, "button-quiet qc-ops-small-button")
-        : null,
-      asset && (asset.dataUrl || asset.id) ? button("Download", () => {
-        void downloadAttachment(asset, ctx.service).catch((error) => notify(errorText(error, "The file could not be downloaded."), true));
-      }, "button-quiet qc-ops-small-button") : null,
-    );
-    return [slot];
-  });
-  const attachmentCell = el("td", { className: "qc-ops-row-attachments qc-ops-row-attachments-readonly" }, ...attachmentSlots);
-  tr.append(
-    el("td", { className: "qc-ops-number" }, row.timeSeconds === null || row.timeSeconds === undefined ? "—" : `${row.timeSeconds}s`),
-    procedure,
-    remarks,
-    attachmentCell,
-  );
-  return tr;
-}
-
-function renderRows(workspace, state, ctx, onDraftChange, displayNumbers) {
-  const body = el("tbody", { className: "qc-ops-table-body" });
-  list(workspace.rows).forEach((row, index) => body.append(isHistoricalBatch(workspace.batch)
-    ? renderHistoricalInspectionRow(row, index, workspace, state, ctx)
-    : renderInspectionRow(row, index, workspace, state, ctx, null, onDraftChange, displayNumbers)));
-  return body;
-}
-
-function makeInspectionTable(workspace, state, ctx, onDraftChange) {
-  const displayNumbers = resolveBatchDisplayNumbers(state);
-  const multipleProducts = !isHistoricalBatch(workspace.batch) && batchProducts(workspace.batch, state, workspace).length > 1;
-  const table = el("table", { className: `qc-ops-inspection-table${multipleProducts ? " qc-ops-mixed-product-table" : ""}` });
-  const colgroup = el("colgroup");
-  const widths = ["34px", ...(multipleProducts ? ["118px"] : []), "100px", "185px", "80px", "60px", "76px", "55px", "55px", "52px", "52px", "52px", "52px", "52px", "44px", "64px", "165px", "128px"];
-  for (const width of widths) {
-    colgroup.append(el("col", { style: { width } }));
-  }
-  const thead = el("thead", {},
-    el("tr", { className: "qc-ops-group-head" },
-      el("th", { rowSpan: "2", scope: "col" }, "No.", el("br"), el("span", { lang: "zh" }, "序号")),
-      multipleProducts ? el("th", { rowSpan: "2", scope: "col" }, "Product / qty", el("br"), el("span", { lang: "zh" }, "产品 / 数量")) : null,
-      el("th", { rowSpan: "2", scope: "col" }, "QC task", el("br"), el("span", { lang: "zh" }, "检验项目")),
-      el("th", { rowSpan: "2", scope: "col" }, "Specifications / inspection points", el("br"), el("span", { lang: "zh" }, "规格尺寸 / 检验要点")),
-      el("th", { rowSpan: "2", scope: "col" }, "Devices / methods", el("br"), el("span", { lang: "zh" }, "检测仪器 / 方法")),
-      el("th", { rowSpan: "2", scope: "col" }, "Inspection frequency", el("br"), el("span", { lang: "zh" }, "检验频率")),
-      el("th", { rowSpan: "2", scope: "col" }, "Recording frequency", el("br"), el("span", { lang: "zh" }, "记录频率")),
-      el("th", { colSpan: "3", scope: "colgroup" }, "Quality control points", el("br"), el("span", { lang: "zh" }, "品质管制点")),
-      el("th", { colSpan: "4", scope: "colgroup" }, "Defective rate history · saved batches only", el("br"), el("span", { lang: "zh" }, "不良率历史记录 · 已保存批次")),
-      el("th", { rowSpan: "2", scope: "col" }, "Time", el("br"), el("span", { lang: "zh" }, "时数 (sec)")),
-      el("th", { rowSpan: "2", scope: "col" }, "Procedure / link", el("br"), el("span", { lang: "zh" }, "视频 / 程序 / 报告")),
-      el("th", { rowSpan: "2", scope: "col" }, "Remarks", el("br"), el("span", { lang: "zh" }, "备注")),
-      el("th", { rowSpan: "2", scope: "col" }, "Attachments", el("br"), el("span", { lang: "zh" }, "附件"))
-    ),
-    el("tr", { className: "qc-ops-sub-head" },
-      el("th", { scope: "col" }, "Inspection qty", el("br"), el("span", { lang: "zh" }, "检验数量")),
-      el("th", { scope: "col" }, "Defective qty", el("br"), el("span", { lang: "zh" }, "不良数")),
-      el("th", { scope: "col" }, "Defective rate", el("br"), el("span", { lang: "zh" }, "不良率")),
-      ...[1, 2, 3, 4].map((index) => el("th", { scope: "col" }, `Prior ${index}`, el("br"), el("span", { lang: "zh" }, `历史 ${index}`)))
-    )
-  );
-  table.append(colgroup, thead, renderRows(workspace, state, ctx, onDraftChange, displayNumbers));
-  return el("div", { className: "qc-ops-table-scroll", tabindex: "0", "aria-label": "Batch inspection table; scroll horizontally to see all columns" }, table);
 }
 
 function renderOperationalRows(workspace, state, ctx, manualSaveController, onDraftChange) {
@@ -850,21 +770,142 @@ function renderHistoricalBatchDetail(root, ctx, workspace) {
       inspection?.raw ? el("details", { className: "qc-ops-historical-raw" }, el("summary", {}, "Preserved source fields"), el("pre", {}, JSON.stringify(inspection.raw, null, 2))) : null,
     ),
   );
+
+  const rowStatusElements = new Map();
+  const rowInputStates = new Map();
+  const onRowDraftChange = (rowId = null, status = null, createIssueButton = null, inputState = null) => {
+    if (rowId && status) {
+      rowStatusElements.set(rowId, { status, createIssueButton });
+      rowInputStates.set(rowId, inputState);
+    }
+  };
+  const rowsDraftedForBatch = () => [...rowDrafts.entries()].filter(([key]) => key.startsWith(`${batch.id}::`));
+  const hasChanges = () => rowsDraftedForBatch().length > 0;
+  const readSnapshot = () => ({
+    rows: rowsDraftedForBatch().map(([key, draft]) => {
+      const rowId = key.slice(`${batch.id}::`.length);
+      const row = list(workspace.rows).find((candidate) => candidate.id === rowId);
+      return {
+        rowId,
+        inspectedQty: draft.inspectedQty === "" ? null : Number(draft.inspectedQty),
+        defectiveQty: draft.defectiveQty === "" ? null : Number(draft.defectiveQty),
+        actualTimeSeconds: draft.actualTimeSeconds === "" || draft.actualTimeSeconds === undefined ? null : Number(draft.actualTimeSeconds),
+        invalidInspectedQty: draft.invalidInspectedQty === true,
+        invalidDefectiveQty: draft.invalidDefectiveQty === true,
+        invalidActualTimeSeconds: draft.invalidActualTimeSeconds === true,
+        previous: { inspectedQty: row?.inspectedQty ?? null, defectiveQty: row?.defectiveQty ?? null },
+      };
+    }),
+  });
+  const saveError = el("p", { className: "qc-ops-form-error qc-ops-save-error", role: "alert" });
+  const saveStatus = el("span", { hidden: true });
+  const manualSaveController = createManualSaveController({
+    hasChanges,
+    readSnapshot,
+    saveOnExit: true,
+    validate: (snapshot) => {
+      for (const row of snapshot.rows) {
+        if (row.invalidInspectedQty || row.invalidDefectiveQty || row.invalidActualTimeSeconds ||
+          row.inspectedQty !== null && (!Number.isSafeInteger(row.inspectedQty) || row.inspectedQty < 0) ||
+          row.defectiveQty !== null && (!Number.isSafeInteger(row.defectiveQty) || row.defectiveQty < 0) ||
+          row.actualTimeSeconds !== null && (!Number.isFinite(row.actualTimeSeconds) || row.actualTimeSeconds < 0)) {
+          return "Enter nonnegative whole-number quantities and a nonnegative actual time, or leave a field blank.";
+        }
+        const countsChanged = row.inspectedQty !== row.previous.inspectedQty || row.defectiveQty !== row.previous.defectiveQty;
+        if (countsChanged && row.inspectedQty !== null && row.defectiveQty !== null && row.defectiveQty > row.inspectedQty) {
+          return "Defective quantity cannot exceed inspection quantity when changing historical counts.";
+        }
+      }
+      return true;
+    },
+    save: (snapshot) => ctx.run("saveBatchChanges", {
+      batchId: batch.id,
+      rows: snapshot.rows.map(({ rowId, inspectedQty, defectiveQty, actualTimeSeconds }) => ({
+        rowId, inspectedQty, defectiveQty, actualTimeSeconds,
+      })),
+    }, { manualSave: true, render: false, silent: true }),
+    onError: (error) => {
+      saveError.textContent = `This page remains open because the changes could not be saved: ${errorText(error, "Check the highlighted changes and try again.")}`;
+    },
+    onSaved: (snapshot, response) => {
+      saveError.textContent = "";
+      const latestState = response.state || ctx.state || state;
+      const savedBatch = list(latestState.batches).find((candidate) => candidate.id === batch.id) ||
+        list(response.result?.changes?.batches).find((candidate) => candidate.id === batch.id);
+      if (!savedBatch) throw new Error("The saved historical results could not be confirmed.");
+      Object.assign(batch, savedBatch);
+      Object.assign(workspace.batch, savedBatch);
+      for (const savedRow of list(savedBatch.rows)) {
+        const currentRow = list(workspace.rows).find((candidate) => candidate.id === savedRow.id);
+        if (!currentRow) continue;
+        Object.assign(currentRow, savedRow, historicalResultValues(savedRow, findHistoricalSourceRow(latestState, savedBatch, savedRow)));
+        const rowInputState = rowInputStates.get(savedRow.id);
+        if (!rowInputState) continue;
+        const currentValue = rowInputState.read();
+        const sameAsSaved = !currentValue.invalidInspectedQty && !currentValue.invalidDefectiveQty && !currentValue.invalidActualTimeSeconds &&
+          (currentValue.inspectedQty ?? null) === (currentRow.inspectedQty ?? null) &&
+          (currentValue.defectiveQty ?? null) === (currentRow.defectiveQty ?? null) &&
+          (currentValue.actualTimeSeconds ?? null) === (currentRow.actualTimeSeconds ?? null);
+        const key = rowKey(batch.id, savedRow.id);
+        if (sameAsSaved) {
+          rowDrafts.delete(key);
+          rowInputState.reset(currentRow);
+        } else {
+          rowDrafts.set(key, {
+            inspectedQty: rowInputState.inspectedInput.value,
+            defectiveQty: rowInputState.defectiveInput.value,
+            actualTimeSeconds: rowInputState.actualTimeInput.value,
+            invalidInspectedQty: currentValue.invalidInspectedQty,
+            invalidDefectiveQty: currentValue.invalidDefectiveQty,
+            invalidActualTimeSeconds: currentValue.invalidActualTimeSeconds,
+            remarks: "",
+          });
+        }
+        rowInputState.updateStatus();
+      }
+    },
+    onDiscard: () => {
+      clearDraftsForBatch(batch.id);
+      for (const [rowId, rowInputState] of rowInputStates) {
+        const savedRow = list(workspace.rows).find((candidate) => candidate.id === rowId);
+        rowInputState.reset(savedRow);
+        rowInputState.updateStatus();
+      }
+      saveError.textContent = "";
+    },
+    onStatus: (status) => {
+      const visibleStatus = status === "Saving…" || status === "Save failed" ? status : "";
+      saveStatus.textContent = visibleStatus;
+      saveStatus.hidden = !visibleStatus;
+      saveStatus.className = visibleStatus === "Saving…" ? "qc-ops-save-pending"
+        : visibleStatus === "Save failed" ? "qc-ops-save-failed" : "";
+      for (const [rowId, elements] of rowStatusElements) {
+        if (!rowDrafts.has(rowKey(batch.id, rowId))) continue;
+        elements.status.textContent = visibleStatus;
+        elements.status.hidden = !visibleStatus;
+        elements.status.className = visibleStatus === "Saving…" ? "qc-ops-save-pending"
+          : visibleStatus === "Save failed" ? "qc-ops-save-failed" : "";
+      }
+    },
+  });
+  ctx.registerManualSaveController?.(manualSaveController);
   const intro = el("section", { className: "card qc-ops-inspection-card" },
     el("div", { className: "qc-ops-section-heading" },
-      el("h2", {}, "Batch inspection table"),
-      el("span", { className: "qc-ops-note-pill" }, "Read-only"),
+      el("h2", {}, "Batch inspection"),
+      saveStatus,
     ),
-    makeInspectionTable(workspace, state, ctx, null),
+    saveError,
+    makeOperationalInspectionTable(workspace, state, ctx, manualSaveController, onRowDraftChange),
   );
+
   root.replaceChildren(
     pageHeading("Batches", "", [
       button("All batches", () => ctx.navigate("batches"), "button button-secondary"),
       button("View report", () => ctx.navigate("batch-report", batch.id), "button button-secondary"),
     ]),
     metadata,
-    renderBatchAttachments(attachmentsWorkspace, state, ctx),
     intro,
+    renderBatchAttachments(attachmentsWorkspace, state, ctx),
   );
 }
 

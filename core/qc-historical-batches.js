@@ -25,6 +25,40 @@ function digest8(value) {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+function historicalRowId(row) {
+  return typeof row.id === "string" && row.id.trim() ? row.id : `historical-row-${row.no}`;
+}
+
+function sourceWholeNumber(value) {
+  if (Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value !== "string" || !/^\d+$/u.test(value.trim())) return null;
+  const number = Number(value.trim());
+  return Number.isSafeInteger(number) ? number : null;
+}
+
+/** Resolve an imported row's source counterpart without changing the preserved history collection. */
+export function findHistoricalSourceRow(state, batch, row) {
+  const inspection = state.history?.inspections?.find((candidate) => candidate.id === batch?.historyInspectionId);
+  return inspection?.rows?.find((candidate) => historicalRowId(candidate) === row?.id) ?? null;
+}
+
+/** Project editable result values while keeping their original printed values in the source row. */
+export function historicalResultValues(row, sourceRow = row) {
+  return {
+    inspectedQty: Object.hasOwn(row, "inspectedQty") ? row.inspectedQty : sourceWholeNumber(sourceRow?.sourceInspectedQty),
+    defectiveQty: sourceWholeNumber(row.defectiveQty),
+    actualTimeSeconds: Object.hasOwn(row, "actualTimeSeconds") ? row.actualTimeSeconds : null,
+  };
+}
+
+export function historicalSourceResultValues(sourceRow) {
+  return {
+    inspectedQty: sourceWholeNumber(sourceRow?.sourceInspectedQty),
+    defectiveQty: sourceWholeNumber(sourceRow?.defectiveQty),
+    actualTimeSeconds: null,
+  };
+}
+
 /** Give an imported source page a readable archive identity without claiming a source batch number. */
 export function historicalBatchNumber(inspection, source) {
   const familyToken = compactToken(inspection.model || inspection.productLabel || source.family, source.family.toLocaleUpperCase());
@@ -59,7 +93,7 @@ export function createHistoricalBatch(inspection, source, createdAt) {
     status: "historical",
     rows: inspection.rows.map((row) => ({
       ...clone(row),
-      id: typeof row.id === "string" && row.id.trim() ? row.id : `historical-row-${row.no}`,
+      id: historicalRowId(row),
     })),
     attachmentIds: [source.assetId],
     createdAt,
@@ -84,6 +118,15 @@ function assertExistingProjection(existing, expected) {
   const existingAttachments = existingWithoutGeneratedMetadata.attachmentIds;
   delete existingWithoutGeneratedMetadata.attachmentIds;
   delete expectedWithoutGeneratedMetadata.attachmentIds;
+
+  for (const batch of [existingWithoutGeneratedMetadata, expectedWithoutGeneratedMetadata]) {
+    for (const row of batch.rows ?? []) {
+      delete row.inspectedQty;
+      delete row.defectiveQty;
+      delete row.actualTimeSeconds;
+      delete row.attachmentIds;
+    }
+  }
 
   if (!Array.isArray(existingAttachments) || !existingAttachments.includes(expected.attachmentIds[0])) {
     fail(`Historical batch ${expected.number} is missing its original PDF attachment.`);
