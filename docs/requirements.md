@@ -7,7 +7,7 @@ Status: 2026-10-06, batch saving on in-app departure approved. Issue disposition
 - Bring QC standards, original files, inspection records, and issue disposition together in one system.
 - Use the dense inspection table in the original PDF as the main interface reference, retaining inspection standards, current data, historical comparisons, and attachment access.
 - Use one consistent Web interface and workflow; do not create a separate mobile interface for entering items one at a time.
-- Mark important checks in green. Green indicates importance, not pass/fail status.
+- Mark important checks in green without a visible “Important” badge. Green indicates importance, not pass/fail status.
 - Confirmed again on 2026-09-27: build the batch inspection workspace around the original PDF's table layout. Preserve its inspection grouping, item order, and standards presentation when translating it into an editable Web table; inspect the original PDF before implementing the layout.
 - The familiar form is an adoption requirement: staff moving from the original spreadsheet should recognize the table and experience a small change in their filling workflow. Add the new system capabilities to that familiar structure instead of replacing it with a substantially different presentation.
 - Preserve existing row photo associations and their issue snapshots. New row-scoped operational evidence uses the three independent file slots specified below; never share a row attachment with another row or issue.
