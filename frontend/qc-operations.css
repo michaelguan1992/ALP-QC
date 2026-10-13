@@ -248,7 +248,6 @@
 .qc-ops-operational-table .qc-ops-spec .qc-ops-en { font-weight: 400; }
 .qc-ops-operational-table .qc-ops-important-row td { border-top-color: #93bd9d; border-bottom-color: #93bd9d; background: #e9f5eb; }
 .qc-ops-operational-table .qc-ops-important-row td:first-child { border-left: 3px solid #4d9360; }
-.qc-ops-important-badge { display: inline-flex; margin-top: 5px; border: 1px solid #8cb596; border-radius: 4px; padding: 2px 7px; color: #28623a; background: #f3faf4; font-size: 10px; font-weight: 700; line-height: 1.2; }
 .qc-ops-row-details { margin-top: 6px; color: #546157; font-size: 11px; }
 .qc-ops-row-details > summary { width: fit-content; color: #2d6841; cursor: pointer; font-size: 11px; font-weight: 650; }
 .qc-ops-row-details > summary:focus-visible, .qc-ops-batch-details-summary:focus-visible, .qc-ops-attachments-disclosure > summary:focus-visible { outline: 2px solid #548c63; outline-offset: 2px; }

@@ -321,7 +321,6 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
   const task = el("th", { scope: "row", className: "qc-ops-task" });
   task.setAttribute("aria-label", fullTitle);
   setBilingual(task, operationalTaskTitle(row, workspace, state), row.titleZh);
-  if (important === true) task.append(el("span", { className: "qc-ops-important-badge" }, "Important"));
   if (historical && row.status === "missing-from-source") {
     task.append(el("span", { className: "qc-ops-historical-badge" }, "Missing from source"));
     if (row.missingEvidence) task.append(el("small", { className: "qc-ops-historical-evidence" }, row.missingEvidence));

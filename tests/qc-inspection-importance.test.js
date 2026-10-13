@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createInitialQCState } from "../core/qc-domain.js";
 import { getBatchWorkspace } from "../core/qc-inspections.js";
+import { createQCService } from "../core/qc-service.js";
+import { createMemoryQCAdapter } from "../storage/memory-qc-adapter.js";
 
 const CURRENT_ROW = {
   id: "operation-row-1",
@@ -9,6 +12,9 @@ const CURRENT_ROW = {
   title: "Air Pump Test 气泵测试 [S11/S12/S13/S14·AP·OQC]",
   specification: "Power on to check whether the air pump and EVAP knob is working properly 通电检查气泵,气压调节钮是否正常工 作",
   devices: "DC power supply 直流电源",
+  factory: "AP",
+  stage: "OQC",
+  models: ["S11", "S12", "S13", "S14"],
   samplingPercent: 10,
   recordingRule: "0%",
   important: false,
@@ -93,6 +99,24 @@ function makeState({
 } = {}) {
   const currentRow = { ...structuredClone(CURRENT_ROW), ...row };
   const entries = historical;
+  const sourceProductIds = ["product-s11", "product-s12", "product-s13", "product-s14"];
+  const sourceRaw = {
+    "历史项目编号 History Item Code": currentRow.key,
+    "工厂 Factory": [currentRow.factory],
+    "工序 Stage": [currentRow.stage],
+    "序号 No.": currentRow.no,
+    "抽检比例 Sampling Ratio": `${currentRow.samplingPercent}%`,
+    "记录比例 Recording Ratio": currentRow.recordingRule,
+    "检验方法/设备 Method & Equipment": currentRow.devices,
+    "规格/尺寸/检验要点 Spec & Criteria": currentRow.specification,
+    "项目名称 Item Name": currentRow.title,
+    ...sourceRawRecord,
+  };
+  const versionSourceRows = sourceRows ?? [{
+    sourceRecordId: "source-item-1",
+    applicableProductIds: sourceProductIds,
+    rawRecord: sourceRaw,
+  }];
   return {
     families: [
       { id: "s11-s14", name: "S11–S14", models: ["S11", "S12", "S13", "S14"] },
@@ -101,12 +125,21 @@ function makeState({
     variants: [
       { id: "variant-s11", familyId: "s11-s14", model: "S11", label: "S11" },
       { id: "variant-s12", familyId: "s11-s14", model: "S12", label: "S12" },
+      { id: "variant-s13", familyId: "s11-s14", model: "S13", label: "S13" },
+      { id: "variant-s14", familyId: "s11-s14", model: "S14", label: "S14" },
     ],
     versions: [{
       id: "recorded-version",
       familyId: "s11-s14",
       status: versionStatus,
-      sourceRows: sourceRows ?? [{ sourceRecordId: "source-item-1", rawRecord: sourceRawRecord }],
+      source: {
+        productFieldMapping: { fieldLabel: "VENTUS" },
+        familyProductFacts: sourceProductIds.map((id, index) => ({
+          sourceRecordId: id,
+          fieldValues: { VENTUS: `S${11 + index}` },
+        })),
+      },
+      sourceRows: versionSourceRows,
     }],
     orders: [],
     issues: [],
@@ -134,7 +167,7 @@ function makeState({
         rows: [currentRow],
         products: [{
           lineId: "line-1",
-          variantId: currentModel === "S12" ? "variant-s12" : "variant-s11",
+          variantId: `variant-${currentModel.toLocaleLowerCase()}`,
           familyId: "s11-s14",
           quantity: 10,
           versionId: "recorded-version",
@@ -156,6 +189,105 @@ function makeState({
 function workspaceFor(state) {
   return getBatchWorkspace(state, "operation-batch");
 }
+
+async function run(service, type, data) {
+  const state = await service.getState();
+  return service.command(type, data, state.revision);
+}
+
+function standardItem({ id, key, no, important }) {
+  return {
+    id,
+    key,
+    no,
+    title: `Inspection ${no}`,
+    titleZh: "",
+    specification: `Required criteria ${no}`,
+    specificationZh: "",
+    devices: "",
+    factory: "AP",
+    stage: "OQC",
+    models: [],
+    samplingPercent: 10,
+    recordingRule: "",
+    important,
+    timeSeconds: null,
+    procedureUrl: "",
+  };
+}
+
+test("new color-variant batches inherit the same standard importance flags", async () => {
+  let idNumber = 0;
+  const service = createQCService(createMemoryQCAdapter({ initialState: createInitialQCState() }), {
+    idFactory: () => `importance-inheritance-${String(++idNumber).padStart(4, "0")}`,
+    now: () => "2026-10-13T12:00:00.000Z",
+  });
+  await service.initialize();
+
+  const versionResult = await run(service, "createVersion", {
+    familyId: "s11-s14",
+    label: "Importance test",
+    sequence: 1,
+    effectiveDate: "2026-10-13",
+    notes: "",
+    items: [standardItem({ id: "important-check", key: "important-check", no: 1, important: true }),
+      standardItem({ id: "ordinary-check", key: "ordinary-check", no: 2, important: false })],
+  });
+  await run(service, "publishVersion", { id: versionResult.entityId });
+
+  let state = await service.getState();
+  const red = state.variants.find((variant) => variant.model === "S11" && variant.color === "Red");
+  const yellow = state.variants.find((variant) => variant.model === "S11" && variant.color === "Yellow");
+  const orderResult = await run(service, "createOrder", {
+    number: "PO-IMPORTANCE",
+    date: "2026-10-13",
+    supplier: "Supplier",
+    notes: "",
+    lines: [
+      { variantId: red.id, orderedQty: 100 },
+      { variantId: yellow.id, orderedQty: 100 },
+    ],
+  });
+  state = await service.getState();
+  const order = state.orders.find((candidate) => candidate.id === orderResult.entityId);
+  const batchIds = [];
+  for (const [index, variant] of [red, yellow].entries()) {
+    const line = order.lines.find((candidate) => candidate.variantId === variant.id);
+    const result = await run(service, "createBatch", {
+      number: `B-IMPORTANCE-${variant.color.toUpperCase()}`,
+      orderId: order.id,
+      products: [{ lineId: line.id, quantity: 20 }],
+      versionLabel: "Importance test",
+      factory: "AP",
+      stage: "OQC",
+      date: "2026-10-13",
+      recorder: "Inspector",
+      notes: "",
+    });
+    batchIds[index] = result.entityId;
+  }
+
+  const expectedFlags = [true, false];
+  for (const batchId of batchIds) {
+    const workspace = await service.getBatchWorkspace(batchId);
+    assert.deepEqual(workspace.rows.map((row) => row.important), expectedFlags);
+    await run(service, "saveBatchChanges", {
+      batchId,
+      rows: workspace.rows.map((row) => ({
+        rowId: row.id,
+        defectiveQty: 0,
+        actualTimeSeconds: 1,
+        remarks: "",
+        important: !row.important,
+      })),
+    });
+    const savedWorkspace = await service.getBatchWorkspace(batchId);
+    assert.deepEqual(savedWorkspace.rows.map((row) => row.important), expectedFlags);
+  }
+
+  const originalVersion = (await service.getState()).versions.find((version) => version.id === versionResult.entityId);
+  assert.deepEqual(originalVersion.items.map((item) => item.important), expectedFlags);
+});
 
 test("query-only fallback resolves a PDF-matched recorded row and returns auditable source IDs", () => {
   const state = makeState();
@@ -257,7 +389,7 @@ test("missing-from-source rows and inconsistent batch projections are not eviden
   assert.equal(workspaceFor(inconsistent).rows[0].displayImportant, false);
 });
 
-test("conflicting matching source rows suppress green and retain both audit references", () => {
+test("same-date conflicting matching source rows stay unresolved and retain both references", () => {
   const state = makeState({
     historical: [
       historicalEntry("green-evidence", { row: { important: true } }),
@@ -270,33 +402,108 @@ test("conflicting matching source rows suppress green and retain both audit refe
   assert.equal(row.displayImportant, false);
   assert.equal(row.importanceEvidence.status, "conflict");
   assert.equal(row.importanceEvidence.matches.length, 2);
+  assert.equal(row.importanceEvidence.selectedDate, "2026-09-03");
 });
 
-test("different criteria, method, sampling, recording rule, factory, stage, family, or model never match", async (t) => {
-  const mismatches = [
-    ["criteria", { row: { specification: HISTORICAL_ROW.specification.replace("气压调节钮", "气压旋钮") } }],
-    ["sampling ratio", { row: { samplingPercent: 100 } }],
-    ["recording rule", { row: { recordingRule: "50%+all failed units" } }],
-    ["method", { row: { devices: "Visual 目测" } }],
-    ["factory", { batch: { factory: "UI" }, inspection: { factory: "UI" } }],
-    ["stage", { batch: { stage: "IQC" }, inspection: { stage: "IQC" } }],
-    ["family", { batch: { familyId: "s15" }, source: { family: "s15" } }],
-    ["model", { batch: { model: "S15" }, inspection: { model: "S15" } }],
+test("newest dated PDF marking wins across the source standard's full model scope", () => {
+  const newestTrue = [
+    historicalEntry("older-s14-white", {
+      inspection: { model: "S14", date: "2026-08-27" },
+      batch: { model: "S14", date: "2026-08-27" },
+      row: { important: false },
+    }),
+    historicalEntry("newer-s11-green", {
+      inspection: { model: "S11", date: "2026-09-03" },
+      batch: { model: "S11", date: "2026-09-03" },
+      row: { important: true, specification: "New criteria", devices: "New equipment", samplingPercent: 25, recordingRule: "all units" },
+    }),
   ];
 
-  for (const [name, overrides] of mismatches) {
-    await t.test(name, () => {
-      const state = makeState({ historical: [historicalEntry(`mismatch-${name}`, overrides)] });
+  for (const currentModel of ["S11", "S14"]) {
+    const state = makeState({ currentModel, historical: newestTrue });
+    const row = workspaceFor(state).rows[0];
+    assert.equal(row.displayImportant, true, currentModel);
+    assert.equal(row.importanceEvidence.selectedDate, "2026-09-03", currentModel);
+    assert.equal(row.importanceEvidence.selectionPolicy, "newest-dated-inspection", currentModel);
+    assert.equal(row.importanceEvidence.matches.length, 1, currentModel);
+    assert.equal(row.importanceEvidence.otherMatches.length, 1, currentModel);
+  }
 
-      const row = workspaceFor(state).rows[0];
+  const newestFalse = makeState({
+    currentModel: "S14",
+    historical: [
+      historicalEntry("older-s11-green", {
+        inspection: { model: "S11", date: "2026-08-27" },
+        batch: { model: "S11", date: "2026-08-27" },
+        row: { important: true },
+      }),
+      historicalEntry("newer-s14-white", {
+        inspection: { model: "S14", date: "2026-09-03" },
+        batch: { model: "S14", date: "2026-09-03" },
+        row: { important: false },
+      }),
+    ],
+  });
+  const newestFalseRow = workspaceFor(newestFalse).rows[0];
+  assert.equal(newestFalseRow.displayImportant, false);
+  assert.equal(newestFalseRow.importanceEvidence.status, "consistent");
+  assert.equal(newestFalseRow.importanceEvidence.important, false);
+  assert.equal(newestFalseRow.importanceEvidence.selectedDate, "2026-09-03");
+});
 
-      assert.equal(row.displayImportant, false);
-      assert.equal(row.importanceEvidence, null);
-    });
+test("ambiguous identities and disjoint source models do not infer importance", () => {
+  const ambiguousHistory = historicalEntry("duplicate-history-title");
+  ambiguousHistory.inspection.rows.push({ ...structuredClone(ambiguousHistory.inspection.rows[0]), id: "duplicate-row" });
+  ambiguousHistory.batch.rows.push({ ...structuredClone(ambiguousHistory.batch.rows[0]), id: "duplicate-row" });
+  const ambiguousHistoryState = makeState({ historical: [ambiguousHistory] });
+  assert.equal(workspaceFor(ambiguousHistoryState).rows[0].importanceEvidence, null);
+
+  const ambiguousStandard = makeState();
+  const duplicateSourceRow = structuredClone(ambiguousStandard.versions[0].sourceRows[0]);
+  duplicateSourceRow.sourceRecordId = "duplicate-source-item";
+  duplicateSourceRow.rawRecord["历史项目编号 History Item Code"] = "H026";
+  duplicateSourceRow.rawRecord["序号 No."] = 2;
+  ambiguousStandard.versions[0].sourceRows.push(duplicateSourceRow);
+  assert.equal(workspaceFor(ambiguousStandard).rows[0].importanceEvidence, null);
+
+  const disjointModel = makeState({
+    historical: [historicalEntry("s15-only", {
+      inspection: { model: "S15", productLabel: "S15" },
+      batch: { model: "S15", productLabel: "S15" },
+    })],
+  });
+  assert.equal(workspaceFor(disjointModel).rows[0].importanceEvidence, null);
+
+  for (const overrides of [
+    { inspection: { factory: "UI" }, batch: { factory: "UI" } },
+    { inspection: { stage: "IQC" }, batch: { stage: "IQC" } },
+    { batch: { familyId: "s15" } },
+    { row: { title: "Different check" } },
+  ]) {
+    const state = makeState({ historical: [historicalEntry("context-mismatch", overrides)] });
+    assert.equal(workspaceFor(state).rows[0].importanceEvidence, null);
   }
 });
 
-test("full bilingual criteria retain model codes, numbers, and operators through PDF line reflow", () => {
+test("undated evidence uses consensus when no dated original PDF matches", () => {
+  const consistent = makeState({ historical: [historicalEntry("undated", { inspection: { date: "not-a-date" } })] });
+  const row = workspaceFor(consistent).rows[0];
+  assert.equal(row.displayImportant, true);
+  assert.equal(row.importanceEvidence.selectionPolicy, "undated-consensus");
+  assert.equal(row.importanceEvidence.selectedDate, null);
+
+  const conflict = makeState({
+    historical: [
+      historicalEntry("undated-true", { inspection: { date: "not-a-date" }, row: { important: true } }),
+      historicalEntry("undated-false", { inspection: { date: null }, row: { important: false } }),
+    ],
+  });
+  const conflictRow = workspaceFor(conflict).rows[0];
+  assert.equal(conflictRow.displayImportant, false);
+  assert.equal(conflictRow.importanceEvidence.status, "conflict");
+});
+
+test("normalized bilingual title identity ignores criteria and frequency changes", () => {
   const current = {
     ...CURRENT_ROW,
     key: "H027",
@@ -324,7 +531,7 @@ test("full bilingual criteria retain model codes, numbers, and operators through
       row: current,
       historical: [historicalEntry("changed-criterion", { row: { ...historical, specification } })],
     });
-    assert.equal(workspaceFor(changed).rows[0].displayImportant, false);
+    assert.equal(workspaceFor(changed).rows[0].displayImportant, true);
   }
 
   const currentPower = {
@@ -348,10 +555,10 @@ test("full bilingual criteria retain model codes, numbers, and operators through
       row: { ...historicalPower, specification: historicalPower.specification.replaceAll("S11", "S15") },
     })],
   });
-  assert.equal(workspaceFor(changedModelCode).rows[0].displayImportant, false);
+  assert.equal(workspaceFor(changedModelCode).rows[0].displayImportant, true);
 });
 
-test("an explicit historical model must equal the operational product model", () => {
+test("a historical model within the source standard scope applies across product variants", () => {
   const state = makeState({
     currentModel: "S12",
     historical: [historicalEntry("s11-only", { inspection: { model: "S11" }, batch: { model: "S11" } })],
@@ -359,6 +566,6 @@ test("an explicit historical model must equal the operational product model", ()
 
   const row = workspaceFor(state).rows[0];
 
-  assert.equal(row.displayImportant, false);
-  assert.equal(row.importanceEvidence, null);
+  assert.equal(row.displayImportant, true);
+  assert.equal(row.importanceEvidence.matches[0].batchId, "s11-only");
 });
