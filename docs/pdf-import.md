@@ -84,6 +84,7 @@ Staff-editable batch values (inspected quantity, defective quantity, actual seco
 
 ### Verification status (2026-10-16)
 
-- `pdfplumber` is not installed in the working environment, so `data/pdf-import/*` has not been regenerated from the PDFs. The committed package still holds the earlier values, and the import, correction, and restore paths handle it correctly.
-- The regenerated package must be compared with the committed one (expected: the changes above only) and re-imported as an identical skip after the correction before it is committed.
+- `data/pdf-import/*` was regenerated from the 30 PDFs with `pdfplumber` 0.11.10 in an isolated virtual environment. Two runs were byte-identical.
+- Compared with the previous package, the only changes were the expected ones: 1 printed rate (`1.58`) and 3 printed zeros, the partial S15 color and its anomaly, the 2 row highlights, 20 mislabelled duplicate anomalies removed (76 to 57), and the machine-specific fields removed. No absolute path remains in `data/`.
+- Imported into a corrected copy of the production database, the regenerated package was an identical skip: the revision, history, and batches were unchanged.
 - The correction was verified on a copy of the production database: the correction changed only the fields listed above, a second start changed nothing, current results and attachments were unchanged, and the earlier JSON backup and both packages imported as identical skips.

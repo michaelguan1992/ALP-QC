@@ -22,9 +22,7 @@
   "sources": [
     {
       "id": "source-s15-01",
-      "inventoryKey": "S15-01",
       "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.5.25.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/5.21.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.5.25.pdf",
       "sha256": "4e9b697b497b4688ae3c92d76c3fc4c65521987735835691da2f3e996e2b9841",
       "pageCount": 5,
       "family": "s15",
@@ -49,9 +47,7 @@
     },
     {
       "id": "source-s15-02",
-      "inventoryKey": "S15-02",
       "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/5.25.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
       "sha256": "5e467722aea54c9b9ce9478f4375fa3aa9b6073bcd5dc432011335c09ed944c6",
       "pageCount": 5,
       "family": "s15",
@@ -76,9 +72,7 @@
     },
     {
       "id": "source-s15-03",
-      "inventoryKey": "S15-03",
       "fileName": "6.11.26-AP检查资HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/6.11.26-AP检查资HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
       "sha256": "8086d0b050ae1f3a984b4cd50bd0b55a02423273761ece10fb73115af1117ed4",
       "pageCount": 5,
       "family": "s15",
@@ -103,9 +97,7 @@
     },
     {
       "id": "source-s15-04",
-      "inventoryKey": "S15-04",
       "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/6.18.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
       "sha256": "6050a0665f32ce5d0c32a2f9b681c3ec0a64ff3a1a131dba88fe5c0b4e1b5b34",
       "pageCount": 5,
       "family": "s15",
@@ -130,9 +122,7 @@
     },
     {
       "id": "source-s15-05",
-      "inventoryKey": "S15-05",
       "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.3.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/6.25.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.3.pdf",
       "sha256": "4022220bd3d2930243a9bfb9c8b6ea6d16278c849d29aef5e2256fdd0848a0a9",
       "pageCount": 5,
       "family": "s15",
@@ -157,9 +147,7 @@
     },
     {
       "id": "source-s15-06",
-      "inventoryKey": "S15-06",
       "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List- 2026.6.8.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/6.3.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List- 2026.6.8.pdf",
       "sha256": "d31b1b409eb36aba03d375a169924fbc240644903ae7efc90286ee9a66f131c1",
       "pageCount": 5,
       "family": "s15",
@@ -184,9 +172,7 @@
     },
     {
       "id": "source-s15-07",
-      "inventoryKey": "S15-07",
       "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/7.10.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
       "sha256": "4ae413145af7110d7663511531514e2b71687a501b88709f0d1c2f10d4ced9b8",
       "pageCount": 5,
       "family": "s15",
@@ -211,9 +197,7 @@
     },
     {
       "id": "source-s15-08",
-      "inventoryKey": "S15-08",
       "fileName": "7.20.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/7.20.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
       "sha256": "a307b488eaebcb35d31bd0c1c5f9db6b6f4919b9fef62e6ff11abc21c1caf11e",
       "pageCount": 5,
       "family": "s15",
@@ -238,9 +222,7 @@
     },
     {
       "id": "source-s15-09",
-      "inventoryKey": "S15-09",
       "fileName": "7.27.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/7.27.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
       "sha256": "44170521239a6b1560d54ae25a730394110b3d68a4d0dd5a02eec362e58894f2",
       "pageCount": 5,
       "family": "s15",
@@ -265,9 +247,7 @@
     },
     {
       "id": "source-s15-10",
-      "inventoryKey": "S15-10",
       "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/7.3.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
       "sha256": "ec5d239772439cda939e72697215b8023cbca1335961132e709e2b51465f3c02",
       "pageCount": 5,
       "family": "s15",
@@ -292,9 +272,7 @@
     },
     {
       "id": "source-s15-11",
-      "inventoryKey": "S15-11",
       "fileName": "8.12.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/8.12.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
       "sha256": "4557c3896e9b2b3c9671e606b7002f89064919a4f73df6706ba3faddb9e989b7",
       "pageCount": 5,
       "family": "s15",
@@ -319,9 +297,7 @@
     },
     {
       "id": "source-s15-12",
-      "inventoryKey": "S15-12",
       "fileName": "8.19.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/8.19.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
       "sha256": "ee1403868ee0878f596f858947aa35ef373bfd63e7d90642626421a51bfbd957",
       "pageCount": 5,
       "family": "s15",
@@ -346,9 +322,7 @@
     },
     {
       "id": "source-s15-13",
-      "inventoryKey": "S15-13",
       "fileName": "8.27.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.27(1).pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/8.27.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.27(1).pdf",
       "sha256": "8cbca43bbc06df922f7e34e721b1ad4261459792e11dc4fae40b83586de08ad4",
       "pageCount": 5,
       "family": "s15",
@@ -373,9 +347,7 @@
     },
     {
       "id": "source-s15-14",
-      "inventoryKey": "S15-14",
       "fileName": "8.5.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.7.df.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/8.5.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.7.df.pdf",
       "sha256": "f46d9feab7eebd66436c090eecb749577c4a6137fd25ddb4c4fe877546665f17",
       "pageCount": 5,
       "family": "s15",
@@ -400,9 +372,7 @@
     },
     {
       "id": "source-s15-15",
-      "inventoryKey": "S15-15",
       "fileName": "9.3.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S15/9.3.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
       "sha256": "7616e6664f505652a3ef0667b2c2aa235c59401e32494b4fe4c878295e04d603",
       "pageCount": 5,
       "family": "s15",
@@ -28055,8 +28025,8 @@
       "productLabel": "HyperSmoke15",
       "model": "S15",
       "modelBasis": "source-folder-and-printed-S15-form-title",
-      "color": "red",
-      "colorBasis": "special-notes-explicit-product-quantity",
+      "color": null,
+      "colorBasis": "special-notes-partial-color-quantity",
       "factory": "UI",
       "factoryRaw": "Suzhou Youmite Intelligent Technology Co., Ltd.苏州优米特智能科技有限公司",
       "stage": "IQC",
@@ -29069,7 +29039,19 @@
         }
       ],
       "sourceText": "IQC Inspection specification 来料检验规范\nItem Name 品名 HyperSmoke15 Batch Qty 批次数量 832 Batch Date 批次日期 2026.8.5 Recorded by 记录人员 闫鹏/YP Version 版本 25.10.29 Page 页数 1/1\nUI-051526C 本批发货数量 Quantity of this wholesale:：\nSpecial Notes 生产832PCS，实际发货S15：7月27发货448PCS剩余 红色：384PCS本批发货 主控文件数据为832PCS资料\n本批次特殊情况 Production: 832PCS. Actual shipment: 448PCS were dispatched on July 27th. Remaining red: 384PCS. The main control file data for this wholesale shipment is 832PCS\nQuality control points Defective rate history\n序号 QC Task 检验项目 Specifications a 规 nd 格 尺 di 寸 men / s 检 io 验 ns 要 / 点 inspection points de 检 v I i 测 n c s e 仪 p s e 器 / c m t e / i t 方 o h n o 法 ds I F 检 n r s e 查 p q e u 百 c e t n 分 i c o e 比 n y 记 Fr L 录 e o q g 百 u i e n 分 n g c 比 y Insp q e t c y tion 品 D 质 efe q 管 c t t y 制 ive 点 Def r e a c t t e ive 7 q / t 2 y 7 7 q / t 2 y 0 7 q / t 1 y 0 历史 7 q 不 / t 3 y 良率 6 q / t 记 2 y 5 录 6 q / t 2 y 2 6 q / t 1 y 1 6 q / t 3 y ( T 时 s i e 数 m c e ) A p v 件 e e r r 平 ( a s u g 均 e n e c i 工 ) t t / 时 i 单 me Proce V d i L u d o r e g e o 记 视 操 录 频 作程序 Re 备 ma 注 rks\n检验数量 不良数 不良率 832 768 768 384 768 768 768 768\n1 Heat 发 in 热 g 丝 Co 测 il 试 Test The re l s o i o s p t s e 发 nc 热 e 丝 of 欧 t 姆 he 值 h 为 ea 2 t . i 9 n - g 3 . c 3 o Ω il ， i 圈 s 数 2. 为 9- 2 3 0 . 圈 3Ω, 20 Re 电 si 阻 s M t 测 u a l n 试 t c i e 仪 m e / t t 万 e e s r 用 te 表 r / 100% 2 f u % a n + i i a l t l e s l d 832 2 0.24% 0.24%0.39%0.52%0.52%0.13%0.26%0.52%0.39% 5 5 Proce V d L i u o d r g e e o 记 视 操 录 频 作程序\nDC power supply / air\n2 T D e N s 1 t 0 - D 1 N . 1 5 0 K - P 止 A 试 回 Ch 阀 ec 芯 k 测 Va 试 lv 测 e After applyin 涂 g 油 gr 后 ea 测 se 试 , 阀 th 值 e K P 范 v A a 围 lv 3 e K P c A a 内 n 通 be 气 opened with 3 直 p 流 r p e u 电 s m s p 源 u r / / e 气 d m i e g 泵 f t a f e u / e r g 差 r e e 压 n / t 表 i f a / l l 流 ow 量 20% 5 f u % a n + i i a l t l e s l d — — — — — — — — — — — 30 6 Proce V d L i u o d r g e e o 记 视 操 录 频 作程序\n计\nDC power supply / air\n3 T D e N s 8 t - 7 D K N P 8 A - 止 Ch 回 ec 阀 k 芯 Va 测 lv 试 e pre A 涂 s f u t 油 s e r r 后 e a . n a 测 d p T p 试 s h l h e y 阀 o i u v 值 n l a g d l 范 v g e n 围 r o e t s a 6 h s - o a e 8 u l , K l l P d o A t w ， e a s v l 8 t e l K n o P w t w A i i 内 t l v h a e 通 t n 8 i t 气 K o i P n l 且 A a t a 6 a i t K n o P d n 6 A 不 6 w K K i P 能 P t A A h 通 a 8 气 i r K PA 直 p 流 r p e u 电 s m s p 源 u r / / e 气 d m i e g 泵 f t a f e u / e r g 差 r e e 压 n / t 表 i f a / l l 流 ow 量 20% 3 f 5 u a % n i + i l a t e l s d l — — — — — — — — — — — 45 9 Proce V d L i u o d r g e e o 记 视 操 录 频 作程序\n计\nwith 12.7V power, air pump flow >2.0L/min, time to reach 15 PSI DC power supply / air\n4 Air 气 P 泵 um 测 p 试 Test 气 1 w 2 i 压 . t 7 h w 并 V i h 供 n e 记 n r 电 e 录 2 l 4 t ， e 时 0 h a e 气 间 s s e e b 泵 d c l 。 o e 流 n e ( 观 d d t 量 s i h 察 n e 大 g w 气 i c 于 t h 泵 p h a o 2 n 泄 r . g t a 0 气 e L 2 o / 口 L f v m a i 堵 l c t n u o h ， 住 e n e t 给 及 a a s i i h 1 松 n r o L e u 容 开 r l p , d u 器 时 m p o b 充 是 b e i s 气 否 s e w r i 要 有 v t b e h l 在 流 i o n c f 量 2 k l 4 e 0 o 变 0 d . w 秒 1 化 P r a 内 S a n （ I t d 达 ) e 变 . t 到 c h 化 h e 1 a n 5 值 n P g S 在 e I p 直 p r u e 流 m s p s 电 u r 源 / e d m / g i e 气 a f t u f e 泵 g e r e r / e 差 n / 压 t i f 表 a l l o / w 100% 1 f 0 u a % n i + i l a t e l s d l 832 88 10.58% 10.58%10.68%8.33%5.21%9.24%7.55%7.81%14.58% 56 56 Proce V d L i u o d r g e e o 记 视 操 录 频 作程序\n0.1PSI内） 流量计\n5 Circu 电 it 路 板 Bo 测 ar 试 d Test P 检 WM 查 ， 占 ap 空 pe 比 ar ， nc 外 e 观 c 检 he 查 ck Osci 示 ll 波 is 器 cope 0.1% 0% 7 0 0% 0% — — — — — — — 30 0.03\n6 1.25m Ho 烟 se 管 T 测 es 试 t 1.25m发 samp 后 f l l e 不 e H . x a 通 i r R b d 气 e i n c l e o 。 i s r t s d 抽 y , . 取 h l a e t 3 r n a 条 d g k n t e 管 e h s , p 子 s i . c i 与 t n 硬 u n 封 r e 度 e r 样 s 、 & 一 o 长 o f 起 u 度 t 3 拍 e x 、 r 对 h 内 比 o d s i 外 照 e a s m 直 e 。 t w 径 e i 记 r t 、 s h 录 , 柔 g 硬 a o 顺 n l 度 d d 不 e 。 n 能 折Ta H p a e r d m n e e a s s s u 尺 r e te 硬 st 度 er 计 / /卷 0.25% 0% — — — — — 0.00% — — — — — 65 0.1625 Proce V d i u d r e e o 视 操 频 作程序\n7 Oil T e P s a t k c 油 et 包 D 破 es 坏 tr 测 uc 试 tive How m 增 an 加 y 砝 KG 码 u 重 nt 量 il 直 到 th w 油 e e i 包 o g i h 破 l t 裂 p i a n c 。 c k r e 每 e t a 增 s b e 加 u d r . 重 st 量 . 做 Re 一 co 次 rd 记 e 录 ve 。 rytime Sca 称 le / / 法 We 码 ight 0.10% 0% 1 0 0.00% 0.00%0.00%0.00%0.00%0.00%0.00%0.00%0.00% 10 0.01\n8 Oil 油 Pa 包 ck 测 et 试 Test The weight w o e f i 油 g h t 包 t he 重 t 量 o o il p 2 r 2 e g p s , a s c 用 u k r e 5 i t k z g e i 法 s 码 t 2 h 压 2 e 油 g p r a 包 a c m k s e . t Use a 5kg Sca 称 le / / 法 We 码 ight 1% 0% 4 0 0.00% 0.00%0.00%0.00%0.00%0.00%0.00%0.00%0.00% 10 0.1 P S r u 生 o p d e 产 u r c v 主 t i 管 i s o o n r JXY 工 F M 厂 a a c n 负 t a o g 责 r e y r 人 TYF\n2026年8月5日 2026年8月5日\n9 US Cu 美 st 国 om 客 er 户 批 ap 准 proval\n10\nSuzhou Youmite Intelligent Technology Co., Ltd.苏州优米特智能科技有限公司\nd:\\Users\\DELL\\Desktop\\出货资料\\主控文件\\8月\\8月5日\\UI检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 25.10.29.xlsx",
-      "anomalies": []
+      "anomalies": [
+        {
+          "code": "partial-color-allocation",
+          "message": "Special Notes state a color quantity that is not the whole page batch quantity; the color remains null and all source notes are preserved.",
+          "batchQuantity": 832,
+          "statedColorQuantities": [
+            {
+              "color": "red",
+              "quantity": 384
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "cbca499a-c244-58fa-a77d-5005c853fc47",
@@ -32735,6 +32717,20 @@
       "notes": "UI-051526C\n本批发货数量： Quantity of this wholesale:\nS15-red：384PCS；\nS15-yellow：384PCS"
     },
     {
+      "sourceId": "source-s15-14",
+      "inspectionId": "f4a42277-d0b9-589a-a0e5-788ff48a3c78",
+      "page": 1,
+      "code": "partial-color-allocation",
+      "message": "Special Notes state a color quantity that is not the whole page batch quantity; the color remains null and all source notes are preserved.",
+      "batchQuantity": 832,
+      "statedColorQuantities": [
+        {
+          "color": "red",
+          "quantity": 384
+        }
+      ]
+    },
+    {
       "sourceId": "source-s15-15",
       "inspectionId": "d410b110-7f55-58b5-b6ab-8888d51047dc",
       "page": 1,
@@ -32773,6 +32769,5 @@
         "printedVersion": "25.10.29"
       }
     }
-  ],
-  "extractedAt": "2026-09-29T19:36:43Z"
+  ]
 }
