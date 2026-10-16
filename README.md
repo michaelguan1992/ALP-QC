@@ -51,8 +51,14 @@ To share a saved snapshot through GitHub:
 
 1. Save app edits and download a full backup.
 2. Stop the local service with Ctrl+C before copying or committing its database.
-3. Include `data/workspace/masterqc-main.sqlite` with the application changes in the Git commit and upload it.
-4. A collaborator downloads/clones that project and starts the app with a supported Node.js installation. Its saved records and attachments are already present.
+3. Compact the database from the project directory. Every save rewrites the business records, so the file accumulates free pages that can still hold deleted content; compaction removes them and roughly halves the file:
+
+   ```sh
+   node -e "new (require('node:sqlite').DatabaseSync)('data/workspace/masterqc-main.sqlite').exec('VACUUM')"
+   ```
+
+4. Include `data/workspace/masterqc-main.sqlite` with the application changes in the Git commit and upload it.
+5. A collaborator downloads/clones that project and starts the app with a supported Node.js installation. Its saved records and attachments are already present.
 
 Stop the service before pulling or replacing a database as well. Back up local edits first. Git exchanges snapshots; later edits on different computers are independent, and the binary SQLite file cannot be automatically merged. Coordinate which saved database is authoritative before updating it. The configured ALP-QC repository is public, so uploading this file publishes all included business records and attachments.
 
