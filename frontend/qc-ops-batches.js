@@ -23,35 +23,79 @@ import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.
 import { createManualSaveController } from "./qc-manual-save.js";
 import { batchReleaseBlockers } from "../core/qc-inspections.js";
 import { findHistoricalSourceRow, historicalResultValues } from "../core/qc-historical-batches.js";
+import {
+  applySaveStatus,
+  batchRowDrafts,
+  clearDraftsForBatch,
+  createBatchRowRegistry,
+  deleteDetailDraft,
+  deleteRowDraft,
+  draftCounts,
+  getDetailDraft,
+  getRowDraft,
+  hasAnyBatchDrafts,
+  pendingBatchIds,
+  pruneSavedBatchDrafts,
+  reconcileSavedDetailDraft,
+  reconcileSavedRowDraft,
+  setDetailDraft,
+  setRowDraft,
+} from "./qc-batch-drafts.js";
 
-const rowDrafts = new Map();
-const batchDetailDrafts = new Map();
+export { clearBatchDrafts } from "./qc-batch-drafts.js";
 
 function navigateWithDraftWarning(ctx, route, id) {
   void ctx.navigate(route, id);
 }
 
 window.addEventListener("beforeunload", (event) => {
-  if (rowDrafts.size || batchDetailDrafts.size) {
+  if (hasAnyBatchDrafts()) {
     event.preventDefault();
     event.returnValue = "";
   }
 });
 
-function rowKey(batchId, rowId) {
-  return `${batchId}::${rowId}`;
+/**
+ * Accessible name for a control in the inspection table. It states the action, the file slot and the
+ * row, so that repeated controls in different rows can be told apart by assistive technology.
+ */
+export function inspectionControlName({ action, slot = "", fileName = "" }, row) {
+  const subject = [slot, fileName ? `file ${fileName}` : ""].filter(Boolean).join(" ");
+  return [action, subject, "for", text(row?.title, "inspection row")].filter(Boolean).join(" ");
 }
 
-function detailDraftKey(batchId) {
-  return String(batchId);
+/** The row draft that the current inputs represent, in the same shape the drafts store. */
+function draftFromInputs(rowInputState, { historical }) {
+  const value = rowInputState.read();
+  return {
+    ...(historical ? { inspectedQty: rowInputState.inspectedInput.value } : {}),
+    defectiveQty: rowInputState.defectiveInput.value,
+    actualTimeSeconds: rowInputState.timeUntouched() ? undefined : rowInputState.actualTimeInput.value,
+    remarks: String(value.remarks ?? ""),
+    invalidInspectedQty: value.invalidInspectedQty,
+    invalidDefectiveQty: value.invalidDefectiveQty,
+    invalidActualTimeSeconds: value.invalidActualTimeSeconds,
+  };
 }
 
-function clearDraftsForBatch(batchId) {
-  const prefix = `${batchId}::`;
-  for (const key of rowDrafts.keys()) {
-    if (key.startsWith(prefix)) rowDrafts.delete(key);
-  }
-  batchDetailDrafts.delete(detailDraftKey(batchId));
+/** True when the visible inputs of a row hold exactly the persisted values. */
+function inputsMatchSavedRow(rowInputState, savedRow, { historical }) {
+  const value = rowInputState.read();
+  if (value.invalidInspectedQty || value.invalidDefectiveQty || value.invalidActualTimeSeconds) return false;
+  if (historical && (value.inspectedQty ?? null) !== (savedRow.inspectedQty ?? null)) return false;
+  if ((value.defectiveQty ?? null) !== (savedRow.defectiveQty ?? null)) return false;
+  if (!rowInputState.timeUntouched() && (value.actualTimeSeconds ?? null) !== (savedRow.actualTimeSeconds ?? null)) return false;
+  return true;
+}
+
+/**
+ * After an acknowledged save, a row draft that matches the saved row is cleared. Anything the inputs
+ * still show differently is kept as a draft, so typed values are never lost.
+ */
+function settleRowDraftAfterSave(batchId, rowId, rowInputState, persistedRow, { historical }) {
+  if (inputsMatchSavedRow(rowInputState, persistedRow, { historical })) deleteRowDraft(batchId, rowId);
+  else setRowDraft(batchId, rowId, draftFromInputs(rowInputState, { historical }));
+  rowInputState.updateStatus();
 }
 
 function variantsById(state) {
@@ -118,8 +162,7 @@ function sourceValue(value) {
 }
 
 function stateForRow(row, batchId) {
-  const key = rowKey(batchId, row.id);
-  return rowDrafts.get(key) || {
+  return getRowDraft(batchId, row.id) || {
     inspectedQty: row.inspectedQty === null || row.inspectedQty === undefined ? "" : String(row.inspectedQty),
     defectiveQty: row.defectiveQty === null || row.defectiveQty === undefined ? "" : String(row.defectiveQty),
     actualTimeSeconds: row.actualTimeSeconds === null || row.actualTimeSeconds === undefined ? "" : String(row.actualTimeSeconds),
@@ -240,12 +283,16 @@ function legacyEvidenceDisclosure(row, workspace, state, ctx) {
       const name = text(photo?.name, "Inspection photo");
       const actions = [];
       if (attachmentCanPreview(photo)) {
-        actions.push(button("Preview", () => makePhotoDialog(photo, row, ctx), "button-quiet qc-ops-small-button"));
+        const preview = button("Preview", () => makePhotoDialog(photo, row, ctx), "button-quiet qc-ops-small-button");
+        preview.setAttribute("aria-label", inspectionControlName({ action: "Preview", slot: "photo", fileName: name }, row));
+        actions.push(preview);
       }
       if (photo?.dataUrl || photo?.id) {
-        actions.push(button("Download", () => {
+        const download = button("Download", () => {
           void downloadAttachment(photo, ctx.service, name).catch((error) => notify(errorText(error, "The photo could not be downloaded."), true));
-        }, "button-quiet qc-ops-small-button"));
+        }, "button-quiet qc-ops-small-button");
+        download.setAttribute("aria-label", inspectionControlName({ action: "Download", slot: "photo", fileName: name }, row));
+        actions.push(download);
       }
       return el("li", {}, el("span", { title: name }, name), ...actions);
     }))
@@ -262,6 +309,7 @@ function renderRowAttachmentCell(row, workspace, state, ctx, readOnly) {
   const cell = el("td", { className: "qc-ops-row-attachments" });
   for (const [category, label] of ROW_ATTACHMENT_CATEGORIES) {
     const asset = attachments?.[category] || null;
+    const assetName = text(asset?.name, "Attachment");
     const input = el("input", {
       type: "file",
       accept: category === "videos" ? ".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm" : undefined,
@@ -270,6 +318,7 @@ function renderRowAttachmentCell(row, workspace, state, ctx, readOnly) {
       disabled: readOnly,
     });
     const choose = button(asset ? "Replace" : "Add", () => input.click(), "button-secondary qc-ops-small-button");
+    choose.setAttribute("aria-label", inspectionControlName({ action: asset ? "Replace" : "Add", slot: label }, row));
     choose.disabled = readOnly;
     input.addEventListener("change", async () => {
       const file = input.files?.[0];
@@ -287,34 +336,45 @@ function renderRowAttachmentCell(row, workspace, state, ctx, readOnly) {
         notify(errorText(error, `Could not read the selected ${label.toLowerCase()} file.`), true);
       }
     });
-    const slot = el("div", { className: "qc-ops-row-attachment-slot" },
-      el("strong", {}, label),
-      asset ? el("span", { className: "qc-ops-row-attachment-name", title: text(asset.name) }, text(asset.name, "Attachment")) : null,
-      asset && attachmentCanPreview(asset)
-        ? button("Preview", () => { void previewAttachment(asset, ctx.service, `${text(row.title)} · ${label}`); }, "button-quiet qc-ops-small-button")
-        : null,
-      asset && (asset.dataUrl || asset.id) ? button("Download", () => {
+    const previewButton = asset && attachmentCanPreview(asset)
+      ? button("Preview", () => { void previewAttachment(asset, ctx.service, `${text(row.title)} · ${label}`); }, "button-quiet qc-ops-small-button")
+      : null;
+    if (previewButton) previewButton.setAttribute("aria-label", inspectionControlName({ action: "Preview", slot: label, fileName: assetName }, row));
+    const downloadButton = asset && (asset.dataUrl || asset.id)
+      ? button("Download", () => {
         void downloadAttachment(asset, ctx.service).catch((error) => notify(errorText(error, "The file could not be downloaded."), true));
-      }, "button-quiet qc-ops-small-button") : null,
-      choose,
-      asset ? button("Remove", () => {
+      }, "button-quiet qc-ops-small-button")
+      : null;
+    if (downloadButton) downloadButton.setAttribute("aria-label", inspectionControlName({ action: "Download", slot: label, fileName: assetName }, row));
+    const removeButton = asset
+      ? button("Remove", () => {
         if (!window.confirm(`Remove “${text(asset.name, "this attachment")}” from this inspection row?`)) return;
         void ctx.run("removeRowAttachment", { batchId: workspace.batch.id, rowId: row.id, category });
-      }, "button-quiet qc-ops-attachment-remove") : null,
+      }, "button-quiet qc-ops-attachment-remove")
+      : null;
+    if (removeButton) {
+      removeButton.setAttribute("aria-label", inspectionControlName({ action: "Remove", slot: label, fileName: assetName }, row));
+      removeButton.disabled = readOnly;
+    }
+    const slot = el("div", { className: "qc-ops-row-attachment-slot" },
+      el("strong", {}, label),
+      asset ? el("span", { className: "qc-ops-row-attachment-name", title: text(asset.name) }, assetName) : null,
+      previewButton,
+      downloadButton,
+      choose,
+      removeButton,
       input,
     );
-    const remove = slot.querySelector(".qc-ops-attachment-remove");
-    if (remove) remove.disabled = readOnly;
     cell.append(slot);
   }
   return cell;
 }
 
+
 function renderInspectionRow(row, index, workspace, state, ctx, manualSaveController, onDraftChange = null, displayNumbers = null) {
   const historical = isHistoricalBatch(workspace.batch);
   const readOnly = workspace.batch.status === "released";
   const draft = stateForRow(row, workspace.batch.id);
-  const key = rowKey(workspace.batch.id, row.id);
   const fullTitle = text(row.title);
   const important = row.displayImportant ?? row.important;
   const tr = el("tr", { className: important === true ? "qc-ops-important-row" : "" });
@@ -383,7 +443,7 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
     "aria-label": `Actual time in seconds for ${text(row.title)}`
   });
   const legacyTimeOmitted = !Object.hasOwn(row, "actualTimeSeconds");
-  let actualTimeTouched = legacyTimeOmitted && rowDrafts.get(key)?.actualTimeSeconds !== undefined;
+  let actualTimeTouched = legacyTimeOmitted && getRowDraft(workspace.batch.id, row.id)?.actualTimeSeconds !== undefined;
   const rowFormId = `qc-row-form-${workspace.batch.id}-${row.id}`.replace(/[^A-Za-z0-9_-]/g, "-");
   defectiveInput.setAttribute("form", rowFormId);
   actualTimeInput.setAttribute("form", rowFormId);
@@ -414,6 +474,7 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
       stayOnBatch: true,
     });
   }, "button button-secondary qc-ops-small-button");
+  createIssueButton.setAttribute("aria-label", inspectionControlName({ action: "Create issue" }, row));
   createIssueButton.disabled = readOnly;
   const rowForm = el("form", { id: rowFormId, className: "qc-ops-row-form", "data-autosave-form": "true" });
   let rowState = el("span", { hidden: true });
@@ -453,18 +514,13 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
     ...(value.actualTimeSeconds === undefined ? {} : { actualTimeSeconds: value.actualTimeSeconds }),
     remarks: value.remarks,
   };
-  const updateRowStatus = (status = null) => {
-    const visibleStatus = status === "Saving…" || status === "Save failed" ? status : "";
-    rowState.textContent = visibleStatus;
-    rowState.hidden = !visibleStatus;
-    rowState.className = visibleStatus === "Saving…" ? "qc-ops-save-pending"
-      : visibleStatus === "Save failed" ? "qc-ops-save-failed" : "";
-  };
+  const updateRowStatus = (status = null) => applySaveStatus(rowState, status);
   const rowInputState = {
     defectiveInput,
     inspectedInput,
     actualTimeInput,
     actualTimeTouched: () => actualTimeTouched,
+    timeUntouched: () => legacyTimeOmitted && !actualTimeTouched,
     read: readRowValue,
     createIssueButton,
     updateStatus: updateRowStatus,
@@ -500,11 +556,11 @@ function renderInspectionRow(row, index, workspace, state, ctx, manualSaveContro
         (row.actualTimeSeconds ?? null) === valueForPersistence(value).actualTimeSeconds
       : !value.invalidDefectiveQty && !value.invalidActualTimeSeconds && sameInspectionValues(row, valueForPersistence(value));
     if (isUnchanged) {
-      rowDrafts.delete(key);
+      deleteRowDraft(workspace.batch.id, row.id);
     } else {
-      rowDrafts.set(key, nextDraft);
+      setRowDraft(workspace.batch.id, row.id, nextDraft);
     }
-    liveRate.textContent = currentRate(row, rowDrafts.get(key) || nextDraft, historical);
+    liveRate.textContent = currentRate(row, getRowDraft(workspace.batch.id, row.id) || nextDraft, historical);
     updateRowStatus();
     createIssueButton.disabled = readOnly;
     manualSaveController?.noteChanges();
@@ -772,19 +828,16 @@ function renderHistoricalBatchDetail(root, ctx, workspace) {
     ),
   );
 
-  const rowStatusElements = new Map();
-  const rowInputStates = new Map();
+  const rows = createBatchRowRegistry();
   const onRowDraftChange = (rowId = null, status = null, createIssueButton = null, inputState = null) => {
-    if (rowId && status) {
-      rowStatusElements.set(rowId, { status, createIssueButton });
-      rowInputStates.set(rowId, inputState);
-    }
+    if (rowId && status) rows.register(rowId, status, createIssueButton, inputState);
   };
-  const rowsDraftedForBatch = () => [...rowDrafts.entries()].filter(([key]) => key.startsWith(`${batch.id}::`));
-  const hasChanges = () => rowsDraftedForBatch().length > 0;
+  const saveError = el("p", { className: "qc-ops-form-error qc-ops-save-error", role: "alert" });
+  const saveStatus = el("span", { hidden: true });
+  pruneSavedBatchDrafts(batch, list(workspace.rows), { historical: true });
+  const hasChanges = () => batchRowDrafts(batch.id).length > 0;
   const readSnapshot = () => ({
-    rows: rowsDraftedForBatch().map(([key, draft]) => {
-      const rowId = key.slice(`${batch.id}::`.length);
+    rows: batchRowDrafts(batch.id).map(([rowId, draft]) => {
       const row = list(workspace.rows).find((candidate) => candidate.id === rowId);
       return {
         rowId,
@@ -795,11 +848,10 @@ function renderHistoricalBatchDetail(root, ctx, workspace) {
         invalidDefectiveQty: draft.invalidDefectiveQty === true,
         invalidActualTimeSeconds: draft.invalidActualTimeSeconds === true,
         previous: { inspectedQty: row?.inspectedQty ?? null, defectiveQty: row?.defectiveQty ?? null },
+        input: structuredClone(draft),
       };
     }),
   });
-  const saveError = el("p", { className: "qc-ops-form-error qc-ops-save-error", role: "alert" });
-  const saveStatus = el("span", { hidden: true });
   const manualSaveController = createManualSaveController({
     hasChanges,
     readSnapshot,
@@ -836,38 +888,19 @@ function renderHistoricalBatchDetail(root, ctx, workspace) {
       if (!savedBatch) throw new Error("The saved historical results could not be confirmed.");
       Object.assign(batch, savedBatch);
       Object.assign(workspace.batch, savedBatch);
+      const submittedRows = new Map(snapshot.rows.map((entry) => [entry.rowId, entry.input]));
       for (const savedRow of list(savedBatch.rows)) {
         const currentRow = list(workspace.rows).find((candidate) => candidate.id === savedRow.id);
         if (!currentRow) continue;
         Object.assign(currentRow, savedRow, historicalResultValues(savedRow, findHistoricalSourceRow(latestState, savedBatch, savedRow)));
-        const rowInputState = rowInputStates.get(savedRow.id);
-        if (!rowInputState) continue;
-        const currentValue = rowInputState.read();
-        const sameAsSaved = !currentValue.invalidInspectedQty && !currentValue.invalidDefectiveQty && !currentValue.invalidActualTimeSeconds &&
-          (currentValue.inspectedQty ?? null) === (currentRow.inspectedQty ?? null) &&
-          (currentValue.defectiveQty ?? null) === (currentRow.defectiveQty ?? null) &&
-          (currentValue.actualTimeSeconds ?? null) === (currentRow.actualTimeSeconds ?? null);
-        const key = rowKey(batch.id, savedRow.id);
-        if (sameAsSaved) {
-          rowDrafts.delete(key);
-          rowInputState.reset(currentRow);
-        } else {
-          rowDrafts.set(key, {
-            inspectedQty: rowInputState.inspectedInput.value,
-            defectiveQty: rowInputState.defectiveInput.value,
-            actualTimeSeconds: rowInputState.actualTimeInput.value,
-            invalidInspectedQty: currentValue.invalidInspectedQty,
-            invalidDefectiveQty: currentValue.invalidDefectiveQty,
-            invalidActualTimeSeconds: currentValue.invalidActualTimeSeconds,
-            remarks: "",
-          });
-        }
-        rowInputState.updateStatus();
+        if (submittedRows.has(savedRow.id)) reconcileSavedRowDraft(batch.id, savedRow.id, submittedRows.get(savedRow.id));
+        const rowInputState = rows.inputState(savedRow.id);
+        if (rowInputState) settleRowDraftAfterSave(batch.id, savedRow.id, rowInputState, currentRow, { historical: true });
       }
     },
     onDiscard: () => {
       clearDraftsForBatch(batch.id);
-      for (const [rowId, rowInputState] of rowInputStates) {
+      for (const [rowId, rowInputState] of rows.inputEntries()) {
         const savedRow = list(workspace.rows).find((candidate) => candidate.id === rowId);
         rowInputState.reset(savedRow);
         rowInputState.updateStatus();
@@ -875,18 +908,8 @@ function renderHistoricalBatchDetail(root, ctx, workspace) {
       saveError.textContent = "";
     },
     onStatus: (status) => {
-      const visibleStatus = status === "Saving…" || status === "Save failed" ? status : "";
-      saveStatus.textContent = visibleStatus;
-      saveStatus.hidden = !visibleStatus;
-      saveStatus.className = visibleStatus === "Saving…" ? "qc-ops-save-pending"
-        : visibleStatus === "Save failed" ? "qc-ops-save-failed" : "";
-      for (const [rowId, elements] of rowStatusElements) {
-        if (!rowDrafts.has(rowKey(batch.id, rowId))) continue;
-        elements.status.textContent = visibleStatus;
-        elements.status.hidden = !visibleStatus;
-        elements.status.className = visibleStatus === "Saving…" ? "qc-ops-save-pending"
-          : visibleStatus === "Save failed" ? "qc-ops-save-failed" : "";
-      }
+      applySaveStatus(saveStatus, status);
+      rows.applyStatus(batch.id, status);
     },
   });
   ctx.registerManualSaveController?.(manualSaveController);
@@ -896,7 +919,7 @@ function renderHistoricalBatchDetail(root, ctx, workspace) {
       saveStatus,
     ),
     saveError,
-    makeOperationalInspectionTable(workspace, state, ctx, manualSaveController, onRowDraftChange),
+    makeOperationalInspectionTable(workspace, state, ctx, manualSaveController, onRowDraftChange)
   );
 
   root.replaceChildren(
@@ -910,20 +933,28 @@ function renderHistoricalBatchDetail(root, ctx, workspace) {
   );
 }
 
+
 function renderBatchDetail(root, ctx) {
   root.replaceChildren(el("p", { className: "qc-ops-loading" }, "Loading batch workspace…"));
+  // A superseded render, or one whose root has left the document, must not change the page, report
+  // errors, or register a save controller. Its batch is simply not shown.
+  const isCurrent = () => root.isConnected && (ctx.isCurrentRender?.() ?? true);
   return ctx.service.getBatchWorkspace(ctx.selectedId).then((workspace) => {
+    if (!isCurrent()) return;
     const state = ctx.state || {};
     const batch = workspace.batch;
     if (!batch) throw new Error("The selected batch could not be found.");
-    if (isHistoricalBatch(batch)) return renderHistoricalBatchDetail(root, ctx, workspace);
+    if (isHistoricalBatch(batch)) {
+      renderHistoricalBatchDetail(root, ctx, workspace);
+      return;
+    }
     const isReleased = batch.status === "released";
-    const detailKey = detailDraftKey(batch.id);
     const savedDetails = savedDetailsFrom(batch);
-    const draftDetails = batchDetailDrafts.get(detailKey) || savedDetails;
+    pruneSavedBatchDrafts(batch, list(workspace.rows), { historical: false, savedDetails });
+    const draftDetails = getDetailDraft(batch.id) || savedDetails;
     const order = workspace.order || orderById(state).get(batch.orderId);
     const products = batchProducts(batch, state, workspace);
-    const detailForm = el("form", { className: "qc-ops-batch-meta qc-ops-detail-form" });
+    const detailForm = el("form", { className: "qc-ops-batch-meta qc-ops-detail-form", "data-autosave-form": "true" });
     const dateInput = el("input", { type: "date", value: draftDetails.date, disabled: isReleased, name: "date", "aria-label": "Batch date 批次日期" });
     const recorderInput = el("input", { type: "text", maxLength: "80", value: draftDetails.recorder, disabled: isReleased, name: "recorder", autocomplete: "name", "aria-label": "Recorded by 记录人员" });
     const notesInput = el("textarea", { rows: "2", maxLength: "1000", disabled: isReleased, name: "notes", "aria-label": "Special notes 本批次特殊情况" }, draftDetails.notes);
@@ -941,27 +972,21 @@ function renderBatchDetail(root, ctx) {
     });
     let releasePanel = null;
     const saveError = el("p", { className: "qc-ops-form-error qc-ops-save-error", role: "alert" });
-  const rowStatusElements = new Map();
-  const rowInputStates = new Map();
-  const onRowDraftChange = (rowId = null, status = null, createIssueButton = null, inputState = null) => {
-    if (rowId && status) {
-      rowStatusElements.set(rowId, { status, createIssueButton });
-      rowInputStates.set(rowId, inputState);
-      return;
-    }
-    releasePanel?.refresh();
-  };
-    const rowsDraftedForBatch = () => [...rowDrafts.entries()]
-      .filter(([key]) => key.startsWith(`${batch.id}::`));
+    const rows = createBatchRowRegistry();
+    const onRowDraftChange = (rowId = null, status = null, createIssueButton = null, inputState = null) => {
+      if (rowId && status) {
+        rows.register(rowId, status, createIssueButton, inputState);
+        return;
+      }
+      releasePanel?.refresh();
+    };
     const detailsDiffer = (value) => value.date !== (savedDetails.date || "") ||
       value.recorder !== (savedDetails.recorder || "") || value.notes !== (savedDetails.notes || "");
-    const hasChanges = () => rowsDraftedForBatch().length > 0 || Boolean(
-      batchDetailDrafts.has(detailKey) && detailsDiffer(batchDetailDrafts.get(detailKey))
-    );
+    const hasChanges = () => batchRowDrafts(batch.id).length > 0 ||
+      Boolean(getDetailDraft(batch.id) && detailsDiffer(getDetailDraft(batch.id)));
     const readSnapshot = () => ({
-      details: batchDetailDrafts.has(detailKey) ? readDetailValue() : null,
-      rows: rowsDraftedForBatch().map(([key, draft]) => {
-        const rowId = key.slice(`${batch.id}::`.length);
+      details: getDetailDraft(batch.id) ? readDetailValue() : null,
+      rows: batchRowDrafts(batch.id).map(([rowId, draft]) => {
         const row = list(workspace.rows).find((candidate) => candidate.id === rowId);
         const defectiveQty = draft.defectiveQty === "" ? null : Number(draft.defectiveQty);
         const actualTimeSeconds = draft.actualTimeSeconds === undefined
@@ -1017,43 +1042,27 @@ function renderBatchDetail(root, ctx) {
         if (!savedBatch) throw new Error("The saved batch changes could not be confirmed.");
         Object.assign(batch, savedBatch);
         Object.assign(workspace.batch, savedBatch);
+        const submittedRows = new Map(snapshot.rows.map((entry) => [entry.rowId, entry.input]));
         for (const savedRow of list(savedBatch.rows)) {
           const currentRow = list(workspace.rows).find((candidate) => candidate.id === savedRow.id);
           if (currentRow) Object.assign(currentRow, savedRow);
-          const rowInputState = rowInputStates.get(savedRow.id);
-          if (rowInputState) {
-            const currentValue = rowInputState.read();
-            const persistenceValue = {
-              defectiveQty: currentValue.defectiveQty,
-              ...(currentValue.actualTimeSeconds === undefined ? {} : { actualTimeSeconds: currentValue.actualTimeSeconds }),
-              remarks: currentValue.remarks,
-            };
-            const key = rowKey(batch.id, savedRow.id);
-            if (currentValue.invalidDefectiveQty || currentValue.invalidActualTimeSeconds || !sameInspectionValues(savedRow, persistenceValue)) {
-              rowDrafts.set(key, {
-                defectiveQty: rowInputState.defectiveInput.value,
-                actualTimeSeconds: rowInputState.actualTimeTouched() ? rowInputState.actualTimeInput.value : undefined,
-                remarks: String(currentValue.remarks || ""),
-                invalidDefectiveQty: currentValue.invalidDefectiveQty,
-                invalidActualTimeSeconds: currentValue.invalidActualTimeSeconds,
-              });
-            } else {
-              rowDrafts.delete(key);
-            }
-            rowInputState.updateStatus();
-            rowInputState.createIssueButton.disabled = isReleased;
-          }
+          if (submittedRows.has(savedRow.id)) reconcileSavedRowDraft(batch.id, savedRow.id, submittedRows.get(savedRow.id));
+          const rowInputState = rows.inputState(savedRow.id);
+          if (!rowInputState) continue;
+          settleRowDraftAfterSave(batch.id, savedRow.id, rowInputState, currentRow ?? savedRow, { historical: false });
+          rowInputState.createIssueButton.disabled = isReleased;
         }
         if (snapshot.details) {
+          reconcileSavedDetailDraft(batch.id, snapshot.details);
           Object.assign(savedDetails, savedDetailsFrom(savedBatch));
           batch.date = savedDetails.date;
           batch.recorder = savedDetails.recorder;
           batch.notes = savedDetails.notes;
           const currentDetails = readDetailValue();
           if (detailsDiffer(currentDetails)) {
-            batchDetailDrafts.set(detailKey, { date: currentDetails.date, recorder: currentDetails.recorder, notes: currentDetails.notes });
+            setDetailDraft(batch.id, { date: currentDetails.date, recorder: currentDetails.recorder, notes: currentDetails.notes });
           } else {
-            batchDetailDrafts.delete(detailKey);
+            deleteDetailDraft(batch.id);
           }
           dateSummary.textContent = `Date: ${dateLabel(savedDetails.date)}`;
           recorderSummary.textContent = `Recorded by: ${text(savedDetails.recorder)}`;
@@ -1069,7 +1078,7 @@ function renderBatchDetail(root, ctx) {
         dateInput.value = savedDetails.date;
         recorderInput.value = savedDetails.recorder;
         notesInput.value = savedDetails.notes;
-        for (const [rowId, rowInputState] of rowInputStates) {
+        for (const [rowId, rowInputState] of rows.inputEntries()) {
           const savedRow = list(workspace.rows).find((candidate) => candidate.id === rowId);
           rowInputState.reset(savedRow);
           rowInputState.updateStatus();
@@ -1077,27 +1086,16 @@ function renderBatchDetail(root, ctx) {
         saveError.textContent = "";
       },
       onStatus: (status) => {
-        const visibleStatus = status === "Saving…" || status === "Save failed" ? status : "";
-        detailStatus.textContent = visibleStatus;
-        detailStatus.hidden = !visibleStatus;
-        detailStatus.className = visibleStatus === "Saving…" ? "qc-ops-save-pending"
-          : visibleStatus === "Save failed" ? "qc-ops-save-failed" : "";
-        for (const [rowId, elements] of rowStatusElements) {
-          const key = rowKey(batch.id, rowId);
-          if (!rowDrafts.has(key)) continue;
-          elements.status.textContent = visibleStatus;
-          elements.status.hidden = !visibleStatus;
-          elements.status.className = visibleStatus === "Saving…" ? "qc-ops-save-pending"
-            : visibleStatus === "Save failed" ? "qc-ops-save-failed" : "";
-        }
+        applySaveStatus(detailStatus, status);
+        rows.applyStatus(batch.id, status);
         releasePanel?.refresh();
       },
     });
     ctx.registerManualSaveController?.(manualSaveController);
     const updateDetailDraft = () => {
       const current = readDetailValue();
-      if (detailsDiffer(current)) batchDetailDrafts.set(detailKey, { date: current.date, recorder: current.recorder, notes: current.notes });
-      else batchDetailDrafts.delete(detailKey);
+      if (detailsDiffer(current)) setDetailDraft(batch.id, { date: current.date, recorder: current.recorder, notes: current.notes });
+      else deleteDetailDraft(batch.id);
       manualSaveController.noteChanges();
       releasePanel?.refresh();
     };
@@ -1119,10 +1117,11 @@ function renderBatchDetail(root, ctx) {
     const deleteBatchButton = button("Delete", async () => {
       if (!window.confirm(`Delete batch ${text(workspace.displayNumber ?? resolveBatchDisplayNumber(state, batch.id, batch.number), "Batch")}? This action cannot be undone.`)) return;
       const deleteSavedBatch = async () => {
-        const response = await ctx.run("deleteBatch", { id: batch.id });
+        // The deleted batch is not re-rendered; the page moves to the batch list at once.
+        const response = await ctx.run("deleteBatch", { id: batch.id }, { render: false });
         if (!response.ok) return;
         clearDraftsForBatch(batch.id);
-        ctx.navigate("batches", null, true);
+        await ctx.navigate("batches", null, true);
       };
       if (manualSaveController.hasPending()) await ctx.resolveManualChanges?.("delete this batch", deleteSavedBatch);
       else await deleteSavedBatch();
@@ -1173,6 +1172,7 @@ function renderBatchDetail(root, ctx) {
       releasePanel.element
     );
   }).catch((error) => {
+    if (!isCurrent()) return;
     root.replaceChildren(
       pageHeading("Batches", "The batch workspace could not be loaded."),
       el("section", { className: "card qc-ops-error-card" }, el("p", {}, errorText(error)), button("Back to batches", () => ctx.navigate("batches"), "button button-secondary"))
@@ -1541,15 +1541,12 @@ function renderBatchList(root, ctx) {
       button("Open standards", () => ctx.navigate("standards"), "button button-primary")
     ));
   }
-  if (rowDrafts.size || batchDetailDrafts.size) {
-    const pendingBatchIds = new Set([
-      ...Array.from(rowDrafts.keys(), (key) => key.split("::")[0]),
-      ...Array.from(batchDetailDrafts.keys())
-    ]);
+  if (hasAnyBatchDrafts()) {
+    const counts = draftCounts();
     sections.unshift(el("section", { className: "card qc-ops-draft-warning" },
       el("strong", {}, "Unsaved edits are held in this tab"),
-      el("p", {}, `${rowDrafts.size} inspection row(s) and ${batchDetailDrafts.size} batch detail set(s) need saving.`),
-      ...Array.from(pendingBatchIds).map((batchId) => {
+      el("p", {}, `${counts.rows} inspection row(s) and ${counts.details} batch detail set(s) need saving.`),
+      ...pendingBatchIds().map((batchId) => {
         const batch = batches.find((item) => item.id === batchId);
         return batch ? button(`Resume ${text(displayNumbers.get(batch.id) ?? batch.number)}`, () => ctx.navigate("batches", batchId, true), "button button-secondary qc-ops-small-button") : null;
       })
@@ -1565,13 +1562,6 @@ function renderBatchList(root, ctx) {
   }
   root.replaceChildren(pageHeading("Batches", "", actions), ...sections);
 }
-
-export function clearBatchDrafts() {
-  rowDrafts.clear();
-  batchDetailDrafts.clear();
-}
-
-window.addEventListener("masterqc:discard-operation-drafts", clearBatchDrafts);
 
 export async function renderBatchesPage(root, ctx) {
   if (ctx.selectedId) return renderBatchDetail(root, ctx);

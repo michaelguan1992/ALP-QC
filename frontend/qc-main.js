@@ -2,6 +2,7 @@ import { qcService, createDemoQCService } from "../core/qc-app.js";
 import { renderAdminPage } from "./qc-admin.js";
 import { renderOperationsPage } from "./qc-operations.js";
 import { button, el, notify, showDialog, closeDialog } from "./qc-ui.js";
+import { createManualSaveRegistry } from "./qc-manual-save-registry.js";
 
 const app = document.querySelector("#app");
 const routes = new Set(["batches", "batch-report", "issues", "catalog", "standards", "orders", "library", "settings", "backup"]);
@@ -14,9 +15,7 @@ let selectedId = null;
 let staleMessage = "";
 let renderNumber = 0;
 let channel = null;
-let activeManualSaveController = null;
-const manualSaveControllers = [];
-let automaticExitActionVersion = 0;
+const saves = createManualSaveRegistry();
 let commandQueue = Promise.resolve();
 let needsAuthoritativeRefresh = false;
 let commandInFlight = 0;
@@ -54,92 +53,6 @@ function hasUnsavedForm() {
 
 function dirtyForms() {
   return [...app.querySelectorAll('.app-main form[data-dirty="true"]:not([data-autosave-form="true"]):not([data-issue-id])')];
-}
-
-function disposeManualSaveController() {
-  for (const entry of manualSaveControllers) entry.controller.dispose?.();
-  manualSaveControllers.length = 0;
-  activeManualSaveController = null;
-}
-
-function saveDialogSnapshot() {
-  const dialog = document.querySelector("#qc-dialog");
-  if (!dialog?.open) return null;
-  return {
-    dialog,
-    title: dialog.querySelector(".dialog-header h2")?.textContent || "",
-    nodes: [...(dialog.querySelector(".dialog-content")?.childNodes || [])],
-  };
-}
-
-function restoreDialogSnapshot(snapshot) {
-  if (snapshot?.dialog?.open) showDialog(snapshot.title, snapshot.nodes);
-}
-
-async function resolveManualChanges(actionLabel, action) {
-  const controller = activeManualSaveController;
-  if (!controller?.hasPending?.()) return action();
-
-  if (controller.saveOnExit && typeof controller.saveBeforeExit === "function") {
-    const actionVersion = ++automaticExitActionVersion;
-    const saved = await controller.saveBeforeExit();
-    if (actionVersion !== automaticExitActionVersion || activeManualSaveController !== controller) return false;
-    if (!saved) {
-      const reason = controller.getLastError?.()?.message || "Check the highlighted changes and try again.";
-      notify(`This page remains open because the changes could not be saved: ${reason}`, true);
-      return false;
-    }
-    return action();
-  }
-
-  const snapshot = saveDialogSnapshot();
-  const message = el("p", { className: "qc-ops-manual-exit-message", role: "status" },
-    `Save your changes before you ${actionLabel}, discard them, or cancel.`);
-  const save = button("Save changes", async () => {
-    if (controller.isSaving?.()) return;
-    save.disabled = true;
-    discard.disabled = true;
-    message.textContent = "Saving changes…";
-    const saved = await controller.saveAll();
-    if (!saved) {
-      message.textContent = "The changes could not be saved. Your edits are still here.";
-      save.disabled = false;
-      discard.disabled = false;
-      return;
-    }
-    if (controller.hasPending?.()) {
-      message.textContent = "New changes were made while saving. Save or discard them before continuing.";
-      save.disabled = false;
-      discard.disabled = false;
-      return;
-    }
-    resolved = true;
-    closeDialog(true);
-    await action();
-  }, "button-primary qc-ops-unsaved-save");
-  const discard = button("Discard changes", async () => {
-    if (!controller.discardAll?.() || controller.hasPending?.()) {
-      message.textContent = "Wait for the current save to finish before discarding changes.";
-      return;
-    }
-    resolved = true;
-    closeDialog(true);
-    await action();
-  }, "button-danger qc-ops-unsaved-discard");
-  const cancel = button("Cancel", () => {
-    resolved = true;
-    if (snapshot) restoreDialogSnapshot(snapshot);
-    else closeDialog(true);
-  }, "button-secondary qc-ops-unsaved-cancel");
-  let resolved = false;
-  const dialog = showDialog("Unsaved changes", el("div", { className: "discard-prompt qc-ops-manual-exit" },
-    message,
-    el("div", { className: "button-row" }, save, discard, cancel),
-  ));
-  const restoreIfDismissed = () => {
-    if (!resolved && snapshot) restoreDialogSnapshot(snapshot);
-  };
-  dialog.addEventListener("close", restoreIfDismissed, { once: true });
 }
 
 function enqueueCommand(work) {
@@ -188,12 +101,9 @@ async function readLatestState() {
 }
 
 async function requestRefresh() {
-  if (activeManualSaveController?.hasPending?.()) {
-    if (activeManualSaveController.saveOnExit) {
-      await refreshLatest();
-      return;
-    }
-    await resolveManualChanges("reload the latest data", () => refreshLatest());
+  // Pending edits stay in their drafts; the refreshed page reopens them. Nothing is saved implicitly.
+  if (saves.hasPending()) {
+    await refreshLatest();
     return;
   }
   if (hasUnsavedForm()) {
@@ -217,8 +127,8 @@ async function navigate(route, id = null, force = false) {
   if (!routes.has(route)) return false;
   const targetId = id ?? null;
   if (route === currentRoute && targetId === selectedId) return false;
-  if (!force && activeManualSaveController?.hasPending?.()) {
-    await resolveManualChanges(`leave for ${route === "batch-report" ? "the report" : route}`, () => navigate(route, targetId, true));
+  if (!force && saves.hasPending()) {
+    await saves.resolve(`leave for ${route === "batch-report" ? "the report" : route}`, () => navigate(route, targetId, true));
     return false;
   }
   if (!closeDialog()) return false;
@@ -274,7 +184,7 @@ function applyCommandProjection(commandResult) {
   return true;
 }
 
-function getContext() {
+function getContext(thisRender) {
   return {
     service,
     isDemo: demoMode,
@@ -283,20 +193,16 @@ function getContext() {
     refresh: requestRefresh,
     announceChange: (revision) => channel?.postMessage({ revision }),
     selectedId,
+    isCurrentRender: () => thisRender === renderNumber,
     registerManualSaveController: (controller) => {
-      const registration = { controller };
-      manualSaveControllers.push(registration);
-      activeManualSaveController = controller;
-      return () => {
-        const index = manualSaveControllers.indexOf(registration);
-        if (index >= 0) manualSaveControllers.splice(index, 1);
+      // A replaced page must not guard departure, so its controller is disposed at once.
+      if (thisRender !== renderNumber) {
         controller.dispose?.();
-        if (activeManualSaveController === controller) {
-          activeManualSaveController = manualSaveControllers.at(-1)?.controller || null;
-        }
-      };
+        return () => {};
+      }
+      return saves.register(controller);
     },
-    resolveManualChanges,
+    resolveManualChanges: (actionLabel, action, options) => saves.resolve(actionLabel, action, options),
     refreshState: async ({ render = false } = {}) => enqueueCommand(async () => {
       commandInFlight += 1;
       try {
@@ -377,9 +283,16 @@ function getContext() {
   };
 }
 
+function releaseRetiredWhenCurrent(thisRender) {
+  return () => {
+    if (thisRender === renderNumber) saves.releaseRetired();
+  };
+}
+
 function renderApp() {
   if (!state) return;
-  disposeManualSaveController();
+  // Controllers of the replaced page keep guarding departure until this render has registered its own.
+  saves.retireRendered();
   const thisRender = ++renderNumber;
   const shell = el("div", { className: "app-frame" });
   const homeUrl = demoMode ? "/?workspace=demo" : "/";
@@ -427,9 +340,9 @@ function renderApp() {
   app.classList.remove("app-loading");
   updateStaleWarning();
 
-  const context = getContext();
+  const context = getContext(thisRender);
   if (operationRoutes.has(currentRoute)) {
-    void Promise.resolve(renderOperationsPage(slot, currentRoute, context)).catch((error) => {
+    void Promise.resolve(renderOperationsPage(slot, currentRoute, context)).then(releaseRetiredWhenCurrent(thisRender), (error) => {
       if (thisRender !== renderNumber) return;
       slot.replaceChildren(el("section", { className: "error-card card", role: "alert" },
         el("h2", {}, "This page could not load"), el("p", {}, error instanceof Error ? error.message : "An unexpected error occurred."),
@@ -437,7 +350,7 @@ function renderApp() {
       ));
     });
   } else {
-    void Promise.resolve(renderAdminPage(slot, currentRoute, context)).catch((error) => {
+    void Promise.resolve(renderAdminPage(slot, currentRoute, context)).then(releaseRetiredWhenCurrent(thisRender), (error) => {
       if (thisRender !== renderNumber) return;
       slot.replaceChildren(el("section", { className: "error-card card", role: "alert" },
         el("h2", {}, "This page could not load"), el("p", {}, error instanceof Error ? error.message : "An unexpected error occurred."),
@@ -450,11 +363,11 @@ function renderApp() {
 document.addEventListener("click", (event) => {
   const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
   if (!anchor || !app.contains(anchor) || anchor.target === "_blank" ||
-      (!activeManualSaveController?.hasPending?.() && !hasUnsavedForm())) return;
+      (!saves.hasPending() && !hasUnsavedForm())) return;
   const target = new URL(anchor.href, location.href);
   event.preventDefault();
   const openTarget = () => { location.href = target.href; };
-  if (activeManualSaveController?.hasPending?.()) void resolveManualChanges("open this link", openTarget);
+  if (saves.hasPending()) void saves.resolve("open this link", openTarget);
   else promptToDiscard("open link", openTarget);
 });
 
@@ -472,9 +385,9 @@ window.addEventListener("popstate", () => {
       history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
       renderApp();
     };
-    if (activeManualSaveController?.hasPending?.()) {
+    if (saves.hasPending()) {
       restoreCurrentUrl();
-      await resolveManualChanges("leave this page", openNextRoute);
+      await saves.resolve("leave this page", openNextRoute);
       return;
     }
     if (!closeDialog()) {
@@ -498,7 +411,7 @@ window.addEventListener("popstate", () => {
 });
 
 window.addEventListener("beforeunload", (event) => {
-  if (activeManualSaveController?.hasPending?.() || activeManualSaveController?.isSaving?.()) {
+  if (saves.hasPending() || saves.active()?.isSaving?.()) {
     event.preventDefault();
     event.returnValue = "";
   }
