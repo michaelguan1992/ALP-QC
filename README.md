@@ -39,7 +39,7 @@ See [User Guide](docs/user-guide.md) for the complete workflow and [Local App Ac
 - Database snapshots contain records and attachments and restore with the service stopped. Earlier JSON backups restore additively and reject conflicting records without partial import.
 - Batches includes imported historical inspections and newly entered batches. Historical inspection quantities, defect counts, and actual elapsed seconds can be corrected; rates are derived, while printed values, standard time, original PDFs, and missing-check provenance stay intact. Historical records remain excluded from release and PO fulfillment. See [Original PDF Import](docs/pdf-import.md).
 
-Use the fixed local address. All browsers on this computer connect to the same selected workspace. Download a database snapshot regularly and before moving computers or changing the service data directory. Attachments allow up to 5 MiB per photo and 10 MiB per video or general file, with 30 MiB total attachment content.
+Use the fixed local address. All browsers on this computer connect to the same selected workspace. Download a database snapshot regularly and before moving computers or changing the service data directory. Attachments allow up to 20 MiB per file in every category, with 500 MiB of attachment content in total. One upload carries up to 64 MiB of files; add larger sets in several uploads. JSON backup files stay limited to 50 MiB, so larger workspaces move as database snapshots.
 
 ## Database Location
 
@@ -58,6 +58,8 @@ The default production database is `data/workspace/masterqc-main.sqlite`. Saved 
 
   Add `--workspace demo` to restore the demo workspace instead. Before changing anything, the command copies the snapshot, runs SQLite's integrity check, opens it with the current code, validates every business record, and verifies the MIME type, size, and SHA-256 of every attachment and historical PDF. It then keeps the current database as `data/workspace/masterqc-main.sqlite.before-snapshot-restore-<UTC time>.sqlite` and swaps in the validated copy. The kept file is never deleted. The command refuses to run while MasterQC Web listens on 127.0.0.1:4173 or while SQLite journal files sit next to the database. On failure it leaves the live database unchanged and exits with a non-zero status. Start MasterQC Web again afterwards.
 - **Restore a JSON backup from the earlier format** imports an older full JSON backup into the running workspace. It is additive: identical records are skipped, and conflicts stop the import without changes.
+
+> **Warning:** GitHub rejects files larger than 100 MB. Attachments are stored as base64 text, so the database passes that size at roughly 70 MiB of attachments. After that, sharing `data/workspace/masterqc-main.sqlite` through Git stops working. Use **Download database snapshot** or the shared server instead.
 
 To share a saved snapshot through GitHub:
 

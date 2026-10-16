@@ -1,10 +1,15 @@
 export const QC_SCHEMA_VERSION = 1;
 export const BACKUP_FORMAT = "masterqc-web-backup";
 export const BACKUP_FORMAT_VERSION = 1;
-export const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
-export const DOCUMENT_MAX_BYTES = 10 * 1024 * 1024;
-export const ASSET_TOTAL_MAX_BYTES = 30 * 1024 * 1024;
+export const PHOTO_MAX_BYTES = 20 * 1024 * 1024;
+export const DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
+export const ASSET_TOTAL_MAX_BYTES = 500 * 1024 * 1024;
+// JSON restore and historical package imports only; full-content reads are also refused above this decoded total.
 export const BACKUP_MAX_BYTES = 50 * 1024 * 1024;
+// Decoded file bytes one upload request may carry: three maximal 20 MiB files, or about a dozen phone photos.
+export const UPLOAD_REQUEST_MAX_BYTES = 64 * 1024 * 1024;
+// Base64 text is one third larger than the decoded bytes; the extra mebibyte covers JSON field names and metadata.
+export const API_UPLOAD_BODY_MAX_BYTES = Math.ceil(UPLOAD_REQUEST_MAX_BYTES * 4 / 3) + 1024 * 1024;
 
 export const PHOTO_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 export const VIDEO_MIMES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
@@ -97,6 +102,14 @@ export function clone(value) {
 
 export function fail(message) {
   throw new Error(message);
+}
+
+// Throws an error that the HTTP layer reports with its own status code and machine-readable code.
+export function failWithStatus(statusCode, code, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  throw error;
 }
 
 export function requireRecord(value, label) {

@@ -18,13 +18,14 @@ import {
   attachmentCanPreview,
   attachmentDownload,
   createAttachmentPreview,
+  assertUploadRequestSize,
   issueAttachmentCategory,
   loadAssetContent,
   loadAssetImage,
-  MEBIBYTE,
   normalizedMimeType,
   readAttachmentFile,
 } from "./qc-attachments.js";
+import { DOCUMENT_MAX_BYTES, PHOTO_MAX_BYTES } from "../core/qc-domain.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
 import { resolveBatchDisplayNumber } from "../core/qc-batch-display.js";
 import { hasRequiredIssuePhoto, remainingIssueDraftAfterDiscussion } from "./qc-issue-drafts.js";
@@ -292,11 +293,12 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
     if (!selected.length || disposed) return;
     markDraftForPreservation();
     try {
+      assertUploadRequestSize(selected);
       const files = await Promise.all(selected.map(async (file) => {
         const mimeType = normalizedMimeType(file.name, file.type);
         const category = issueAttachmentCategory(mimeType);
         const payload = await readAttachmentFile(file, {
-          maxBytes: category === "photo" ? 5 * MEBIBYTE : 10 * MEBIBYTE,
+          maxBytes: category === "photo" ? PHOTO_MAX_BYTES : DOCUMENT_MAX_BYTES,
           category: category === "photo" ? "photo" : null,
         });
         return { ...payload, category };
@@ -986,9 +988,10 @@ export function openNewIssueDialog(state, ctx, options = {}) {
     if (batchId) data.batchId = batchId;
     if (rowId) data.rowId = rowId;
     try {
+      assertUploadRequestSize(selectedFiles.map((entry) => entry.file));
       data.files = await Promise.all(selectedFiles.map(async (entry) => {
         const payload = await readAttachmentFile(entry.file, {
-          maxBytes: entry.category === "photo" ? 5 * MEBIBYTE : 10 * MEBIBYTE,
+          maxBytes: entry.category === "photo" ? PHOTO_MAX_BYTES : DOCUMENT_MAX_BYTES,
           category: entry.category === "photo" ? "photo" : null,
         });
         return { ...payload, category: entry.category };

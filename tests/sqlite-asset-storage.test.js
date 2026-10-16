@@ -166,6 +166,32 @@ test("payload and aggregate updates roll back together when serialization fails"
   await adapter.close();
 });
 
+test("a rolled-back payload insert never appears in later trusted metadata", async (t) => {
+  const directory = await temporaryDirectory();
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const databasePath = path.join(directory, "workspace.sqlite");
+  const adapter = createSQLiteQCAdapter({ databasePath });
+  await adapter.initialize();
+  await adapter.transact(() => ({ state: stateWithAsset(), result: null }));
+  assert.deepEqual([...adapter.getTrustedAssetValidation().keys()], ["asset-1"]);
+
+  // The payload row is written before the aggregate fails to serialize, so the whole transaction rolls back.
+  const failing = stateWithAsset();
+  failing.assets.push({ ...failing.assets[0], id: "asset-rolled-back", name: "rolled.txt", dataUrl: SECOND_URL });
+  failing.revision += 1;
+  failing.marker = 1n;
+  await assert.rejects(adapter.transact(() => ({ state: failing, result: null })), /BigInt|serialize/i);
+  assert.deepEqual([...adapter.getTrustedAssetValidation().keys()], ["asset-1"]);
+
+  const committed = stateWithAsset();
+  committed.assets.push({ ...committed.assets[0], id: "asset-committed", name: "committed.txt", dataUrl: FIRST_URL });
+  await adapter.transact(() => ({ state: committed, result: null }));
+  assert.deepEqual([...adapter.getTrustedAssetValidation().keys()].sort(), ["asset-1", "asset-committed"]);
+  assert.equal((await adapter.readAsset("asset-rolled-back")), null);
+
+  await adapter.close();
+});
+
 test("full reads and asset reads report corrupt or missing payloads", async (t) => {
   const directory = await temporaryDirectory();
   t.after(() => rm(directory, { recursive: true, force: true }));

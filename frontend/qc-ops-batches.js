@@ -14,7 +14,8 @@ import {
   text
 } from "./qc-ops-common.js";
 import { closeDialog, showDialog } from "./qc-ui.js";
-import { attachmentCanPreview, downloadAttachment, MEBIBYTE, previewAttachment, readAttachmentFile } from "./qc-attachments.js";
+import { attachmentCanPreview, downloadAttachment, formatMebibytes, previewAttachment, readAttachmentFile } from "./qc-attachments.js";
+import { DOCUMENT_MAX_BYTES } from "../core/qc-domain.js";
 import { openNewIssueDialog } from "./qc-ops-issues.js";
 import { resolveBatchDisplayNumber, resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { getBatchVersionItems, getBatchVersions, getBatchVersionReadiness, getSharedBatchVersionChoices } from "../core/qc-batch-versions.js";
@@ -274,7 +275,7 @@ function renderRowAttachmentCell(row, workspace, state, ctx, readOnly) {
       const file = input.files?.[0];
       if (!file) return;
       try {
-        const payload = await readAttachmentFile(file, { maxBytes: 10 * MEBIBYTE, category: category === "videos" ? "video" : null });
+        const payload = await readAttachmentFile(file, { maxBytes: DOCUMENT_MAX_BYTES, category: category === "videos" ? "video" : null });
         const response = await ctx.run("setRowAttachment", {
           batchId: workspace.batch.id,
           rowId: row.id,
@@ -651,13 +652,14 @@ function renderBatchAttachments(workspace, state, ctx, { compact = false } = {})
   fileInput.addEventListener("change", async () => {
     const files = Array.from(fileInput.files || []);
     if (!files.length) return;
+    // Each batch attachment is its own request, so the per-file limit also bounds every request.
     for (const file of files) {
-      if (file.size > 10 * 1024 * 1024) {
-        notify(`${file.name} exceeds the 10 MiB per-file limit.`, true);
+      if (file.size > DOCUMENT_MAX_BYTES) {
+        notify(`${file.name} exceeds the ${formatMebibytes(DOCUMENT_MAX_BYTES)} per-file limit.`, true);
         continue;
       }
       try {
-        const payload = await readAttachmentFile(file, { maxBytes: 10 * MEBIBYTE });
+        const payload = await readAttachmentFile(file, { maxBytes: DOCUMENT_MAX_BYTES });
         const response = await ctx.run("addBatchAttachment", {
           batchId: batch.id,
           ...payload,

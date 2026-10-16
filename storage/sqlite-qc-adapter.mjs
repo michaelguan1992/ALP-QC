@@ -280,10 +280,6 @@ export function createSQLiteQCAdapter({ databasePath } = {}) {
     SELECT asset_id, content_ref, mime_type, decoded_bytes, content_sha256, content_revision
     FROM qc_asset_payloads ORDER BY asset_id
   `);
-  const readPayloadMetadataByIdStatement = database.prepare(`
-    SELECT asset_id, content_ref, mime_type, decoded_bytes, content_sha256, content_revision
-    FROM qc_asset_payloads WHERE asset_id = ?
-  `);
   const readPayloadIdsStatement = database.prepare("SELECT asset_id FROM qc_asset_payloads");
   // Verification iterates this statement so only one attachment body is held in memory at a time.
   const payloadContentStatement = database.prepare(`
@@ -304,6 +300,8 @@ export function createSQLiteQCAdapter({ databasePath } = {}) {
   let closed = false;
   let verifiedPayloadGeneration = null;
   let transactionOpen = false;
+  // Cached payload metadata rows, valid for one payload generation. Rollbacks clear it (see runTransaction).
+  let payloadMetadataCache = null;
 
   function ensureOpen() {
     if (closed) throw new Error("SQLite QC adapter is closed.");
@@ -318,6 +316,7 @@ export function createSQLiteQCAdapter({ databasePath } = {}) {
       database.exec("COMMIT;");
       return result;
     } catch (error) {
+      payloadMetadataCache = null;
       try {
         database.exec("ROLLBACK;");
       } catch {
@@ -402,6 +401,20 @@ export function createSQLiteQCAdapter({ databasePath } = {}) {
     return row ? Number(row.integer_value) : 0;
   }
 
+  // SQLite reads columns stored after an overflowing Data URL by walking that payload's overflow pages, so every
+  // metadata query costs time proportional to all stored attachments. Rows are cached per payload generation,
+  // which each payload write advances, so ordinary saves and reads do not repeat that work.
+  function payloadMetadataById() {
+    const generation = currentPayloadGeneration();
+    if (payloadMetadataCache === null || payloadMetadataCache.generation !== generation) {
+      payloadMetadataCache = {
+        generation,
+        rows: new Map(readPayloadMetadataStatement.all().map((row) => [row.asset_id, row])),
+      };
+    }
+    return payloadMetadataCache.rows;
+  }
+
   function ensureTrustedPayloadGeneration() {
     return readSnapshot(() => {
       const generation = currentPayloadGeneration();
@@ -438,10 +451,12 @@ export function createSQLiteQCAdapter({ databasePath } = {}) {
     return state;
   }
 
-  function withLightPayloadMetadata(state) {
+  // Light reads keep Data URLs out of memory. Assets listed in `loadIds` keep their verified content so a
+  // mutator can compare them exactly; every other asset carries only its stable content reference.
+  function withLightPayloadMetadata(state, loadIds = new Set()) {
     if (state === null) return null;
     ensureTrustedPayloadGeneration();
-    const metadataById = new Map(readPayloadMetadataStatement.all().map((row) => [row.asset_id, row]));
+    const metadataById = payloadMetadataById();
     for (const asset of state.assets ?? []) {
       if (typeof asset.dataUrl === "string") {
         asset.contentRef = contentRefFor(asset.id);
@@ -451,6 +466,11 @@ export function createSQLiteQCAdapter({ databasePath } = {}) {
       const metadata = metadataById.get(asset.id);
       if (!metadata) throw new Error(`Stored attachment payload is missing for asset ${asset.id}.`);
       if (metadata.content_ref !== contentRefFor(asset.id)) throw new Error(`Stored attachment reference is invalid for asset ${asset.id}.`);
+      if (loadIds.has(asset.id)) {
+        asset.dataUrl = verifyPayload(asset.id, requirePayloadRow(asset.id));
+        delete asset.contentRef;
+        continue;
+      }
       asset.contentRef = metadata.content_ref;
       delete asset.dataUrl;
     }
@@ -562,6 +582,7 @@ export function createSQLiteQCAdapter({ databasePath } = {}) {
       database.exec("COMMIT;");
       verifiedPayloadGeneration = migratedGeneration;
     } catch (error) {
+      payloadMetadataCache = null;
       try {
         database.exec("ROLLBACK;");
       } catch {
@@ -661,7 +682,7 @@ export function createSQLiteQCAdapter({ databasePath } = {}) {
       } else {
         const reference = asset.contentRef ?? (previousIds.has(asset.id) ? contentRefFor(asset.id) : null);
         if (reference !== contentRefFor(asset.id)) throw new Error(`Attachment ${asset.id} has no stable content reference.`);
-        const metadata = readPayloadMetadataByIdStatement.get(asset.id);
+        const metadata = payloadMetadataById().get(asset.id);
         if (!metadata) throw new Error(`Attachment payload is missing for asset ${asset.id}.`);
         if (metadata.content_ref !== reference) throw new Error(`Stored attachment reference is invalid for asset ${asset.id}.`);
       }
@@ -705,7 +726,7 @@ export function createSQLiteQCAdapter({ databasePath } = {}) {
       ensureOpen();
       return readSnapshot(() => {
         ensureTrustedPayloadGeneration();
-        return new Map(readPayloadMetadataStatement.all().map((row) => [row.asset_id, {
+        return new Map([...payloadMetadataById().values()].map((row) => [row.asset_id, {
           contentRef: row.content_ref,
           contentSha256: row.content_sha256,
           decodedBytes: Number(row.decoded_bytes),
@@ -721,7 +742,8 @@ export function createSQLiteQCAdapter({ databasePath } = {}) {
       return row ? Number(row.revision) : null;
     },
 
-    async transact(mutator, { includeAssetContent = true } = {}) {
+    // `contentAssetIds` lists the only attachments whose content a light transaction loads, for exact comparisons.
+    async transact(mutator, { includeAssetContent = true, contentAssetIds = [] } = {}) {
       ensureOpen();
       if (typeof mutator !== "function") throw new TypeError("QC transaction mutator must be a function");
 
@@ -730,7 +752,7 @@ export function createSQLiteQCAdapter({ databasePath } = {}) {
         const storedState = parseStoredState(stored);
         const current = includeAssetContent
           ? withFullPayloads(storedState)
-          : withLightPayloadMetadata(storedState);
+          : withLightPayloadMetadata(storedState, new Set(contentAssetIds));
         const outcome = requireSynchronousOutcome(mutator(current));
         const nextState = cloneState(outcome.state);
         const result = clone(outcome.result);

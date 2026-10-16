@@ -4,6 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { validateHistoryPackage, verifyHistoryPackage } from "../../core/qc-history.js";
+import { BACKUP_MAX_BYTES } from "../../core/qc-domain.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const CREATED_AT = "2026-09-29T00:00:00.000Z";
@@ -682,7 +683,7 @@ async function main(args) {
   validateHistoryPackage(result.package);
   const serialized = `${JSON.stringify(result.package, null, 2)}\n`;
   const packageBytes = Buffer.byteLength(serialized);
-  if (packageBytes > 50 * 1024 * 1024) fail(`Built history package is ${(packageBytes / (1024 * 1024)).toFixed(2)} MiB, above the 50 MiB app limit.`);
+  if (packageBytes > BACKUP_MAX_BYTES) fail(`Built history package is ${(packageBytes / (1024 * 1024)).toFixed(2)} MiB, above the ${BACKUP_MAX_BYTES / (1024 * 1024)} MiB app limit.`);
   result.summary.packageBytes = packageBytes;
   result.summary.packageMiB = Number((packageBytes / (1024 * 1024)).toFixed(2));
   await writeFile(options.output, serialized, "utf8");

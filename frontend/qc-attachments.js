@@ -1,6 +1,21 @@
 import { blobFromDataUrl, button, downloadFile, el, notify, readFileAsDataURL, showDialog } from "./qc-ui.js";
+import { UPLOAD_REQUEST_MAX_BYTES } from "../core/qc-domain.js";
 
 export const MEBIBYTE = 1024 * 1024;
+
+export function formatMebibytes(bytes) {
+  return `${Number((bytes / MEBIBYTE).toFixed(1))} MiB`;
+}
+
+// One upload request carries at most UPLOAD_REQUEST_MAX_BYTES of file content. The total is checked from the
+// selected File sizes before any file is read, so an oversized selection never reaches the service.
+export function assertUploadRequestSize(files) {
+  const total = files.reduce((sum, file) => sum + (Number(file?.size) || 0), 0);
+  if (total > UPLOAD_REQUEST_MAX_BYTES) {
+    throw new Error(`The selected files total ${formatMebibytes(total)}; one upload can carry up to ${formatMebibytes(UPLOAD_REQUEST_MAX_BYTES)}. Add fewer files at a time.`);
+  }
+  return total;
+}
 
 const previewableImages = new Set([
   "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/avif",
@@ -38,7 +53,7 @@ export function issueAttachmentCategory(mimeType) {
 
 export async function readAttachmentFile(file, { maxBytes = null, category = null } = {}) {
   if (maxBytes !== null && file.size > maxBytes) {
-    throw new Error(`${file.name || "The selected file"} exceeds the ${(maxBytes / MEBIBYTE).toFixed(0)} MiB per-file limit.`);
+    throw new Error(`${file.name || "The selected file"} exceeds the ${formatMebibytes(maxBytes)} per-file limit.`);
   }
   const mimeType = normalizedMimeType(file.name, file.type);
   if (category === "video" && !videoTypes.has(mimeType)) {

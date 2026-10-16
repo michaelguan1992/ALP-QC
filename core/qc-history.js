@@ -319,7 +319,7 @@ export function importHistory(targetState, historyPackage, context) {
 
   const addedCount = Object.values(counts.added).reduce((total, count) => total + count, 0);
   if (addedCount === 0 && versionCorrection.versionIds.length === 0 && !versionMerge.changed) {
-    validateQCState(target);
+    validateQCState(target, context.validation);
     return { state: target, result: { entityId: "history-import", changed: false, counts, revision: target.revision } };
   }
 
@@ -331,6 +331,6 @@ export function importHistory(targetState, historyPackage, context) {
     entityId: "history-import",
     summary: `Imported ${counts.added.sources} historical PDF sources and ${counts.added.inspections} inspection records into ${counts.added.batches} canonical historical batches; merged ${versionMerge.versionIds.length + preparedMerge.versionIds.length} duplicate AP version records and relinked ${versionMerge.assetIds.length + preparedMerge.assetIds.length} documents; no PO quantities were linked.`,
   });
-  validateQCState(target);
+  validateQCState(target, context.validation);
   return { state: target, result: { entityId: "history-import", changed: true, counts, revision: target.revision } };
 }

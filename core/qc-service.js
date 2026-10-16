@@ -1,12 +1,15 @@
 import {
   addAudit,
+  API_UPLOAD_BODY_MAX_BYTES,
   BACKUP_MAX_BYTES,
   createInitialQCState,
   DOCUMENT_MAX_BYTES,
   fail,
+  failWithStatus,
   normalizeDataUrl,
   PHOTO_MAX_BYTES,
   ASSET_TOTAL_MAX_BYTES,
+  UPLOAD_REQUEST_MAX_BYTES,
 } from "./qc-domain.js";
 import { createVariant, setVariantActive } from "./qc-catalog.js";
 import { makeBackup, importBackup as applyBackupImport } from "./qc-backup.js";
@@ -34,7 +37,7 @@ import { importLarkVersionHistory } from "./qc-lark-versions.js";
 import { mergeSupersededAPVersionDuplicates } from "./qc-version-merge.js";
 import { removeAuthorizedS15TrialVersion, S15_TRIAL_VERSION_ID } from "./qc-version-cleanup.js";
 
-export { PHOTO_MAX_BYTES, DOCUMENT_MAX_BYTES, ASSET_TOTAL_MAX_BYTES, BACKUP_MAX_BYTES };
+export { PHOTO_MAX_BYTES, DOCUMENT_MAX_BYTES, ASSET_TOTAL_MAX_BYTES, BACKUP_MAX_BYTES, API_UPLOAD_BODY_MAX_BYTES, UPLOAD_REQUEST_MAX_BYTES };
 
 const COMMANDS = new Map([
   ["createVariant", createVariant],
@@ -142,6 +145,19 @@ function projectFullAsset(asset) {
   return projected;
 }
 
+function formatMebibytes(bytes) {
+  return `${Number((bytes / (1024 * 1024)).toFixed(1))} MiB`;
+}
+
+// A base64 Data URL is about four thirds of its decoded size, plus the media-type prefix and JSON quoting.
+function serializedPayloadBytes(decodedBytes, mimeType) {
+  return Math.ceil(decodedBytes / 3) * 4 + String(mimeType).length + 64;
+}
+
+function incomingAssetIds(assets) {
+  return (assets ?? []).map((asset) => asset.id);
+}
+
 function projectCommandChanges(type, state, entityId, auditStart) {
   const changes = {
     batches: [],
@@ -194,6 +210,44 @@ export function createQCService(adapter, options = {}) {
       : undefined;
   }
 
+  // Totals come from stored sizes and a light read, so deciding whether a full read is affordable never loads a body.
+  async function storedAttachmentTotals() {
+    await ensureOpen();
+    const state = await adapter.readState({ includeAssetContent: false });
+    if (state === null) return { decodedBytes: 0, serializedBytes: 0 };
+    const trusted = trustedAssetValidation();
+    let decodedBytes = 0;
+    let payloadBytes = 0;
+    for (const asset of state.assets ?? []) {
+      const bytes = typeof asset.dataUrl === "string"
+        ? normalizeDataUrl(asset.dataUrl, "Stored attachment").decodedBytes
+        : Number(trusted?.get?.(asset.id)?.decodedBytes) || 0;
+      decodedBytes += bytes;
+      payloadBytes += serializedPayloadBytes(bytes, asset.mimeType);
+    }
+    // Records are measured without Data URLs, so an adapter that returns payloads is not counted twice.
+    const recordJson = JSON.stringify(state, (key, value) => (key === "dataUrl" ? undefined : value));
+    return { decodedBytes, serializedBytes: new TextEncoder().encode(recordJson).byteLength + payloadBytes };
+  }
+
+  // Full-content reads hold every attachment Data URL in memory, so they stop above the backup limit.
+  async function requireFullContentRead() {
+    const { decodedBytes } = await storedAttachmentTotals();
+    if (decodedBytes > BACKUP_MAX_BYTES) {
+      failWithStatus(413, "content_too_large",
+        `This workspace stores ${formatMebibytes(decodedBytes)} of attachments, more than the ${formatMebibytes(BACKUP_MAX_BYTES)} one full read can return. Use the lightweight state and single-attachment reads, or download the database snapshot from Backup and restore.`);
+    }
+  }
+
+  // A JSON backup must stay within the limit that restore enforces, so this is measured in serialized bytes.
+  async function requireJsonBackupFits() {
+    const { serializedBytes } = await storedAttachmentTotals();
+    if (serializedBytes > BACKUP_MAX_BYTES) {
+      failWithStatus(413, "backup_too_large",
+        `A JSON backup of this workspace would be about ${formatMebibytes(serializedBytes)}, above the ${formatMebibytes(BACKUP_MAX_BYTES)} limit that restore accepts. Download the database snapshot from Backup and restore instead.`);
+    }
+  }
+
   function validateState(state, preparedOptions = undefined) {
     return validateQCState(state, preparedOptions ?? validationOptions(state));
   }
@@ -213,6 +267,7 @@ export function createQCService(adapter, options = {}) {
   async function initialize(readOptions = {}) {
     const includeAssetContent = !isLightweightMode(readOptions);
     await ensureOpen();
+    if (includeAssetContent) await requireFullContentRead();
     const existing = await adapter.readState({ includeAssetContent });
     if (existing !== null) {
       validateState(existing);
@@ -292,6 +347,7 @@ export function createQCService(adapter, options = {}) {
   async function getState(readOptions = {}) {
     const includeAssetContent = !isLightweightMode(readOptions);
     await ensureOpen();
+    if (includeAssetContent) await requireFullContentRead();
     const state = await adapter.readState({ includeAssetContent });
     if (state === null) return createInitialQCState();
     validateState(state);
@@ -311,7 +367,7 @@ export function createQCService(adapter, options = {}) {
     await ensureOpen();
     const handler = COMMANDS.get(type);
     if (!handler) fail(`Unknown QC command: ${String(type)}.`);
-    const includeAssetContent = type === "importLarkVersionHistory";
+    // Command handlers judge attachments from stored metadata (IDs, sizes, ownership), so no body is loaded here.
     return adapter.transact((current) => {
       const state = current === null ? createInitialQCState() : current;
       const currentValidation = validationOptions(state);
@@ -349,7 +405,7 @@ export function createQCService(adapter, options = {}) {
             : {}),
         },
       };
-    }, { includeAssetContent });
+    }, { includeAssetContent: false });
   }
 
   async function saveBatchChanges(data, expectedRevision) {
@@ -375,6 +431,7 @@ export function createQCService(adapter, options = {}) {
   async function getBatchWorkspace(batchId, readOptions = {}) {
     const includeAssetContent = !isLightweightMode(readOptions);
     await ensureOpen();
+    if (includeAssetContent) await requireFullContentRead();
     const state = await adapter.readState({ includeAssetContent });
     if (state === null) return readBatchWorkspace(createInitialQCState(), batchId, { includeAssetContent });
     validateState(state);
@@ -397,6 +454,7 @@ export function createQCService(adapter, options = {}) {
   }
 
   async function exportBackup() {
+    await requireJsonBackupFits();
     const state = await getState();
     return makeBackup(state, now);
   }
@@ -419,7 +477,7 @@ export function createQCService(adapter, options = {}) {
       const state = current === null ? createInitialQCState() : current;
       validateState(state);
       validateExpectedRevision(expectedRevision, state);
-      const outcome = applyBackupImport(state, savedBackup, { idFactory, now });
+      const outcome = applyBackupImport(state, savedBackup, { idFactory, now, validation: validationOptions(state) });
       const trialCleanup = removeAuthorizedS15TrialVersion(outcome.state);
       const shouldAuditCleanup = (trialCleanup.versionIds.length > 0 || omittedBackupTrial.versionIds.length > 0) &&
         !hasS15TrialCleanupAudit(outcome.state);
@@ -462,7 +520,7 @@ export function createQCService(adapter, options = {}) {
           },
         },
       };
-    }, { includeAssetContent: true });
+    }, { includeAssetContent: false, contentAssetIds: incomingAssetIds(savedBackup.state.assets) });
   }
 
   async function importHistory(historyPackage, expectedRevision) {
@@ -474,9 +532,9 @@ export function createQCService(adapter, options = {}) {
       const state = current === null ? createInitialQCState() : current;
       validateState(state);
       validateExpectedRevision(expectedRevision, state);
-      const outcome = applyHistoryImport(state, savedPackage, { idFactory, now });
+      const outcome = applyHistoryImport(state, savedPackage, { idFactory, now, validation: validationOptions(state) });
       return { state: outcome.state, result: outcome.result };
-    }, { includeAssetContent: true });
+    }, { includeAssetContent: false, contentAssetIds: incomingAssetIds(savedPackage.assets) });
   }
 
   return Object.freeze({

@@ -34,7 +34,10 @@ import { validateHistoryState } from "./qc-history.js";
 import { createHistoricalBatch, historicalResultValues, historicalSourceResultValues } from "./qc-historical-batches.js";
 import { validateVersionMergeEvidence } from "./qc-version-merge.js";
 
-const MAX_ASSET_VALIDATION_CACHE_CHARS = Math.ceil(ASSET_TOTAL_MAX_BYTES * 4 / 3) + 1024;
+// The largest attachment (20 MiB) is about 28.0 million base64 characters. This bound holds two such payloads,
+// so a payload validated twice in one pass stays cached. Retained text never exceeds 64 MiB, however large the
+// workspace grows; a larger payload is parsed again instead of being kept.
+export const MAX_ASSET_VALIDATION_CACHE_CHARS = 64 * 1024 * 1024;
 
 function assert(condition, message) {
   if (!condition) fail(message);
