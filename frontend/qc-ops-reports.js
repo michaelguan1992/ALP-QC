@@ -3,7 +3,7 @@ import {
 } from "./qc-ops-common.js";
 import { downloadFile, notify } from "./qc-ui.js";
 import { attachmentCanPreview, attachmentDownload, loadAssetImage, previewAttachment } from "./qc-attachments.js";
-import { normalizeBatchDisplayNumber, resolveBatchDisplayNumber, resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
+import { historicalProductLabel, normalizeBatchDisplayNumber, resolveBatchDisplayNumber, resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
 import { findHistoricalSourceRow } from "../core/qc-historical-batches.js";
 
@@ -25,10 +25,7 @@ function sourceText(value) {
 
 function batchProductLabel(batch, variant) {
   if (!isHistoricalBatch(batch)) return variant?.label;
-  const label = String(batch.productLabel || batch.model || "");
-  const color = String(batch.color || "");
-  const normalColor = ["red", "normalred"].includes(color.toLocaleLowerCase().replace(/[\s_-]/g, ""));
-  return color && !normalColor && !label.toLocaleLowerCase().includes(color.toLocaleLowerCase()) ? `${label} ${color}`.trim() : label;
+  return historicalProductLabel(String(batch.productLabel || batch.model || ""), batch.color);
 }
 
 function batchInspection(stage, factory) {

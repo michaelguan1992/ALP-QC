@@ -77,10 +77,18 @@ Every excluded revision appears in `report.excludedVersionRecords` with `sourceR
 
 ## Rebuilding the package
 
-Run the builder from the project root after placing the three NDJSON exports and their adjacent `.manifest.json` files at the default paths:
+Run the builder from the project root with the three NDJSON exports and their adjacent `.manifest.json` files named explicitly:
 
 ```sh
-node scripts/build-lark-import.mjs
+node scripts/build-lark-import.mjs --revisions FILE --products FILE --specs FILE [--out FILE]
 ```
 
-The default input paths are `/tmp/masterqc-web-version-review.ndjson`, `/tmp/masterqc-lark-products.ndjson`, and `/tmp/masterqc-lark-specs.ndjson`. Each input manifest is checked for a complete all-fields/all-records snapshot and a record count matching its NDJSON file. Optional `--revisions`, `--products`, `--specs`, and `--out` flags accept alternate file paths. The generated JSON is stable for the same input snapshots and contains no unrelated source export rows.
+There is no default input path. Omitting `--revisions`, `--products`, or `--specs` stops the run with an error. `--out` defaults to `data/lark-import/version-history.v1.json`. Each input manifest is checked for a complete all-fields/all-records snapshot and a record count matching its NDJSON file. The generated JSON is stable for the same input snapshots and contains no unrelated source export rows.
+
+Report counting:
+
+- `orphanSpecLinks` and `unknownProductLinks` count each included source revision once, not once per family projection.
+- `specRowsWithoutApplicableProducts` counts linked spec rows of included revisions whose product links match no product of an applicable family (for example, a spec linked only to an out-of-scope product or to none). They are dropped from the projections and no longer pass without a count.
+- `otherFamilySpecRowsSkipped` keeps its meaning: spec rows of the revision linked to another applicable family's products.
+
+The committed package predates `specRowsWithoutApplicableProducts`. Rebuild it from the same snapshots to add the count; the records themselves are unchanged. The Lark exports were not available in this working environment, so the committed package was not rebuilt.

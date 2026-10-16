@@ -36,7 +36,7 @@ async function mutateStoredState(service, mutate) {
 }
 
 async function command(service, type, data = {}) {
-  const state = await service.getState();
+  const state = await service.getState({ mode: "lightweight" });
   return service.command(type, data, state.revision);
 }
 
@@ -226,9 +226,14 @@ test("multiple row Issues have request-key idempotency and atomic evidence uploa
   await service.close();
 });
 
-test("photo and general file limits accept the exact boundary and reject one byte above it", async () => {
-  const service = makeService();
+test("photo and general file limits accept the exact boundary and reject one byte above it", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "masterqc-attachment-limits-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  // SQLite keeps payload bodies out of each command's working copy, which keeps these 20 MiB cases quick.
+  const service = makeService(createSQLiteQCAdapter({ databasePath: path.join(directory, "workspace.sqlite") }));
   const { batchId, rowId } = await prepareBatch(service, "BOUNDARY");
+  // Light reads compare revisions and metadata without loading the 20 MiB payloads they would otherwise carry.
+  const lightState = () => service.getState({ mode: "lightweight" });
   const photo = fileDataUrl("image/png", PHOTO_MAX_BYTES);
   const photoResult = await command(service, "createIssue", {
     reportedBy: "Inspector",
@@ -244,39 +249,61 @@ test("photo and general file limits accept the exact boundary and reject one byt
     id: photoResult.entityId,
     files: [{ name: "general-image.png", mimeType: "image/png", dataUrl: generalImage, category: "file" }],
   });
-  assert.ok((await service.getState()).assets.some((asset) => asset.kind === "issueAttachment" && asset.category === "file" && asset.name === "general-image.png"));
-  const beforeMismatchedCategory = await service.getState();
+  assert.ok((await lightState()).assets.some((asset) => asset.kind === "issueAttachment" && asset.category === "file" && asset.name === "general-image.png"));
+  const beforeMismatchedCategory = await lightState();
   await assert.rejects(command(service, "addIssueAttachments", {
     id: photoResult.entityId,
     files: [{ name: "not-photo.mp4", mimeType: "video/mp4", dataUrl: "data:video/mp4;base64,AAAA", category: "photo" }],
   }), /photo.*images/i);
-  assert.deepEqual(await service.getState(), beforeMismatchedCategory);
+  assert.deepEqual(await lightState(), beforeMismatchedCategory);
   const oversizedPhoto = fileDataUrl("image/png", PHOTO_MAX_BYTES + 1);
-  const beforePhotoReject = await service.getState();
+  const beforePhotoReject = await lightState();
   await assert.rejects(command(service, "addIssueAttachments", {
     id: photoResult.entityId,
     files: [{ name: "too-large.png", mimeType: "image/png", dataUrl: oversizedPhoto, category: "photo" }],
-  }), /5 MiB/i);
-  assert.deepEqual(await service.getState(), beforePhotoReject);
+  }), /20 MiB/i);
+  assert.deepEqual(await lightState(), beforePhotoReject);
+  const oversizedGeneralFile = fileDataUrl("image/png", DOCUMENT_MAX_BYTES + 1, 69);
+  await assert.rejects(command(service, "addIssueAttachments", {
+    id: photoResult.entityId,
+    files: [{ name: "too-large-general.png", mimeType: "image/png", dataUrl: oversizedGeneralFile, category: "file" }],
+  }), /20 MiB/i);
+  assert.deepEqual(await lightState(), beforePhotoReject);
 
   const maxFile = fileDataUrl("video/mp4", DOCUMENT_MAX_BYTES, 66);
   await command(service, "setRowAttachment", {
     batchId, rowId, category: "videos", file: { name: "maximum.mp4", mimeType: "video/mp4", dataUrl: maxFile },
   });
-  const atCapacity = await service.getState();
+  const atCapacity = await lightState();
   const row = atCapacity.batches.find((batch) => batch.id === batchId).rows.find((candidate) => candidate.id === rowId);
   const replace = fileDataUrl("video/webm", DOCUMENT_MAX_BYTES, 67);
   await command(service, "setRowAttachment", {
     batchId, rowId, category: "videos", file: { name: "replacement.webm", mimeType: "video/webm", dataUrl: replace },
   });
-  assert.equal((await service.getState()).assets.some((asset) => asset.id === row.attachmentIds.videos), false);
+  assert.equal((await lightState()).assets.some((asset) => asset.id === row.attachmentIds.videos), false);
   const overFile = fileDataUrl("video/mp4", DOCUMENT_MAX_BYTES + 1, 68);
-  const beforeFileReject = await service.getState();
+  const beforeFileReject = await lightState();
   await assert.rejects(command(service, "setRowAttachment", {
     batchId, rowId, category: "videos", file: { name: "too-large.mp4", mimeType: "video/mp4", dataUrl: overFile },
-  }), /10 MiB/i);
-  assert.deepEqual(await service.getState(), beforeFileReject);
-  assert.equal(ASSET_TOTAL_MAX_BYTES, 30 * 1024 * 1024);
+  }), /20 MiB/i);
+  assert.deepEqual(await lightState(), beforeFileReject);
+
+  // Library documents and batch attachments use the same general-file boundary.
+  const libraryFile = fileDataUrl("application/pdf", DOCUMENT_MAX_BYTES, 70);
+  await command(service, "addDocument", { name: "library-maximum.pdf", mimeType: "application/pdf", dataUrl: libraryFile, versionId: null });
+  const beforeLibraryReject = await lightState();
+  await assert.rejects(command(service, "addDocument", {
+    name: "library-too-large.pdf", mimeType: "application/pdf", dataUrl: fileDataUrl("application/pdf", DOCUMENT_MAX_BYTES + 1, 71), versionId: null,
+  }), /20 MiB/i);
+  assert.deepEqual(await lightState(), beforeLibraryReject);
+  const batchFile = fileDataUrl("application/pdf", DOCUMENT_MAX_BYTES, 72);
+  await command(service, "addBatchAttachment", { batchId, name: "batch-maximum.pdf", mimeType: "application/pdf", dataUrl: batchFile });
+  const beforeBatchReject = await lightState();
+  await assert.rejects(command(service, "addBatchAttachment", {
+    batchId, name: "batch-too-large.pdf", mimeType: "application/pdf", dataUrl: fileDataUrl("application/pdf", DOCUMENT_MAX_BYTES + 1, 73),
+  }), /20 MiB/i);
+  assert.deepEqual(await lightState(), beforeBatchReject);
+  assert.equal(ASSET_TOTAL_MAX_BYTES, 500 * 1024 * 1024);
   assert.equal(BACKUP_MAX_BYTES, 50 * 1024 * 1024);
   await service.close();
 });

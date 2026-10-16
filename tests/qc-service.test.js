@@ -543,9 +543,9 @@ test("backup validation rejects malformed issue evidence and unsafe library asse
     name: "payload.html", mimeType: "text/html", dataUrl: "data:text/html;base64,PGI+",
   }), /supported file types/i);
   assert.equal(harness.writes, beforeWrites);
-  assert.equal(PHOTO_MAX_BYTES, 5 * 1024 * 1024);
-  assert.equal(DOCUMENT_MAX_BYTES, 10 * 1024 * 1024);
-  assert.equal(ASSET_TOTAL_MAX_BYTES, 30 * 1024 * 1024);
+  assert.equal(PHOTO_MAX_BYTES, 20 * 1024 * 1024);
+  assert.equal(DOCUMENT_MAX_BYTES, 20 * 1024 * 1024);
+  assert.equal(ASSET_TOTAL_MAX_BYTES, 500 * 1024 * 1024);
   assert.equal(BACKUP_MAX_BYTES, 50 * 1024 * 1024);
 });
 

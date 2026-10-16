@@ -37,6 +37,8 @@ export function createQCHttpService({ workspace = "main", fetchImpl = globalThis
     ),
     getPurchaseOrderProgress: (orderId) => request(`/orders/${encodeURIComponent(orderId)}/progress`),
     exportBackup: () => request("/backup"),
+    // Same-origin download link for a SQLite snapshot; the browser streams it to disk without loading it here.
+    backupSnapshotUrl: () => `${root}/backup/snapshot`,
     importBackup: (backup, expectedRevision) => request("/restore", {
       method: "POST",
       body: { backup, expectedRevision },

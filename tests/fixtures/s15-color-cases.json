@@ -1,0 +1,171 @@
+{
+  "format": "masterqc-s15-color-parity",
+  "formatVersion": 1,
+  "cases": [
+    {
+      "name": "Remaining red quantity is part of a larger batch (committed record f46)",
+      "notes": "生产832PCS，实际发货S15：7月27发货448PCS剩余 红色：384PCS本批发货 主控文件数据为832PCS资料\nProduction: 832PCS. Actual shipment: 448PCS were dispatched on July 27th. Remaining red: 384PCS. The main control file data for this wholesale shipment is 832PCS",
+      "batchQuantity": 832,
+      "expected": {
+        "color": null,
+        "colorBasis": "special-notes-partial-color-quantity",
+        "anomaly": {
+          "code": "partial-color-allocation",
+          "message": "Special Notes state a color quantity that is not the whole page batch quantity; the color remains null and all source notes are preserved.",
+          "batchQuantity": 832,
+          "statedColorQuantities": [
+            {
+              "color": "red",
+              "quantity": 384
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Red quantity equals the batch quantity",
+      "notes": "UI-S1-006 | 本批发货数量： Quantity of this wholesale: | S15 -red：1136 PCS； | 留16PCS存AP。Set aside 16 PCS and keep them in AP.",
+      "batchQuantity": 1136,
+      "expected": {
+        "color": "red",
+        "colorBasis": "special-notes-explicit-product-quantity",
+        "anomaly": null
+      }
+    },
+    {
+      "name": "Chinese pieces-first form equals the batch quantity",
+      "notes": "1152PCS红色/1152 pieces of red",
+      "batchQuantity": 1152,
+      "expected": {
+        "color": "red",
+        "colorBasis": "special-notes-explicit-product-quantity",
+        "anomaly": null
+      }
+    },
+    {
+      "name": "Yellow quantity equals the batch quantity",
+      "notes": "S15 -yellow：200 PCS；",
+      "batchQuantity": 200,
+      "expected": {
+        "color": "yellow",
+        "colorBasis": "special-notes-explicit-product-quantity",
+        "anomaly": null
+      }
+    },
+    {
+      "name": "Color named without any quantity",
+      "notes": "S15-Red only",
+      "batchQuantity": 768,
+      "expected": {
+        "color": null,
+        "colorBasis": "special-notes-color-quantity-not-stated",
+        "anomaly": {
+          "code": "color-quantity-not-stated",
+          "message": "Special Notes name a color without a quantity; the batch color remains null because the whole-batch color cannot be established.",
+          "batchQuantity": 768,
+          "statedColorQuantities": []
+        }
+      }
+    },
+    {
+      "name": "Two colors stated",
+      "notes": "S15 -red：768 PCS；  S15 -yellow：100 PCS",
+      "batchQuantity": 768,
+      "expected": {
+        "color": null,
+        "colorBasis": "special-notes-mixed-color-quantities",
+        "anomaly": null
+      }
+    },
+    {
+      "name": "No color mentioned",
+      "notes": "Production: 500 PCS. Visual check only.",
+      "batchQuantity": 500,
+      "expected": {
+        "color": null,
+        "colorBasis": null,
+        "anomaly": null
+      }
+    },
+    {
+      "name": "Empty notes",
+      "notes": null,
+      "batchQuantity": 500,
+      "expected": {
+        "color": null,
+        "colorBasis": null,
+        "anomaly": null
+      }
+    },
+    {
+      "name": "Chinese quantity before the color word",
+      "notes": "768件红色",
+      "batchQuantity": 768,
+      "expected": {
+        "color": "red",
+        "colorBasis": "special-notes-explicit-product-quantity",
+        "anomaly": null
+      }
+    },
+    {
+      "name": "Full-width digits in a color quantity",
+      "notes": "红色：７６８PCS",
+      "batchQuantity": 768,
+      "expected": {
+        "color": "red",
+        "colorBasis": "special-notes-explicit-product-quantity",
+        "anomaly": null
+      }
+    },
+    {
+      "name": "Remaining red stated for part of the batch",
+      "notes": "剩余red：100PCS；Production: 768PCS.",
+      "batchQuantity": 768,
+      "expected": {
+        "color": null,
+        "colorBasis": "special-notes-partial-color-quantity",
+        "anomaly": {
+          "code": "partial-color-allocation",
+          "message": "Special Notes state a color quantity that is not the whole page batch quantity; the color remains null and all source notes are preserved.",
+          "batchQuantity": 768,
+          "statedColorQuantities": [
+            {
+              "color": "red",
+              "quantity": 100
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Lowercase yellow stated for part of the batch",
+      "notes": "S15-yellow: 5 pcs; Production: 200 PCS.",
+      "batchQuantity": 200,
+      "expected": {
+        "color": null,
+        "colorBasis": "special-notes-partial-color-quantity",
+        "anomaly": {
+          "code": "partial-color-allocation",
+          "message": "Special Notes state a color quantity that is not the whole page batch quantity; the color remains null and all source notes are preserved.",
+          "batchQuantity": 200,
+          "statedColorQuantities": [
+            {
+              "color": "yellow",
+              "quantity": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Red quantity with a trailing note",
+      "notes": "Red: 768 PCS (set aside 16 PCS for AP).",
+      "batchQuantity": 768,
+      "expected": {
+        "color": "red",
+        "colorBasis": "special-notes-explicit-product-quantity",
+        "anomaly": null
+      }
+    }
+  ]
+}

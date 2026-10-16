@@ -1,14 +1,18 @@
+import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { createReadStream } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
-import { lstat, readFile, realpath, stat } from "node:fs/promises";
+import { lstat, readFile, realpath, rm, stat } from "node:fs/promises";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { BACKUP_MAX_BYTES, QC_COMMAND_TYPES, createQCService } from "../core/qc-service.js";
+import { API_UPLOAD_BODY_MAX_BYTES, BACKUP_MAX_BYTES, QC_COMMAND_TYPES, createQCService } from "../core/qc-service.js";
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const HOST = "127.0.0.1";
 export const PORT = 4173;
 export const CANONICAL_URL = `http://${HOST}:${PORT}`;
+export const WORKSPACE_DATABASE_FILES = Object.freeze({ main: "masterqc-main.sqlite", demo: "masterqc-demo.sqlite" });
 
 const STATIC_ROOTS = ["frontend", "core", "storage"].map((directory) => ({
   urlPrefix: `/${directory}`,
@@ -17,7 +21,10 @@ const STATIC_ROOTS = ["frontend", "core", "storage"].map((directory) => ({
 const LARK_IMPORT_ROOT = path.join(PROJECT_ROOT, "data", "lark-import");
 const LARK_IMPORT_PACKAGE_URL = "/data/lark-import/version-history.v1.json";
 const BROWSER_STORAGE_FILES = new Set(["http-json-transport.js"]);
-const API_BODY_MAX_BYTES = BACKUP_MAX_BYTES + 4096;
+// Commands and initialization carry attachment uploads, so they use the upload budget from the core.
+const API_BODY_MAX_BYTES = API_UPLOAD_BODY_MAX_BYTES;
+// JSON restore and historical package imports keep the 50 MiB backup limit plus a small envelope.
+const BACKUP_BODY_MAX_BYTES = BACKUP_MAX_BYTES + 4096;
 const ALLOWED_WORKSPACES = new Set(["main", "demo"]);
 const ALLOWED_COMMANDS = new Set(QC_COMMAND_TYPES);
 
@@ -153,15 +160,16 @@ export async function checkStartupRequirements({ projectRoot = PROJECT_ROOT } = 
   return null;
 }
 
+const SECURITY_HEADERS = {
+  "Cache-Control": "no-store",
+  "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-src 'self' blob:; media-src 'self' blob:",
+  "Referrer-Policy": "no-referrer",
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+};
+
 function send(response, statusCode, body, headers = {}) {
-  response.writeHead(statusCode, {
-    "Cache-Control": "no-store",
-    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-src 'self' blob:; media-src 'self' blob:",
-    "Referrer-Policy": "no-referrer",
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-    ...headers,
-  });
+  response.writeHead(statusCode, { ...SECURITY_HEADERS, ...headers });
   response.end(body);
 }
 
@@ -183,12 +191,24 @@ function requestError(statusCode, message, code = undefined) {
   return error;
 }
 
-async function readJsonBody(request, maxBodyBytes = API_BODY_MAX_BYTES) {
+function formatLimit(bytes) {
+  return bytes >= 1024 * 1024 ? `${Number((bytes / (1024 * 1024)).toFixed(1))} MiB` : `${bytes} bytes`;
+}
+
+function uploadTooLargeMessage(maxBodyBytes) {
+  return `This request is larger than the ${formatLimit(maxBodyBytes)} limit. Add fewer files at a time.`;
+}
+
+function backupTooLargeMessage() {
+  return `This JSON file is larger than the ${formatLimit(BACKUP_MAX_BYTES)} limit for backups and historical packages. Move larger workspaces with a database snapshot.`;
+}
+
+async function readJsonBody(request, maxBodyBytes, tooLargeMessage) {
   const contentType = String(request.headers["content-type"] ?? "").split(";", 1)[0].trim().toLowerCase();
   if (contentType !== "application/json") throw requestError(415, "Content-Type must be application/json.", "unsupported_media_type");
   const declaredLength = Number(request.headers["content-length"]);
   if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
-    throw requestError(413, `Request body exceeds the ${BACKUP_MAX_BYTES / (1024 * 1024)} MiB backup limit.`, "body_too_large");
+    throw requestError(413, tooLargeMessage, "body_too_large");
   }
   const chunks = [];
   let totalBytes = 0;
@@ -196,7 +216,7 @@ async function readJsonBody(request, maxBodyBytes = API_BODY_MAX_BYTES) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     totalBytes += bytes.byteLength;
     if (totalBytes > maxBodyBytes) {
-      throw requestError(413, `Request body exceeds the ${BACKUP_MAX_BYTES / (1024 * 1024)} MiB backup limit.`, "body_too_large");
+      throw requestError(413, tooLargeMessage, "body_too_large");
     }
     chunks.push(bytes);
   }
@@ -223,7 +243,51 @@ function getService(services, workspace) {
   return services[workspace];
 }
 
-async function handleApiRequest(request, response, path, services, maxBodyBytes) {
+function closeReadStream(stream) {
+  if (!stream || stream.closed) return Promise.resolve();
+  return new Promise((resolve) => {
+    stream.once("close", resolve);
+    stream.destroy();
+  });
+}
+
+// Streams one consistent SQLite snapshot as a download. The temporary file stays in the data directory,
+// which is never statically served, and is removed after success, a client disconnect, or an error.
+async function sendDatabaseSnapshot(request, response, service, workspace, snapshotDirectory) {
+  // Same-origin downloads send no Origin header; a page on another site must not be able to fetch the database.
+  const fetchSite = request.headers["sec-fetch-site"];
+  if (fetchSite !== undefined && fetchSite !== "same-origin" && fetchSite !== "none") {
+    throw requestError(403, "Database snapshots can only be downloaded from this local application.", "origin_not_allowed");
+  }
+  if (!snapshotDirectory) throw requestError(503, "Database snapshots are not available for this server.", "snapshot_unavailable");
+
+  const snapshotPath = path.join(snapshotDirectory, `.snapshot-${workspace}-${randomUUID()}.sqlite`);
+  let stream = null;
+  try {
+    await service.createSnapshot(snapshotPath);
+    const { size } = await stat(snapshotPath);
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+    stream = createReadStream(snapshotPath);
+    response.writeHead(200, {
+      ...SECURITY_HEADERS,
+      "Content-Type": "application/vnd.sqlite3",
+      "Content-Disposition": `attachment; filename="masterqc-${workspace}-${stamp}.sqlite"`,
+      "Content-Length": size,
+    });
+    await pipeline(stream, response);
+  } catch (error) {
+    // Before headers are sent, the caller reports the failure. Afterwards only the socket can be closed.
+    if (!response.headersSent) throw error;
+    response.destroy();
+  } finally {
+    await closeReadStream(stream);
+    await rm(snapshotPath, { force: true }).catch((error) => {
+      console.error(`Could not delete the temporary snapshot ${snapshotPath}: ${error.message}`);
+    });
+  }
+}
+
+async function handleApiRequest(request, response, path, services, limits, snapshotDirectory) {
   const segments = path.split("/").filter(Boolean);
   if (segments.length < 4 || segments[0] !== "api" || segments[1] !== "qc") {
     sendJson(response, 404, { error: "API route was not found.", code: "route_not_found" });
@@ -247,7 +311,7 @@ async function handleApiRequest(request, response, path, services, maxBodyBytes)
   try {
     if (action.length === 1 && action[0] === "initialize") {
       allowedMethod("POST");
-      const body = await readJsonBody(request, maxBodyBytes);
+      const body = await readJsonBody(request, limits.maxBodyBytes, uploadTooLargeMessage(limits.maxBodyBytes));
       if (body.mode !== undefined && !["full", "lightweight"].includes(body.mode)) {
         throw requestError(400, "Initialization mode must be full or lightweight.", "invalid_read_mode");
       }
@@ -271,7 +335,7 @@ async function handleApiRequest(request, response, path, services, maxBodyBytes)
     }
     if (action.length === 1 && action[0] === "command") {
       allowedMethod("POST");
-      const body = await readJsonBody(request, maxBodyBytes);
+      const body = await readJsonBody(request, limits.maxBodyBytes, uploadTooLargeMessage(limits.maxBodyBytes));
       if (typeof body.type !== "string" || !ALLOWED_COMMANDS.has(body.type)) {
         throw requestError(400, "QC command is not allowed.", "command_not_allowed");
       }
@@ -287,9 +351,14 @@ async function handleApiRequest(request, response, path, services, maxBodyBytes)
       sendJson(response, 200, await service.exportBackup());
       return;
     }
+    if (action.length === 2 && action[0] === "backup" && action[1] === "snapshot") {
+      allowedMethod("GET");
+      await sendDatabaseSnapshot(request, response, service, segments[2], snapshotDirectory);
+      return;
+    }
     if (action.length === 1 && action[0] === "restore") {
       allowedMethod("POST");
-      const body = await readJsonBody(request, maxBodyBytes);
+      const body = await readJsonBody(request, limits.maxBackupBodyBytes, backupTooLargeMessage());
       requireRevision(body.expectedRevision);
       if (!body.backup || typeof body.backup !== "object" || Array.isArray(body.backup)) {
         throw requestError(400, "A backup object is required.", "invalid_backup");
@@ -299,7 +368,7 @@ async function handleApiRequest(request, response, path, services, maxBodyBytes)
     }
     if (action.length === 1 && action[0] === "history") {
       allowedMethod("POST");
-      const body = await readJsonBody(request, maxBodyBytes);
+      const body = await readJsonBody(request, limits.maxBackupBodyBytes, backupTooLargeMessage());
       requireRevision(body.expectedRevision);
       if (!body.historyPackage || typeof body.historyPackage !== "object" || Array.isArray(body.historyPackage)) {
         throw requestError(400, "A history package object is required.", "invalid_history_package");
@@ -347,6 +416,8 @@ export function createRequestHandler(resolveTarget = resolveStaticTarget, {
   host = HOST,
   port = PORT,
   maxBodyBytes = API_BODY_MAX_BYTES,
+  maxBackupBodyBytes = BACKUP_BODY_MAX_BYTES,
+  snapshotDirectory = null,
 } = {}) {
   return async (request, response) => {
     if (request.headers.host !== `${host}:${port}`) {
@@ -385,7 +456,7 @@ export function createRequestHandler(resolveTarget = resolveStaticTarget, {
         sendJson(response, 503, { error: "The local QC service is not ready.", code: "service_unavailable" });
         return;
       }
-      await handleApiRequest(request, response, requestPath, services, maxBodyBytes);
+      await handleApiRequest(request, response, requestPath, services, { maxBodyBytes, maxBackupBodyBytes }, snapshotDirectory);
       return;
     }
 
@@ -430,8 +501,8 @@ export async function createQCWorkspaceServices({ dataDirectory, projectRoot = P
   const [{ createSQLiteQCAdapter }] = await Promise.all([import("../storage/sqlite-qc-adapter.mjs")]);
   const directory = path.resolve(dataDirectory ?? getDefaultDataDirectory({ projectRoot }));
   const services = {
-    main: createQCService(createSQLiteQCAdapter({ databasePath: path.join(directory, "masterqc-main.sqlite") })),
-    demo: createQCService(createSQLiteQCAdapter({ databasePath: path.join(directory, "masterqc-demo.sqlite") })),
+    main: createQCService(createSQLiteQCAdapter({ databasePath: path.join(directory, WORKSPACE_DATABASE_FILES.main) })),
+    demo: createQCService(createSQLiteQCAdapter({ databasePath: path.join(directory, WORKSPACE_DATABASE_FILES.demo) })),
   };
   return Object.freeze({
     ...services,
@@ -444,7 +515,12 @@ export async function createQCWorkspaceServices({ dataDirectory, projectRoot = P
 
 export async function createStaticServer({ dataDirectory = getDefaultDataDirectory(), services: suppliedServices, host = HOST, port = PORT } = {}) {
   const services = suppliedServices ?? await createQCWorkspaceServices({ dataDirectory });
-  const server = createHttpServer(createRequestHandler(resolveStaticTarget, { services, host, port }));
+  const server = createHttpServer(createRequestHandler(resolveStaticTarget, {
+    services,
+    host,
+    port,
+    snapshotDirectory: path.resolve(dataDirectory),
+  }));
   server.once("close", () => services.close?.());
   server.qcServices = services;
   return server;

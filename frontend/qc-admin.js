@@ -4,7 +4,7 @@ import { getPurchaseOrderProgress } from "../core/qc-purchasing.js";
 import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { formatNumberedDescription } from "./qc-source-description.js";
 import { downloadAttachment, loadAssetContent } from "./qc-attachments.js";
-import { button, closeDialog, downloadFile, el, field, notify, readFileAsDataURL, showDialog } from "./qc-ui.js";
+import { button, closeDialog, el, field, notify, readFileAsDataURL, showDialog } from "./qc-ui.js";
 
 const h = el;
 const today = () => {
@@ -809,19 +809,12 @@ function renderLibrary(root, ctx) {
 
 function renderBackup(root, ctx) {
   pageHeading(root, "Backup and restore");
-  const exportButton = button("Download full backup", async () => {
-    try {
-      const backup = await ctx.service.exportBackup();
-      const serialized = JSON.stringify(backup, null, 2);
-      const size = new TextEncoder().encode(serialized).byteLength;
-      if (size > BACKUP_MAX_BYTES) { notify(`This backup is ${formatBytes(size)}; the maximum is ${formatBytes(BACKUP_MAX_BYTES)}.`, true); return; }
-      const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-      await downloadFile(`MasterQC-backup-${stamp}.json`, serialized, "application/json");
-      notify(`Backup downloaded (${formatBytes(size)}, including attachments).`);
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "The backup could not be exported.", true);
-    }
-  }, "button-primary");
+  // A same-origin link lets the browser stream the SQLite file to disk without loading it into the page.
+  const snapshotLink = h("a", {
+    className: "button button-primary",
+    href: ctx.service.backupSnapshotUrl(),
+    download: "",
+  }, "Download database snapshot");
   const form = h("form", { className: "backup-panel" },
     h("div", { className: "file-choice" },
       field("Backup JSON file", input("backup", "", "file", { accept: ".json,application/json", required: true })),
@@ -863,8 +856,15 @@ function renderBackup(root, ctx) {
     h("div", { className: "progress-stat" }, h("span", {}, "Attachment payload"), h("strong", {}, `${formatBytes(assetBytes)} / ${formatBytes(ASSET_TOTAL_MAX_BYTES)}`)),
   );
   root.append(h("div", { className: "admin-grid backup-grid" },
-    h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("h3", {}, "Export")), exportButton),
-    h("section", { className: "admin-card card" }, h("div", { className: "section-heading" }, h("h3", {}, "Restore")), form),
+    h("section", { className: "admin-card card" },
+      h("div", { className: "section-heading" }, h("h3", {}, "Export")),
+      snapshotLink,
+      h("p", { className: "file-size" }, "To restore a snapshot, stop MasterQC Web and run node launcher/restore-snapshot.mjs <snapshot-file> from the project folder."),
+    ),
+    h("section", { className: "admin-card card" },
+      h("div", { className: "section-heading" }, h("h3", {}, "Restore a JSON backup from the earlier format")),
+      form,
+    ),
     h("div", { className: "admin-card admin-card-wide card backup-metrics" },
       metrics,
     ),

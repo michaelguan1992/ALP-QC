@@ -4,6 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { validateHistoryPackage, verifyHistoryPackage } from "../../core/qc-history.js";
+import { BACKUP_MAX_BYTES } from "../../core/qc-domain.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const CREATED_AT = "2026-09-29T00:00:00.000Z";
@@ -32,6 +33,15 @@ function stableJson(value) {
     return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+// Machine- or run-dependent fields that an extractor may have written; they never enter the package.
+const MACHINE_FIELDS = ["extractorInspectionId", "extractorRowId", "extractorSourceId", "inventoryKey", "path"];
+
+function withoutMachineFields(record) {
+  const copy = structuredClone(record);
+  for (const field of MACHINE_FIELDS) delete copy[field];
+  return copy;
 }
 
 function text(value) {
@@ -93,6 +103,8 @@ function stableSourceObjects(extractionPackages) {
   const anomalies = [];
   const sourceLookup = new Map();
   const assetLookup = new Map();
+  // Extractor inspection IDs only link anomalies to pages inside this run.
+  const inspectionIdMap = new Map();
 
   for (const [packageIndex, extraction] of extractionPackages.entries()) {
     assertExtractionPackage(extraction, `Input ${packageIndex + 1}`);
@@ -105,12 +117,17 @@ function stableSourceObjects(extractionPackages) {
       if (sourceLookup.has(originalSource.id)) fail(`Extractor source ID ${originalSource.id} is duplicated.`);
       const originalAsset = assetById.get(originalSource.assetId);
       if (!originalAsset) fail(`Source ${originalSource.fileName} has no matching embedded original PDF.`);
+      // Only content-derived fields are kept. Absolute file paths, inventory keys,
+      // and extractor identifiers depend on the machine or run and stay out of the package.
       const source = {
-        ...structuredClone(originalSource),
         id: sourceId,
-        assetId,
+        fileName: originalSource.fileName,
+        sha256: originalSource.sha256,
+        pageCount: originalSource.pageCount,
         family: originalSource.family || extraction.family,
-        extractorSourceId: originalSource.id,
+        assetId,
+        inspectionPages: structuredClone(originalSource.inspectionPages ?? []),
+        nonInspectionPages: structuredClone(originalSource.nonInspectionPages ?? []),
       };
       const previousContent = sources.find((candidate) => candidate.id === sourceId);
       if (previousContent) {
@@ -142,17 +159,16 @@ function stableSourceObjects(extractionPackages) {
       if (!link) fail(`Inspection page ${original.page} refers to missing extractor source ${original.sourceId}.`);
       const source = link.source;
       const id = `${source.id}-page-${String(original.page).padStart(3, "0")}`;
+      inspectionIdMap.set(original.id, id);
       const inspection = {
-        ...structuredClone(original),
+        ...withoutMachineFields(original),
         id,
         sourceId: source.id,
-        extractorInspectionId: original.id,
         rows: (original.rows ?? []).map((sourceRow) => {
           const identity = taskIdentity(sourceRow) || `row-${sourceRow.no}`;
           return {
-            ...structuredClone(sourceRow),
+            ...withoutMachineFields(sourceRow),
             id: stableId("history-row", `${source.sha256}|p${original.page}|${identity}|${sourceRow.no}`),
-            extractorRowId: sourceRow.id ?? null,
             photoEvidence: (sourceRow.photoEvidence ?? []).map((photo) => ({ ...photo, sourceId: source.id })),
             ambiguousPhotoEvidence: (sourceRow.ambiguousPhotoEvidence ?? []).map((photo) => ({ ...photo, sourceId: source.id })),
           };
@@ -163,10 +179,7 @@ function stableSourceObjects(extractionPackages) {
     for (const anomaly of extraction.anomalies ?? []) {
       const mapped = structuredClone(anomaly);
       if (mapped.sourceId && sourceLookup.has(mapped.sourceId)) mapped.sourceId = sourceLookup.get(mapped.sourceId).source.id;
-      if (mapped.inspectionId) {
-        const match = inspections.find((item) => item.extractorInspectionId === mapped.inspectionId);
-        if (match) mapped.inspectionId = match.id;
-      }
+      if (mapped.inspectionId && inspectionIdMap.has(mapped.inspectionId)) mapped.inspectionId = inspectionIdMap.get(mapped.inspectionId);
       anomalies.push(mapped);
     }
   }
@@ -188,6 +201,7 @@ function stableSourceObjects(extractionPackages) {
 function scopeObservations(sources, inspections) {
   const sourcesById = new Map(sources.map((source) => [source.id, source]));
   const scopes = new Map();
+  const scopeParts = new Map();
   const unidentifiedRows = [];
   for (const inspection of inspections) {
     const source = sourcesById.get(inspection.sourceId);
@@ -196,6 +210,7 @@ function scopeObservations(sources, inspections) {
     if (!source || !version || !context) continue;
     const scope = groupKey(source.family, version, context);
     if (!scopes.has(scope)) scopes.set(scope, new Map());
+    if (!scopeParts.has(scope)) scopeParts.set(scope, { family: source.family, version, context });
     const tasks = scopes.get(scope);
     for (const row of inspection.rows) {
       const identity = taskIdentity(row);
@@ -207,7 +222,7 @@ function scopeObservations(sources, inspections) {
       tasks.get(identity).push({ row, inspection, source, family: source.family, scope, identity });
     }
   }
-  return { scopes, unidentifiedRows };
+  return { scopes, scopeParts, unidentifiedRows };
 }
 
 function compareObservations(left, right) {
@@ -480,11 +495,12 @@ function buildDrafts(sources, inspections, scopes, anomalies) {
   return { versions, candidates };
 }
 
-function supplementalHistoryRows(sources, inspections, scopes, anomalies) {
+function supplementalHistoryRows(sources, inspections, scopes, scopeParts, anomalies) {
   const sourcesById = new Map(sources.map((source) => [source.id, source]));
   const allocatedTasks = new Map();
   for (const [scope, taskMap] of scopes) {
-    const [family, version, context] = scope.split("|");
+    // The scope key is family|version|factory|stage; the factory and stage stay together as the context.
+    const { family, version, context } = scopeParts.get(scope);
     const scopeAnomalies = [];
     allocatedTasks.set(scope, taskListForScope(taskMap, family, version, context, scopeAnomalies));
     anomalies.push(...scopeAnomalies);
@@ -618,12 +634,12 @@ function summaryMarkdown(summary) {
 export function buildHistoryPackage(extractionPackages) {
   const { sources, inspections, assets, anomalies } = stableSourceObjects(extractionPackages);
   const originalRowCount = inspections.reduce((total, inspection) => total + inspection.rows.length, 0);
-  const { scopes, unidentifiedRows } = scopeObservations(sources, inspections);
+  const { scopes, scopeParts, unidentifiedRows } = scopeObservations(sources, inspections);
   for (const row of unidentifiedRows) anomalies.push({ code: "historical-row-task-identity-unresolved", ...row });
   const draftAnomalies = [];
   const { versions, candidates } = buildDrafts(sources, inspections, scopes, draftAnomalies);
   anomalies.push(...draftAnomalies);
-  const supplementalMissingRowCount = supplementalHistoryRows(sources, inspections, scopes, anomalies);
+  const supplementalMissingRowCount = supplementalHistoryRows(sources, inspections, scopes, scopeParts, anomalies);
   const uniqueAnomalies = [...new Map(anomalies.map((anomaly) => [stableJson(anomaly), anomaly])).values()];
   const pkg = {
     format: "masterqc-pdf-history",
@@ -682,7 +698,7 @@ async function main(args) {
   validateHistoryPackage(result.package);
   const serialized = `${JSON.stringify(result.package, null, 2)}\n`;
   const packageBytes = Buffer.byteLength(serialized);
-  if (packageBytes > 50 * 1024 * 1024) fail(`Built history package is ${(packageBytes / (1024 * 1024)).toFixed(2)} MiB, above the 50 MiB app limit.`);
+  if (packageBytes > BACKUP_MAX_BYTES) fail(`Built history package is ${(packageBytes / (1024 * 1024)).toFixed(2)} MiB, above the ${BACKUP_MAX_BYTES / (1024 * 1024)} MiB app limit.`);
   result.summary.packageBytes = packageBytes;
   result.summary.packageMiB = Number((packageBytes / (1024 * 1024)).toFixed(2));
   await writeFile(options.output, serialized, "utf8");

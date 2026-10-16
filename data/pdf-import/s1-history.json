@@ -23,7 +23,6 @@
     {
       "id": "source-s1-01",
       "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf",
       "sha256": "8db179374a03a219368fff0fd33ddad381f8c383dddc78d3168db7e6642dd6e9",
       "pageCount": 5,
       "family": "s11-s14",
@@ -49,7 +48,6 @@
     {
       "id": "source-s1-02",
       "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf",
       "sha256": "ea26cf0dde3f6ccab71b0f0ef2750a7f98c9a9f68c7f152a5ee3078c69c6ef42",
       "pageCount": 5,
       "family": "s11-s14",
@@ -75,7 +73,6 @@
     {
       "id": "source-s1-03",
       "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf",
       "sha256": "f09d2bb370462b3774055d168660a4b8b973ac8b2c37c365df5330dc2d3c29e3",
       "pageCount": 5,
       "family": "s11-s14",
@@ -101,7 +98,6 @@
     {
       "id": "source-s1-04",
       "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf",
       "sha256": "9ab3a848e07c3db33908eb83462ff1e1d56ea5e625ee2df2a945622f3efba5a4",
       "pageCount": 5,
       "family": "s11-s14",
@@ -127,7 +123,6 @@
     {
       "id": "source-s1-05",
       "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf",
       "sha256": "3eb785610b0e81b9d2962a2008f78448ee803b48b3dab78268937ba29475a184",
       "pageCount": 5,
       "family": "s11-s14",
@@ -153,7 +148,6 @@
     {
       "id": "source-s1-06",
       "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf",
       "sha256": "72dcf6d2f17fc0ed1f62f015f3e3ff0e47649ae49efd65caaf305d16b7d8cc20",
       "pageCount": 5,
       "family": "s11-s14",
@@ -179,7 +173,6 @@
     {
       "id": "source-s1-07",
       "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf",
       "sha256": "c76283c6c226682d11bc514bac369ef3de5e3417c89c7ec7c29a3f5947d833b4",
       "pageCount": 5,
       "family": "s11-s14",
@@ -205,7 +198,6 @@
     {
       "id": "source-s1-08",
       "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf",
       "sha256": "d4c825d4b4b3ef86e92b68b50d08ec6ba49884837a67f5e5aa5be6f37ccc84c6",
       "pageCount": 5,
       "family": "s11-s14",
@@ -231,7 +223,6 @@
     {
       "id": "source-s1-09",
       "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf",
       "sha256": "90a350f910f8cd5339627f712d138e628d5847e8fc1a35809224911ba80277f0",
       "pageCount": 5,
       "family": "s11-s14",
@@ -257,7 +248,6 @@
     {
       "id": "source-s1-10",
       "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf",
       "sha256": "b67e5aa2ef7d13c54f029677217a50ca95b5d02d85c6323ab472e9ddd9596dd5",
       "pageCount": 5,
       "family": "s11-s14",
@@ -283,7 +273,6 @@
     {
       "id": "source-s1-11",
       "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf",
       "sha256": "c557f6410be1df961a5efce2c16a29aff5598a93bbd3fa89a02fc7abcfd43b96",
       "pageCount": 5,
       "family": "s11-s14",
@@ -309,7 +298,6 @@
     {
       "id": "source-s1-12",
       "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf",
       "sha256": "2381cd859f715d54ee960e4c5aeab3adf05e3a65d1178d7fb898baaa58bc703a",
       "pageCount": 5,
       "family": "s11-s14",
@@ -335,7 +323,6 @@
     {
       "id": "source-s1-13",
       "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf",
       "sha256": "a60703e4176e4e261f088d54b42dd4a28291aa426969e6aab3a8bbfe4ab0b75d",
       "pageCount": 5,
       "family": "s11-s14",
@@ -361,7 +348,6 @@
     {
       "id": "source-s1-14",
       "fileName": "8.27.26AP自制-检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.27(2)(1).pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/8.27.26AP自制-检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.27(2)(1).pdf",
       "sha256": "e87f681e6b2b63735142f1c6ad9e98182dc651bb21ed9bb144ae906281a427d7",
       "pageCount": 2,
       "family": "s11-s14",
@@ -375,7 +361,6 @@
     {
       "id": "source-s1-15",
       "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
-      "path": "/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1/8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf",
       "sha256": "1a26fd817b8198bc177d4df114cab315635cbd77f8800adca3eca378fade6795",
       "pageCount": 5,
       "family": "s11-s14",
@@ -1067,7 +1052,7 @@
               "printedDateRaw": "4/1",
               "printedBatchQuantity": 3408,
               "sourceDefectiveRateRaw": "0",
-              "sourceDefectiveRate": null,
+              "sourceDefectiveRate": 0.0,
               "sourceColumn": 14
             },
             {
@@ -3089,7 +3074,7 @@
               "printedDateRaw": "4/1",
               "printedBatchQuantity": 3408,
               "sourceDefectiveRateRaw": "0",
-              "sourceDefectiveRate": null,
+              "sourceDefectiveRate": 0.0,
               "sourceColumn": 15
             },
             {
@@ -11606,7 +11591,7 @@
               "printedDateRaw": "4/1",
               "printedBatchQuantity": 3408,
               "sourceDefectiveRateRaw": "0",
-              "sourceDefectiveRate": null,
+              "sourceDefectiveRate": 0.0,
               "sourceColumn": 16
             }
           ],
@@ -15054,7 +15039,7 @@
           "sourceInspectedQtyRaw": "380",
           "defectiveQty": 6,
           "defectiveQtyRaw": "6",
-          "sourceDefectiveRate": null,
+          "sourceDefectiveRate": 1.58,
           "sourceDefectiveRateRaw": "1.58",
           "timeSeconds": 8,
           "timeSecondsRaw": "8",
@@ -29174,7 +29159,7 @@
           "averageTimePerUnitSeconds": 0.03,
           "averageTimePerUnitSecondsRaw": "0.03",
           "important": false,
-          "importantFillRgb": "0.000,0.000,0.000",
+          "importantFillRgb": "none",
           "remarks": null,
           "specificationModelReferences": [],
           "historicalComparisons": [],
@@ -29369,7 +29354,7 @@
           "averageTimePerUnitSeconds": 0.1,
           "averageTimePerUnitSecondsRaw": "0.1",
           "important": false,
-          "importantFillRgb": "0.000,0.000,0.000",
+          "importantFillRgb": "none",
           "remarks": null,
           "specificationModelReferences": [],
           "historicalComparisons": [],
@@ -33027,6 +33012,5 @@
         }
       ]
     }
-  ],
-  "extractedAt": "2026-09-29T19:37:00Z"
+  ]
 }

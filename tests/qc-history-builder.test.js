@@ -40,7 +40,7 @@ function makeSource(fileName, pages, date = "2026-09-15") {
       title: row.title,
       specification: row.specification,
       devices: "Visual",
-      samplingPercent: 10,
+      samplingPercent: row.samplingPercent ?? 10,
       recordingRule: "Record results.",
       timeSeconds: null,
       important: false,
@@ -121,3 +121,43 @@ test("history builder unions same-revision checks by title only and pads missing
   assert.equal(pkg.versions[0].publishedAt, null);
 });
 
+
+test("same-task anomalies keep the factory and stage as their context and are emitted once", () => {
+  const first = makeSource("S15-21.pdf", [
+    { factory: "AP", stage: "OQC", rows: [row(1, "Visual inspection", "Check visible surfaces.")] },
+  ], "2026-09-21");
+  const second = makeSource("S15-22.pdf", [
+    { factory: "AP", stage: "OQC", rows: [{ ...row(1, "Visual inspection", "Check visible surfaces."), samplingPercent: 20 }] },
+  ], "2026-09-22");
+
+  const pkg = buildHistoryPackage([first, second]).package;
+  const conflicts = pkg.anomalies.filter((anomaly) => anomaly.code === "same-task-has-standard-field-conflicts");
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].context, "AP|OQC");
+  assert.equal(pkg.anomalies.some((anomaly) => anomaly.context === "AP" || anomaly.context === "UI"), false);
+});
+
+test("the package omits absolute paths, inventory keys, and extractor identifiers", () => {
+  const extraction = makeSource("S15-23.pdf", [
+    { factory: "AP", stage: "OQC", rows: [row(1, "Visual inspection", "Check visible surfaces.")] },
+  ], "2026-09-23");
+  extraction.sources[0].path = "/Users/example/MasterQC/S15-23.pdf";
+  extraction.sources[0].inventoryKey = "S15-23";
+  extraction.sources[0].extractorSourceId = "source-s15-23";
+  extraction.inspections[0].extractorInspectionId = "inspection-from-run";
+  extraction.inspections[0].rows[0].extractorRowId = "row-from-run";
+  extraction.extractedAt = "2026-09-29T19:36:43Z";
+
+  const pkg = buildHistoryPackage([extraction]).package;
+  const serialized = JSON.stringify(pkg);
+  assert.equal(serialized.includes("/Users/"), false);
+  assert.equal(serialized.includes("inventoryKey"), false);
+  assert.equal(serialized.includes("extractorSourceId"), false);
+  assert.equal(serialized.includes("extractorInspectionId"), false);
+  assert.equal(serialized.includes("extractorRowId"), false);
+  assert.equal(serialized.includes("inspection-from-run"), false);
+  assert.equal(serialized.includes("extractedAt"), false);
+  assert.deepEqual(Object.keys(pkg.sources[0]).sort(), [
+    "assetId", "family", "fileName", "id", "inspectionPages", "nonInspectionPages", "pageCount", "sha256",
+  ]);
+});

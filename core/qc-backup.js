@@ -9,6 +9,7 @@ import {
 } from "./qc-domain.js";
 import { validateBackup, validateQCState } from "./qc-validation.js";
 import { materializeHistoricalBatches } from "./qc-historical-batches.js";
+import { combineHistoryCorrections, correctHistoricalRecords, recordHistoryCorrectionAudit } from "./qc-history-correction.js";
 import { supersedeOutdatedAPVersions } from "./qc-standards.js";
 import {
   mergeSupersededAPVersionDuplicates,
@@ -96,10 +97,14 @@ export function makeBackup(state, now) {
 export function importBackup(targetState, backup, context) {
   validateBackup(backup);
   const target = targetState === null ? createInitialQCState() : clone(targetState);
-  validateQCState(target);
+  validateQCState(target, context.validation);
+  const targetHistoryCorrection = correctHistoricalRecords(target);
   const targetCorrection = supersedeOutdatedAPVersions(target);
   const targetMerge = mergeSupersededAPVersionDuplicates(target);
   const incomingState = clone(backup.state);
+  // Backups written before the 2026-10-16 correction hold the incorrect historical values; normalize them before the additive merge.
+  const incomingHistoryCorrection = correctHistoricalRecords(incomingState);
+  const historyCorrection = combineHistoryCorrections(targetHistoryCorrection, incomingHistoryCorrection);
   supersedeOutdatedAPVersions(incomingState);
   const incomingMerge = mergeSupersededAPVersionDuplicates(incomingState);
   const restoredMerge = reconcileBackupVersionDuplicates(incomingState, target);
@@ -160,13 +165,14 @@ export function importBackup(targetState, backup, context) {
   const addedCount = Object.values(counts.added).reduce((total, count) => total + count, 0);
   const normalizedExistingState = targetCorrection.versionIds.length > 0 || targetMerge.changed ||
     preAssetCorrection.versionIds.length > 0 || preAssetMerge.changed ||
-    mergedTargetCorrection.versionIds.length > 0 || mergedTargetDuplicates.changed;
+    mergedTargetCorrection.versionIds.length > 0 || mergedTargetDuplicates.changed || targetHistoryCorrection.changed;
   if (addedCount === 0 && counts.adoptedSeedVariants === 0 && !normalizedExistingState) {
-    validateQCState(target);
+    validateQCState(target, context.validation);
     return { state: target, result: { entityId: "backup-import", changed: false, counts, revision: target.revision } };
   }
 
   target.revision += 1;
+  if (historyCorrection.changed) recordHistoryCorrectionAudit(target, historyCorrection.counts, context);
   addAudit(target, {
     idFactory: context.idFactory,
     now: context.now,
@@ -174,6 +180,6 @@ export function importBackup(targetState, backup, context) {
     entityId: "backup-import",
     summary: `Imported ${addedCount} records from a validated backup and materialized ${projections.added} historical batches; merged ${targetMerge.versionIds.length + incomingMerge.versionIds.length + restoredMerge.versionIds.length + preAssetMerge.versionIds.length + mergedTargetDuplicates.versionIds.length} duplicate AP version records and relinked ${targetMerge.assetIds.length + incomingMerge.assetIds.length + restoredMerge.assetIds.length + preAssetMerge.assetIds.length + mergedTargetDuplicates.assetIds.length} documents; adopted ${counts.adoptedSeedVariants} initial catalog preferences.`,
   });
-  validateQCState(target);
+  validateQCState(target, context.validation);
   return { state: target, result: { entityId: "backup-import", changed: true, counts, revision: target.revision } };
 }

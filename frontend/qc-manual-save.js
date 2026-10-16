@@ -2,6 +2,13 @@ function clone(value) {
   return structuredClone(value);
 }
 
+/** Shown when the page that owns a save is replaced before its outcome can be applied to it. */
+export const REPLACED_PAGE_MESSAGE = "This page was refreshed before your changes were confirmed. Reopen it to review your changes.";
+
+function replacedPageError() {
+  return new Error(REPLACED_PAGE_MESSAGE);
+}
+
 export function createManualSaveController({
   hasChanges,
   readSnapshot,
@@ -25,6 +32,8 @@ export function createManualSaveController({
 
   function publish(nextStatus) {
     status = nextStatus;
+    // A disposed controller belongs to a page that is gone, so it must not touch the display.
+    if (disposed) return;
     try {
       onStatus(status, { dirty: hasChanges(), saving: inFlight !== null });
     } catch {
@@ -43,7 +52,10 @@ export function createManualSaveController({
   }
 
   async function saveAll() {
-    if (disposed) return true;
+    if (disposed) {
+      lastError = replacedPageError();
+      return false;
+    }
     if (inFlight) return inFlight;
     if (!hasChanges()) {
       publish("Saved");
@@ -70,6 +82,8 @@ export function createManualSaveController({
       .then(() => save(clone(snapshot)))
       .then((response) => {
         if (!response?.ok) throw response?.error || new Error("The changes could not be saved.");
+        // The server accepted the change, but the page that owns these drafts was replaced meanwhile.
+        if (disposed) throw replacedPageError();
         try {
           onSaved(clone(snapshot), response);
         } catch (error) {
@@ -85,7 +99,9 @@ export function createManualSaveController({
       .catch((error) => {
         failed = true;
         lastError = error;
-        try { onError(error, { snapshot }); } catch {}
+        if (!disposed) {
+          try { onError(error, { snapshot }); } catch {}
+        }
         publish("Save failed");
         return false;
       })
@@ -100,11 +116,19 @@ export function createManualSaveController({
 
   function saveBeforeExit() {
     if (!saveOnExit) return Promise.resolve(false);
-    if (disposed) return Promise.resolve(true);
+    if (disposed) {
+      lastError = replacedPageError();
+      return Promise.resolve(false);
+    }
     if (exitFlush) return exitFlush;
 
+    // Keep saving until nothing is pending. A page may only be left once every change is acknowledged.
     const flush = async () => {
-      while (!disposed) {
+      for (;;) {
+        if (disposed) {
+          lastError = replacedPageError();
+          return false;
+        }
         if (inFlight) {
           if (!await inFlight) return false;
           continue;
@@ -115,7 +139,6 @@ export function createManualSaveController({
         }
         if (!await saveAll()) return false;
       }
-      return true;
     };
 
     exitFlush = flush().finally(() => {
@@ -143,5 +166,6 @@ export function createManualSaveController({
     getLastError: () => lastError,
     discardAll,
     dispose() { disposed = true; },
+    isDisposed: () => disposed,
   };
 }

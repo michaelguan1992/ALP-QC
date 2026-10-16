@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { normalizeBatchDisplayNumber, resolveBatchDisplayNumber, resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
+import { displayColorLabel, historicalProductLabel, normalizeBatchDisplayNumber, resolveBatchDisplayNumber, resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { getBatchWorkspace } from "../core/qc-inspections.js";
 
 function historicalBatch(id, overrides = {}) {
@@ -186,4 +186,22 @@ test("batch workspace exposes the display name outside the persisted batch", () 
   assert.equal(workspace.displayNumber, "S1-20260521-UI-OQC");
   assert.deepEqual(workspace.batch, originalBatch);
   assert.equal(Object.hasOwn(workspace.batch, "displayNumber"), false);
+});
+
+test("staff-facing color labels are capitalized while stored values stay as recorded", () => {
+  assert.equal(displayColorLabel("red"), "Red");
+  assert.equal(displayColorLabel("yellow"), "Yellow");
+  assert.equal(displayColorLabel("Red"), "Red");
+  assert.equal(displayColorLabel(null), "");
+  assert.equal(historicalProductLabel("S15", "yellow"), "S15 Yellow");
+  assert.equal(historicalProductLabel("S15", "red"), "S15");
+  assert.equal(historicalProductLabel("S15", null), "S15");
+
+  const yellow = historicalBatch("yellow", { model: "S15", color: "yellow", date: "2026-05-27" });
+  const red = historicalBatch("red-stored", { model: "S15", color: "red", date: "2026-05-28" });
+  const state = stateFor([yellow, red]);
+  const names = resolveBatchDisplayNumbers(state);
+  assert.match(names.get("yellow"), /^S15 Yellow-/u);
+  assert.match(names.get("red-stored"), /^S15-/u);
+  assert.equal(yellow.color, "yellow", "display capitalization must not rewrite the stored color");
 });

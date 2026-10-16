@@ -36,29 +36,49 @@ See [User Guide](docs/user-guide.md) for the complete workflow and [Local App Ac
 - Each inspection row can own one video, procedure file, and log file. Rows list every linked Issue; Issues preserve a source snapshot and support multiple photo and general-file attachments. Discussion stays separate from formal disposition.
 - Manual issue closure requires an owner, disposition, and three entered confirmation names. These names are not authenticated signatures.
 - Every new OQC batch counts each product's full quantity toward its PO line after explicit release; IQC and historical records do not contribute.
-- Backup exports contain records and attachments. Restore validates the entire backup and rejects conflicting records without partial import.
+- Database snapshots contain records and attachments and restore with the service stopped. Earlier JSON backups restore additively and reject conflicting records without partial import.
 - Batches includes imported historical inspections and newly entered batches. Historical inspection quantities, defect counts, and actual elapsed seconds can be corrected; rates are derived, while printed values, standard time, original PDFs, and missing-check provenance stay intact. Historical records remain excluded from release and PO fulfillment. See [Original PDF Import](docs/pdf-import.md).
 
-Use the fixed local address. All browsers on this computer connect to the same selected workspace. Export backups regularly and before moving computers or changing the service data directory. Attachments allow up to 5 MiB per photo and 10 MiB per video or general file, with 30 MiB total attachment content and 50 MiB per complete JSON backup.
+Use the fixed local address. All browsers on this computer connect to the same selected workspace. Download a database snapshot regularly and before moving computers or changing the service data directory. Attachments allow up to 20 MiB per file in every category, with 500 MiB of attachment content in total. One upload carries up to 64 MiB of files; add larger sets in several uploads. JSON backup files stay limited to 50 MiB, so larger workspaces move as database snapshots.
 
 ## Database Location
 
-The default production database is `data/workspace/masterqc-main.sqlite`. Saved records, original PDFs, row photographs, and audit history are inside this file. Attachment payloads are stored separately from business JSON and loaded on demand; full JSON backups still include every payload. Existing inline databases upgrade atomically with a recovery copy; it is explicitly eligible for Git. The separate `masterqc-demo.sqlite` and temporary SQLite journals are ignored. The server does not expose database files as static downloads.
+The default production database is `data/workspace/masterqc-main.sqlite`. Saved records, original PDFs, row photographs, and audit history are inside this file. Attachment payloads are stored separately from business JSON and loaded on demand. Existing inline databases upgrade atomically with a recovery copy; it is explicitly eligible for Git. The separate `masterqc-demo.sqlite` and temporary SQLite journals are ignored. The server does not expose database files as static downloads.
 
-`MASTERQC_DATA_DIR` can explicitly override the directory. An external override opens another database and is not included when sharing this project. For independent recovery backups, use the app's full JSON export.
+`MASTERQC_DATA_DIR` can explicitly override the directory. An external override opens another database and is not included when sharing this project.
+
+## Backup and Restore
+
+- **Download database snapshot** (Backup and restore page) saves a complete SQLite copy of the workspace: business records, attachments, and revision. The file is named `masterqc-main-<UTC time>.sqlite`. It can be downloaded while the app runs and is unaffected by later edits.
+- **Restore a snapshot** replaces a whole workspace. Stop the service first (press Ctrl+C in its terminal), then run from the project folder:
+
+  ```sh
+  node launcher/restore-snapshot.mjs /path/to/masterqc-main-20261016T120000Z.sqlite
+  ```
+
+  Add `--workspace demo` to restore the demo workspace instead. Before changing anything, the command copies the snapshot, runs SQLite's integrity check, opens it with the current code, validates every business record, and verifies the MIME type, size, and SHA-256 of every attachment and historical PDF. It then keeps the current database as `data/workspace/masterqc-main.sqlite.before-snapshot-restore-<UTC time>.sqlite` and swaps in the validated copy. The kept file is never deleted. The command refuses to run while MasterQC Web listens on 127.0.0.1:4173 or while SQLite journal files sit next to the database. On failure it leaves the live database unchanged and exits with a non-zero status. Start MasterQC Web again afterwards.
+- **Restore a JSON backup from the earlier format** imports an older full JSON backup into the running workspace. It is additive: identical records are skipped, and conflicts stop the import without changes.
+
+> **Warning:** GitHub rejects files larger than 100 MB. Attachments are stored as base64 text, so the database passes that size at roughly 70 MiB of attachments. After that, sharing `data/workspace/masterqc-main.sqlite` through Git stops working. Use **Download database snapshot** or the shared server instead.
 
 To share a saved snapshot through GitHub:
 
-1. Save app edits and download a full backup.
+1. Save app edits and download a database snapshot.
 2. Stop the local service with Ctrl+C before copying or committing its database.
-3. Include `data/workspace/masterqc-main.sqlite` with the application changes in the Git commit and upload it.
-4. A collaborator downloads/clones that project and starts the app with a supported Node.js installation. Its saved records and attachments are already present.
+3. Compact the database from the project directory. Every save rewrites the business records, so the file accumulates free pages that can still hold deleted content; compaction removes them and roughly halves the file:
+
+   ```sh
+   node -e "new (require('node:sqlite').DatabaseSync)('data/workspace/masterqc-main.sqlite').exec('VACUUM')"
+   ```
+
+4. Include `data/workspace/masterqc-main.sqlite` with the application changes in the Git commit and upload it.
+5. A collaborator downloads/clones that project and starts the app with a supported Node.js installation. Its saved records and attachments are already present.
 
 Stop the service before pulling or replacing a database as well. Back up local edits first. Git exchanges snapshots; later edits on different computers are independent, and the binary SQLite file cannot be automatically merged. Coordinate which saved database is authoritative before updating it. The configured ALP-QC repository is public, so uploading this file publishes all included business records and attachments.
 
 ## Existing Browser Data
 
-The current app uses SQLite and no longer offers direct browser migration. To import an existing full JSON backup from the older browser-only edition, open **Backup and restore**, select the file, and choose **Validate and restore backup**. The service validates the complete data graph, skips identical records, and rejects conflicts without partial changes. Preserved source IndexedDB data is not deleted.
+The current app uses SQLite and no longer offers direct browser migration. To import an existing full JSON backup from the older browser-only edition, open **Backup and restore**, select the file under **Restore a JSON backup from the earlier format**, and choose **Validate and restore backup**. The service validates the complete data graph, skips identical records, and rejects conflicts without partial changes. Preserved source IndexedDB data is not deleted.
 
 Saved changes go to SQLite. The retired initialization draft and AP table prototype pages and their dedicated files have been removed; existing browser data is not cleared.
 
@@ -80,7 +100,7 @@ When primarily changing the page, edit the HTML, CSS, and interface JavaScript u
 
 Put business rules in `core/` and database implementation in `storage/`. See [Architecture and Change Boundaries](docs/architecture.md) for detailed boundaries and [Requirements and Decisions](docs/requirements.md) for confirmed product rules.
 
-Browsers on one computer share the local service database. Copying the project with its production database includes the saved records and attachments. Two computers then make independent local changes; Git does not provide live synchronization. Full backup restore remains available for validated additive data transfer.
+Browsers on one computer share the local service database. Copying the project with its production database includes the saved records and attachments. Two computers then make independent local changes; Git does not provide live synchronization. Snapshot restore (service stopped) and additive JSON restore remain available for data transfer.
 
 Concrete implementation uses Luna Max subagents; the primary agent coordinates requirements, integration, review, and acceptance. The Lark edition and its live data remain outside this project's mutation scope.
 

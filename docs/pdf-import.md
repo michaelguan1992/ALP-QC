@@ -35,3 +35,56 @@ The import package includes the original PDF bytes, their SHA-256 identities, so
 Identical repeat imports are skipped. Conflicting identities fail without partially changing the browser database. Existing local records are preserved. Full backup and restore must include the historical records and their source attachments.
 
 The extraction scripts and JSON under `scripts/` and `data/pdf-import/` are reproducible import materials. They are not the live browser database. Actual delivery requires importing through the application's core interface, then reloading the browser and checking the persisted result.
+
+## Extraction pipeline and corrections (2026-10-16)
+
+### Source files
+
+`scripts/pdf-import/source-manifest.json` lists the 30 authorized PDFs by stable key (`S1-01` to `S1-15`, `S15-01` to `S15-15`), family folder, and file name. The extractors read them from the read-only reference folder given by `--source-root` (default `../MasterQC/Master QC 品管主控文档`). Each file must sit directly inside its family folder and begin with `%PDF-`; a missing or unreadable file stops the run with a non-zero status. Keys are identifiers only. Absolute paths and inventory-derived identifiers are not written to any output.
+
+### Regeneration
+
+Run from the project root. The extractors need `pdfplumber` in the Python runtime used for the import. The parser self-check needs only the standard library:
+
+```sh
+python3 -I -B scripts/pdf-import/test_pdf_parsers.py
+python3 scripts/pdf-import/extract_s1_history.py
+python3 scripts/pdf-import-s15/extract_s15.py
+node scripts/pdf-import/build_history_package.mjs
+```
+
+The extractors write `data/pdf-import/s1-history.json` and `data/pdf-import/s15-extraction.json`; the builder writes `masterqc-history.json`, `summary.json`, and `summary.md`. Outputs contain no timestamps or machine paths, so reruns over the same PDFs are byte-identical. Compare the regenerated package with the previous one before committing it.
+
+### Parsing rules
+
+- A printed bare number in a rate column is a percentage (`1.58` means 1.58%). A printed `0` stays `0`; a blank or dash stays null.
+- A result cell that is not one clean number is reported: `result-cell-unparsed` when no value could be read, and `result-cell-parse-mismatch` when only part of the cell was read. S1 and S15 apply the same check.
+- A row highlight is a filled rectangle at least 2 pt wide and high. Stroke-only cell borders and hairlines are not highlights.
+- S15 Special Notes assign a color only when the single color stated equals the page batch quantity. A color stated for part of the batch leaves color null with basis `special-notes-partial-color-quantity` and a `partial-color-allocation` anomaly. A color named without a quantity uses `special-notes-color-quantity-not-stated` and `color-quantity-not-stated`. Core applies the same rule; `tests/fixtures/s15-color-cases.json` is the shared parity check.
+- The builder keeps the factory and stage together as an anomaly context (for example `AP|OQC`). Each same-task anomaly is emitted once.
+
+### Corrections to stored records
+
+`core/qc-history-correction.js` (`correctHistoricalPdfRecords`) corrects records imported before these rules. It runs in `initialize`, and it normalizes incoming JSON backups and history packages before comparison. Each rule applies only while the stored value equals the known incorrect value:
+
+- printed bare-number defective rates and printed zeros in historical comparisons (`sourceDefectiveRate` restored from its raw text);
+- S15 batch color unassigned where the notes state a partial color quantity, with the matching anomaly added to the inspection and the package-level list;
+- the two self-made S1 row highlights (page 1 of `8.27.26AP自制`, table rows 5 and 8) set from `0.000,0.000,0.000` to `none`, as the rendered page shows no highlight;
+- mislabelled AP and UI duplicate anomalies removed where one correctly labelled entry has identical content;
+- `path`, `inventoryKey`, `extractorSourceId`, `extractorInspectionId`, and `extractorRowId` removed from sources, inspections, rows, and historical batch rows;
+- derived historical batch projections (color, rates, comparisons, highlights, and row fields) rebuilt from the corrected inspection.
+
+Staff-editable batch values (inspected quantity, defective quantity, actual seconds, and row and batch attachments) and all Issues, assets, orders, and versions are preserved. When a batch differs from its source evidence in an unexplained way, that batch and its inspection are left unchanged and the skip is counted. The correction writes one audit entry, `correctHistoricalPdfRecords`, only when something changed; a later start changes nothing.
+
+### Restore and import compatibility
+
+- A JSON backup that holds the earlier values restores into a corrected workspace as an identical skip, and into an empty workspace as the corrected history with the correction audit.
+- A history package with the earlier values imports the same way.
+- A database snapshot is validated by `launcher/restore-snapshot.mjs` on a copy that is initialized before the swap. That initialization applies the correction once, so the restored workspace holds the corrected records and its audit entry; the snapshot file itself is not changed.
+
+### Verification status (2026-10-16)
+
+- `data/pdf-import/*` was regenerated from the 30 PDFs with `pdfplumber` 0.11.10 in an isolated virtual environment. Two runs were byte-identical.
+- Compared with the previous package, the only changes were the expected ones: 1 printed rate (`1.58`) and 3 printed zeros, the partial S15 color and its anomaly, the 2 row highlights, 20 mislabelled duplicate anomalies removed (76 to 57), and the machine-specific fields removed. No absolute path remains in `data/`.
+- Imported into a corrected copy of the production database, the regenerated package was an identical skip: the revision, history, and batches were unchanged.
+- The correction was verified on a copy of the production database: the correction changed only the fields listed above, a second start changed nothing, current results and attachments were unchanged, and the earlier JSON backup and both packages imported as identical skips.
