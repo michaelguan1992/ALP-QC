@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, existsSync, linkSync, mkdirSync, unlinkSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, rmSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -285,7 +285,8 @@ export function createSQLiteQCAdapter({ databasePath } = {}) {
     FROM qc_asset_payloads WHERE asset_id = ?
   `);
   const readPayloadIdsStatement = database.prepare("SELECT asset_id FROM qc_asset_payloads");
-  const readAllPayloadsStatement = database.prepare(`
+  // Verification iterates this statement so only one attachment body is held in memory at a time.
+  const payloadContentStatement = database.prepare(`
     SELECT asset_id, content_ref, data_url, mime_type, decoded_bytes, content_sha256, content_revision
     FROM qc_asset_payloads ORDER BY asset_id
   `);
@@ -407,9 +408,8 @@ export function createSQLiteQCAdapter({ databasePath } = {}) {
       if (generation === verifiedPayloadGeneration) return generation;
       const state = getStoredState();
       const stateAssets = new Map((state?.assets ?? []).map((asset) => [asset.id, asset]));
-      const rows = readAllPayloadsStatement.all();
       const rowIds = new Set();
-      for (const row of rows) {
+      for (const row of payloadContentStatement.iterate()) {
         rowIds.add(row.asset_id);
         if (!stateAssets.has(row.asset_id)) throw new Error(`Stored attachment payload has no asset record for ${row.asset_id}.`);
         if (row.content_ref !== contentRefFor(row.asset_id)) throw new Error(`Stored attachment reference is invalid for asset ${row.asset_id}.`);
@@ -748,6 +748,24 @@ export function createSQLiteQCAdapter({ databasePath } = {}) {
       });
       verifiedPayloadGeneration = committed.generation;
       return committed.result;
+    },
+
+    // Writes one consistent copy of the whole database (business records, payloads, revision) to a new file.
+    // VACUUM INTO runs outside transactions and never overwrites; a failed copy is removed.
+    async createSnapshot(targetPath) {
+      ensureOpen();
+      if (typeof targetPath !== "string" || !targetPath.trim()) throw new TypeError("Snapshot path is required.");
+      const resolvedTarget = path.resolve(targetPath);
+      if (resolvedTarget === resolvedPath) throw new Error("A snapshot cannot replace the live database.");
+      if (existsSync(resolvedTarget)) throw new Error("The snapshot file already exists.");
+      try {
+        database.exec(`VACUUM INTO '${resolvedTarget.replaceAll("'", "''")}'`);
+        chmodSync(resolvedTarget, 0o600);
+      } catch (error) {
+        rmSync(resolvedTarget, { force: true });
+        throw error;
+      }
+      return resolvedTarget;
     },
 
     close() {

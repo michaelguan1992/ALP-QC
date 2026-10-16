@@ -401,6 +401,13 @@ export function createQCService(adapter, options = {}) {
     return makeBackup(state, now);
   }
 
+  // Writes a consistent SQLite copy of the whole workspace to a new file. Only durable adapters support it.
+  async function createSnapshot(targetPath) {
+    if (typeof adapter.createSnapshot !== "function") fail("Database snapshots are not supported by this storage adapter.");
+    await ensureOpen();
+    return adapter.createSnapshot(targetPath);
+  }
+
   async function importBackup(backup, expectedRevision) {
     const savedBackup = clone(backup);
     if (savedBackup?.state?.history?.sources?.length) await verifyHistoryStateAssets(savedBackup.state);
@@ -482,6 +489,7 @@ export function createQCService(adapter, options = {}) {
     getBatchWorkspace,
     getPurchaseOrderProgress: getOrderProgress,
     exportBackup,
+    createSnapshot,
     importBackup,
     importHistory,
     close: typeof adapter.close === "function" ? () => adapter.close() : async () => undefined,
