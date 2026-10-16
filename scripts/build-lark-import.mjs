@@ -1,14 +1,9 @@
 #!/usr/bin/env node
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const DEFAULT_INPUTS = {
-  revisions: "/tmp/masterqc-web-version-review.ndjson",
-  products: "/tmp/masterqc-lark-products.ndjson",
-  specs: "/tmp/masterqc-lark-specs.ndjson",
-};
 const DEFAULT_OUTPUT = path.join(ROOT, "data/lark-import/version-history.v1.json");
 const CAPTURE = {
   localDate: "2026-09-29",
@@ -47,7 +42,7 @@ function fail(message) {
 }
 
 function parseArguments(argv) {
-  const values = { ...DEFAULT_INPUTS, out: DEFAULT_OUTPUT };
+  const values = { out: DEFAULT_OUTPUT };
   const options = {
     "--revisions": "revisions",
     "--products": "products",
@@ -61,6 +56,10 @@ function parseArguments(argv) {
     if (!value || value.startsWith("--")) fail(`Missing value for ${argv[index]}`);
     values[key] = path.resolve(value);
     index += 1;
+  }
+  // The exports are never read from a default location, so every run names its inputs.
+  for (const key of ["revisions", "products", "specs"]) {
+    if (!values[key]) fail(`Missing required input --${key}. Pass the NDJSON export explicitly; no default input path is used.`);
   }
   return values;
 }
@@ -156,7 +155,7 @@ function sourceTable(manifest, tableUrl) {
   };
 }
 
-function buildPackage({ manifests, rows }) {
+export function buildPackage({ manifests, rows }) {
   const revisionMap = recordMap(rows.revisions, "Revision export");
   const productMap = recordMap(rows.products, "Product export");
   const specMap = recordMap(rows.specs, "Spec export");
@@ -179,6 +178,7 @@ function buildPackage({ manifests, rows }) {
   const sourceIdsWithBroadLinks = new Set();
   let includedSpecRows = 0;
   let otherFamilySpecRowsSkipped = 0;
+  let specRowsWithoutApplicableProducts = 0;
   let specProductLinksOutsideRevision = 0;
   let orphanSpecLinks = 0;
   let unknownProductLinks = 0;
@@ -214,6 +214,10 @@ function buildPackage({ manifests, rows }) {
       continue;
     }
 
+    // Link counts describe each included source revision once; family projections below reuse them.
+    unknownProductLinks += missingProductIds.length;
+    orphanSpecLinks += linkedSpecIds.filter((specId) => !specMap.has(specId)).length;
+
     const unmatchedSet = [...new Set(unmatchedProductIds)];
     if (unmatchedSet.length > 0) sourceIdsWithBroadLinks.add(revision.record_id);
     const attachments = revision[LABELS.revision.attachments];
@@ -233,6 +237,14 @@ function buildPackage({ manifests, rows }) {
       }
     }
 
+    const applicableProductIdSet = new Set(applicableFamilies.flatMap((family) => familyProductIds.get(family.id)));
+    for (const specId of linkedSpecIds) {
+      const specProductIds = specProductsById.get(specId);
+      if (specProductIds && !specProductIds.some((productId) => applicableProductIdSet.has(productId))) {
+        specRowsWithoutApplicableProducts += 1;
+      }
+    }
+
     for (const family of applicableFamilies) {
       const applicableProductIds = familyProductIds.get(family.id);
       const specs = [];
@@ -242,7 +254,6 @@ function buildPackage({ manifests, rows }) {
         const spec = specMap.get(specId);
         if (!spec) {
           orphanedSpecIds.push(specId);
-          orphanSpecLinks += 1;
           continue;
         }
         const specProductIds = specProductsById.get(specId) ?? [];
@@ -278,7 +289,6 @@ function buildPackage({ manifests, rows }) {
         });
       }
       if (missingProductIds.length > 0) {
-        unknownProductLinks += missingProductIds.length;
         anomalies.push({
           code: "UNKNOWN_PRODUCT_LINK",
           sourceRecordId: revision.record_id,
@@ -375,6 +385,7 @@ function buildPackage({ manifests, rows }) {
         includedSpecRows,
         distinctIncludedSpecSourceIds: distinctIncludedSpecSourceIds.size,
         otherFamilySpecRowsSkipped,
+        specRowsWithoutApplicableProducts,
         specProductLinksOutsideRevision,
         orphanSpecLinks,
         unknownProductLinks,
@@ -412,7 +423,9 @@ async function main() {
   process.stdout.write(`${JSON.stringify({ output: args.out, ...output.report.counts }, null, 2)}\n`);
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error.message}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  });
+}

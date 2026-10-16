@@ -127,6 +127,15 @@ See [Local App Contract](app-contract.md) for command interfaces, data shapes, m
 - Historical source sheets may combine multiple models, cover different quantities at different stages, or omit purchase-order information. Preserve those unknowns instead of inventing order quantities, model allocations, or release events. Historical import does not contribute to PO fulfillment.
 - Original PDFs and the live Lark system remain unchanged. Import is explicit, additive, and repeatable without duplicating identical records.
 
+## Historical PDF Record Correction (2026-10-16)
+
+- Printed bare-number defective rates (for example `1.58` in a rate column) are percentages, and a printed zero remains zero. Blank cells and dashes remain null. These source values are restored in imported historical records; printed values stay evidence.
+- A historical batch takes a color only when the Special Notes state a quantity for that color equal to the whole batch. A color stated for part of the batch, or named without a quantity, remains unassigned, and the source notes and anomaly stay visible. Batch names and labels show the color with a capital first letter (`Red`, `Yellow`); stored values are not rewritten.
+- Stroke-only cell borders are not row highlights. The two self-made S1 rows that carried black borders are not important.
+- Machine-specific values (absolute source paths, inventory keys, extractor identifiers) are not business records and are removed from stored history. Batch names, source facts, and source references are unchanged.
+- The correction runs at startup, changes only the exact known incorrect values, writes one audit entry, and never changes staff-entered current results, attachments, or Issues. Older JSON backups and history packages with the earlier values restore and import as the corrected records.
+- The correction does not create or alter operational batches, PO progress, or released records.
+
 ## Unified Batch History (2026-09-29)
 
 - The user clarified that imported inspection content is the system's batch history. Historical and newly entered batches belong in the same Batches list and batch workspace; there is no separate PDF history product area.

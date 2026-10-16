@@ -17,7 +17,7 @@ import { closeDialog, showDialog } from "./qc-ui.js";
 import { attachmentCanPreview, downloadAttachment, formatMebibytes, previewAttachment, readAttachmentFile } from "./qc-attachments.js";
 import { DOCUMENT_MAX_BYTES } from "../core/qc-domain.js";
 import { openNewIssueDialog } from "./qc-ops-issues.js";
-import { resolveBatchDisplayNumber, resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
+import { displayColorLabel, historicalProductLabel, resolveBatchDisplayNumber, resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { getBatchVersionItems, getBatchVersions, getBatchVersionReadiness, getSharedBatchVersionChoices } from "../core/qc-batch-versions.js";
 import { getBatchProducts, getBatchRowProduct } from "../core/qc-batch-products.js";
 import { createManualSaveController } from "./qc-manual-save.js";
@@ -145,12 +145,7 @@ function isHistoricalBatch(batch) {
 function batchProductLabel(batch, state) {
   const variant = variantsById(state).get(batch.variantId);
   if (!isHistoricalBatch(batch)) return text(variant?.label, batch.variantId);
-  const productLabel = String(batch.productLabel || batch.model || "");
-  const color = String(batch.color || "");
-  const isNormalColor = ["red", "normalred"].includes(color.toLocaleLowerCase().replace(/[\s_-]/g, ""));
-  return color && !isNormalColor && !productLabel.toLocaleLowerCase().includes(color.toLocaleLowerCase())
-    ? `${productLabel} ${color}`.trim()
-    : text(productLabel);
+  return historicalProductLabel(String(batch.productLabel || batch.model || ""), batch.color);
 }
 
 function historicalBatchLabel(displayNumber) {
@@ -793,7 +788,7 @@ function renderHistoricalBatchDetail(root, ctx, workspace) {
   const sourceFacts = [
     ["Family", family?.name || batch.familyId],
     ...(modelAddsInformation ? [["Model", batch.model]] : []),
-    ["Color", batch.color],
+    ["Color", displayColorLabel(batch.color)],
     ...(!attachmentNames.has(source?.fileName) ? [["Source PDF", source?.fileName]] : []),
     ...(!printedDateMatchesBatch && hasHistoricalValue(inspection?.printedDate) ? [["Printed date", dateLabel(inspection.printedDate)]] : []),
   ].filter(([, value]) => hasHistoricalValue(value));

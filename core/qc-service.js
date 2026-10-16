@@ -33,6 +33,7 @@ import { createVersion, cloneVersion, installAPReferences, publishVersion, saveV
 import { clone, requireString } from "./qc-domain.js";
 import { createAssetValidationCache, validateBackup, validateQCState } from "./qc-validation.js";
 import { materializeHistoricalBatches } from "./qc-historical-batches.js";
+import { correctHistoricalRecords, recordHistoryCorrectionAudit } from "./qc-history-correction.js";
 import { importLarkVersionHistory } from "./qc-lark-versions.js";
 import { mergeSupersededAPVersionDuplicates } from "./qc-version-merge.js";
 import { removeAuthorizedS15TrialVersion, S15_TRIAL_VERSION_ID } from "./qc-version-cleanup.js";
@@ -272,22 +273,26 @@ export function createQCService(adapter, options = {}) {
     if (existing !== null) {
       validateState(existing);
       const correctionPreview = clone(existing);
+      const pendingHistoryCorrection = correctHistoricalRecords(correctionPreview);
       const pendingVersionCorrection = supersedeOutdatedAPVersions(correctionPreview);
       const pendingVersionMerge = mergeSupersededAPVersionDuplicates(correctionPreview);
       const pendingTrialCleanup = removeAuthorizedS15TrialVersion(correctionPreview);
-      if (existing.history?.inspections?.length || pendingVersionCorrection.versionIds.length || pendingVersionMerge.changed || pendingTrialCleanup.versionIds.length) {
+      if (existing.history?.inspections?.length || pendingHistoryCorrection.changed || pendingVersionCorrection.versionIds.length || pendingVersionMerge.changed || pendingTrialCleanup.versionIds.length) {
         await adapter.transact((current) => {
           if (current === null) return { state: createInitialQCState(), result: null };
           validateState(current);
           const state = clone(current);
+          // Corrections run before batch materialization, so historical batch projections match the corrected evidence.
+          const historyCorrection = correctHistoricalRecords(state);
           const migration = state.history?.inspections?.length
             ? materializeHistoricalBatches(state)
             : { added: 0 };
           const versionCorrection = supersedeOutdatedAPVersions(state);
           const versionMerge = mergeSupersededAPVersionDuplicates(state);
           const trialCleanup = removeAuthorizedS15TrialVersion(state);
-          if (migration.added === 0 && versionCorrection.versionIds.length === 0 && !versionMerge.changed && trialCleanup.versionIds.length === 0) return { state: current, result: null };
+          if (migration.added === 0 && !historyCorrection.changed && versionCorrection.versionIds.length === 0 && !versionMerge.changed && trialCleanup.versionIds.length === 0) return { state: current, result: null };
           state.revision += 1;
+          if (historyCorrection.changed) recordHistoryCorrectionAudit(state, historyCorrection.counts, { idFactory, now });
           if (migration.added > 0) {
             addAudit(state, {
               idFactory,

@@ -14,3 +14,4 @@ npm-debug.log*
 
 # Scratch review output; files already tracked under tmp/ stay tracked.
 /tmp/
+__pycache__/

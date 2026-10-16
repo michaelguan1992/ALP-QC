@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Extract printed S1 inspection pages into an auditable history package.
 
-Requires pdfplumber from the Codex bundled Python runtime and Poppler-generated
-layout text in tmp/pdf-import for the companion review artifacts. The source
-PDFs are read only; this script writes only the S1 output JSON.
+Requires pdfplumber in the Python runtime used for this import. pdfplumber is
+imported lazily, so the parser self-check (test_pdf_parsers.py) runs without it.
+Source PDFs are read only from the reference folder, resolved through the
+committed source manifest; they must lie inside that folder and start with the
+%PDF header. The output JSON holds no machine-specific paths and no timestamps,
+so reruns over the same PDFs produce identical bytes.
+
+Usage: python3 scripts/pdf-import/extract_s1_history.py [--source-root DIR] [--source KEY] [--output FILE]
 """
 
 from __future__ import annotations
@@ -11,22 +16,25 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import io
 import json
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import pdfplumber
-
 
 ROOT = Path(__file__).resolve().parents[2]
-INVENTORY = ROOT / "tmp/pdf-import/inventory.json"
-SOURCE_PREFIX = Path("/Users/michael/Documents/Projects/MasterQC/Master QC 品管主控文档/S1")
+SOURCE_MANIFEST = Path(__file__).resolve().with_name("source-manifest.json")
+MANIFEST_FORMAT = "masterqc-pdf-source-manifest"
+DEFAULT_SOURCE_ROOT = ROOT.parent / "MasterQC" / "Master QC 品管主控文档"
 FAMILY = "s11-s14"
 NAMESPACE = uuid.UUID("52ebfb87-5177-43bc-a98e-9419a66595b4")
 BLANK_MARKERS = {"", "—", "–", "-", "_", "N/A", "NA"}
+DASH_CHARACTERS = set("—–-―－−_")
+# Rectangles thinner than this (in PDF points) are cell borders, never highlights.
+MIN_FILL_RECTANGLE_SIDE = 2.0
 
 
 def stable_id(kind: str, key: str) -> str:
@@ -64,6 +72,84 @@ def percentage_value(value: Any) -> float | None:
         return None
     match = re.search(r"([-+]?\d+(?:\.\d+)?)\s*%", raw)
     return float(match.group(1)) if match else None
+
+
+BARE_RATE_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
+CLEAN_NUMBER_RE = re.compile(r"[-+]?\d[\d,]*(?:\.\d+)?")
+
+
+def rate_percent_value(value: Any) -> float | None:
+    """Read a defective-rate cell as a percentage.
+
+    Some forms print the rate as a bare number (for example "1.58") in a column
+    whose header is a percentage, so a bare number is a percent. A printed zero
+    stays zero; a blank or dash stays None.
+    """
+    parsed = percentage_value(value)
+    if parsed is not None:
+        return parsed
+    raw = flattened(value)
+    return float(raw) if BARE_RATE_RE.fullmatch(raw) else None
+
+
+def clean_number_value(value: Any, allow_percent: bool = False) -> int | float | None:
+    """Return a number only when the whole cell is one clean numeric token.
+
+    With allow_percent, one trailing percent sign is accepted. Any other text,
+    such as "6 defective" or "1.58 (approx.)", returns None so the mismatch
+    check can flag the cell instead of silently keeping part of it.
+    """
+    raw = flattened(value)
+    if is_blank(raw):
+        return None
+    body = raw[:-1].strip() if allow_percent and raw.endswith("%") else raw
+    if not CLEAN_NUMBER_RE.fullmatch(body):
+        return None
+    parsed = float(body.replace(",", ""))
+    return int(parsed) if parsed.is_integer() else parsed
+
+
+def is_blank_or_dash(value: Any) -> bool:
+    normalized = flattened(value).replace(" ", "")
+    return not normalized or normalized.upper() in BLANK_MARKERS or all(char in DASH_CHARACTERS for char in normalized)
+
+
+def numeric_cell_anomalies(
+    printed_no: int,
+    field_name: str,
+    raw: str,
+    parsed: int | float | None,
+    allow_percent: bool = False,
+) -> list[dict[str, Any]]:
+    """Flag result cells that hold text the parser could not read as one clean number.
+
+    Inspection and page identifiers are added by the caller at package level, so
+    the anomaly carries no extractor-run identifiers of its own.
+    """
+    if is_blank_or_dash(raw):
+        return []
+    if parsed is None:
+        return [
+            {
+                "code": "result-cell-unparsed",
+                "rowNo": printed_no,
+                "field": field_name,
+                "message": "A printed result cell could not be parsed as a number; the raw cell is preserved and the parsed value remains null.",
+                "evidence": raw,
+            }
+        ]
+    expected = clean_number_value(raw, allow_percent=allow_percent)
+    if expected is None or expected != parsed:
+        return [
+            {
+                "code": "result-cell-parse-mismatch",
+                "rowNo": printed_no,
+                "field": field_name,
+                "message": "Parsed result does not match a clean reading of the raw source cell.",
+                "evidence": {"raw": raw, "parsed": parsed, "expected": expected},
+            }
+        ]
+    return []
 
 
 def nonempty(value: Any) -> str | None:
@@ -195,6 +281,19 @@ def header_history(rows: list[list[Any]], columns: dict[str, int | None]) -> lis
     return history
 
 
+def is_fill_rectangle(rect: dict[str, Any]) -> bool:
+    """A cell highlight is a filled rectangle with a readable width and height.
+
+    Stroke-only borders report a default black non-stroking colour, and vertical
+    or horizontal cell rules are hairlines. Neither is a fill.
+    """
+    if rect.get("fill") is False:
+        return False
+    width = float(rect.get("x1", rect.get("x0", 0))) - float(rect.get("x0", 0))
+    height = float(rect.get("bottom", 0)) - float(rect.get("top", 0))
+    return min(width, height) >= MIN_FILL_RECTANGLE_SIDE
+
+
 def table_fill(page: Any, row_cells: list[Any]) -> tuple[bool | None, str | None]:
     if not row_cells or not row_cells[0]:
         return None, None
@@ -204,12 +303,15 @@ def table_fill(page: Any, row_cells: list[Any]) -> tuple[bool | None, str | None
         if abs(rect.get("x0", -999) - left) < 0.7
         and abs(rect.get("top", -999) - top) < 0.7
         and abs(rect.get("bottom", -999) - bottom) < 0.7
+        and is_fill_rectangle(rect)
     ]
     if not matches:
-        # White, unfilled source rows have no background rectangle. The rendered
-        # page review confirmed these rows are not green-highlighted.
+        # White, unfilled source rows have no background rectangle, and cell
+        # borders are not fills. The rendered page review confirmed these rows
+        # are not green-highlighted.
         return False, "none"
-    color = matches[0].get("non_stroking_color")
+    widest = max(matches, key=lambda item: (item.get("x1", 0) - item.get("x0", 0)) * (item.get("bottom", 0) - item.get("top", 0)))
+    color = widest.get("non_stroking_color")
     if isinstance(color, tuple) and len(color) >= 3:
         red, green, blue = color[:3]
         important = red < 0.95 and green > 0.88 and blue > red and green > blue
@@ -413,6 +515,8 @@ def extract_page(page: Any, table: Any, source_id: str, source_key: str, page_nu
         inspected_raw = pick_cell(source_row, columns["inspected"])
         defective_raw = pick_cell(source_row, columns["defective"])
         rate_raw = pick_cell(source_row, columns["rate"])
+        time_raw = pick_cell(source_row, columns["time"])
+        average_raw = pick_cell(source_row, columns["averageTime"])
         important, fill_color = table_fill(page, table.rows[table_row_index].cells)
         evidence_photos, ambiguous_images = row_images(page, table, table_row_index, row_id, columns["remarks"], source_id)
         comparisons = []
@@ -424,7 +528,7 @@ def extract_page(page: Any, table: Any, source_id: str, source_key: str, page_nu
                 "printedDateRaw": header["printedDateRaw"],
                 "printedBatchQuantity": header["printedBatchQuantity"],
                 "sourceDefectiveRateRaw": raw_rate or None,
-                "sourceDefectiveRate": percentage_value(raw_rate),
+                "sourceDefectiveRate": rate_percent_value(raw_rate),
                 "sourceColumn": header["sourceColumn"],
             })
         raw_cells = [nonempty(value) for value in source_row]
@@ -442,12 +546,12 @@ def extract_page(page: Any, table: Any, source_id: str, source_key: str, page_nu
             "sourceInspectedQtyRaw": inspected_raw or None,
             "defectiveQty": number_value(defective_raw),
             "defectiveQtyRaw": defective_raw or None,
-            "sourceDefectiveRate": percentage_value(rate_raw),
+            "sourceDefectiveRate": rate_percent_value(rate_raw),
             "sourceDefectiveRateRaw": rate_raw or None,
-            "timeSeconds": number_value(pick_cell(source_row, columns["time"])),
-            "timeSecondsRaw": pick_cell(source_row, columns["time"]) or None,
-            "averageTimePerUnitSeconds": number_value(pick_cell(source_row, columns["averageTime"])),
-            "averageTimePerUnitSecondsRaw": pick_cell(source_row, columns["averageTime"]) or None,
+            "timeSeconds": number_value(time_raw),
+            "timeSecondsRaw": time_raw or None,
+            "averageTimePerUnitSeconds": number_value(average_raw),
+            "averageTimePerUnitSecondsRaw": average_raw or None,
             "important": important,
             "importantFillRgb": fill_color,
             "remarks": nonempty(pick_cell(source_row, columns["remarks"])),
@@ -459,6 +563,14 @@ def extract_page(page: Any, table: Any, source_id: str, source_key: str, page_nu
         printed_rows.append(row_record)
         if important is None:
             local_anomalies.append({"code": "important-fill-unreadable", "rowNo": printed_no, "message": "The table row fill color could not be read from the source PDF."})
+        for field_name, raw, parsed, allow_percent in (
+            ("sourceInspectedQty", inspected_raw, number_value(inspected_raw), False),
+            ("defectiveQty", defective_raw, number_value(defective_raw), False),
+            ("sourceDefectiveRate", rate_raw, rate_percent_value(rate_raw), True),
+            ("timeSeconds", time_raw, number_value(time_raw), False),
+            ("averageTimePerUnitSeconds", average_raw, number_value(average_raw), False),
+        ):
+            local_anomalies.extend(numeric_cell_anomalies(printed_no, field_name, raw, parsed, allow_percent))
         if number_value(inspected_raw) is not None and batch_quantity is not None and number_value(inspected_raw) > batch_quantity:
             local_anomalies.append({
                 "code": "source-inspected-quantity-exceeds-batch-quantity",
@@ -546,38 +658,58 @@ def extract_page(page: Any, table: Any, source_id: str, source_key: str, page_nu
     return inspection, local_anomalies
 
 
-def load_inventory() -> list[dict[str, Any]]:
-    entries = json.loads(INVENTORY.read_text(encoding="utf-8"))
-    return [entry for entry in entries if entry["key"].startswith("S1-")]
+def load_source_manifest(prefix: str) -> list[dict[str, Any]]:
+    """List the committed source files whose keys start with prefix (for example "S1-")."""
+    manifest = json.loads(SOURCE_MANIFEST.read_text(encoding="utf-8"))
+    if manifest.get("format") != MANIFEST_FORMAT or manifest.get("formatVersion") != 1:
+        raise SystemExit(f"{SOURCE_MANIFEST.name} has an unsupported format.")
+    entries = [entry for entry in manifest["files"] if entry["key"].startswith(prefix)]
+    return sorted(entries, key=lambda entry: int(entry["key"].split("-")[1]))
 
 
-def extract_package(source_filter: str | None = None) -> dict[str, Any]:
-    inventory = load_inventory()
+def resolve_source_pdf(source_root: Path, entry: dict[str, Any]) -> Path:
+    """Resolve a manifest entry to a file that lies inside its family folder under source_root."""
+    root = source_root.resolve()
+    folder = (root / entry["folder"]).resolve()
+    path = (folder / entry["fileName"]).resolve()
+    if not folder.is_relative_to(root) or path.parent != folder:
+        raise SystemExit(f"Source PDF for {entry['key']} must be a file directly inside {folder}; refusing {entry['fileName']!r}.")
+    if not path.is_file():
+        raise SystemExit(f"Source PDF for {entry['key']} is missing: {path}")
+    return path
+
+
+def read_source_pdf(path: Path) -> bytes:
+    pdf_bytes = path.read_bytes()
+    if not pdf_bytes.startswith(b"%PDF-"):
+        raise SystemExit(f"Source file is not a PDF (missing %PDF header): {path.name}")
+    return pdf_bytes
+
+
+def extract_package(source_filter: str | None = None, source_root: Path = DEFAULT_SOURCE_ROOT) -> dict[str, Any]:
+    import pdfplumber
+
+    entries = load_source_manifest("S1-")
     if source_filter:
-        inventory = [entry for entry in inventory if entry["key"] == source_filter]
-        if not inventory:
+        entries = [entry for entry in entries if entry["key"] == source_filter]
+        if not entries:
             raise SystemExit(f"Unknown S1 source key: {source_filter}")
 
     sources: list[dict[str, Any]] = []
     inspections: list[dict[str, Any]] = []
     assets: list[dict[str, Any]] = []
     package_anomalies: list[dict[str, Any]] = []
-    extracted_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     # This is package metadata, not a source-business timestamp. Keeping it fixed
     # makes asset records byte-for-byte stable when the extractor is rerun.
     asset_created_at = "2026-09-29T00:00:00.000Z"
-    for entry in inventory:
-        path = Path(entry["path"])
-        if not path.is_file():
-            package_anomalies.append({"sourceKey": entry["key"], "code": "source-pdf-not-found", "message": f"Source PDF is missing: {path}"})
-            continue
-        pdf_bytes = path.read_bytes()
+    for entry in entries:
+        path = resolve_source_pdf(source_root, entry)
+        pdf_bytes = read_source_pdf(path)
         source_id = f"source-{entry['key'].lower()}"
         asset_id = stable_id("asset", entry["key"])
         source = {
             "id": source_id,
             "fileName": path.name,
-            "path": str(path),
             "sha256": hashlib.sha256(pdf_bytes).hexdigest(),
             "pageCount": None,
             "family": FAMILY,
@@ -585,7 +717,7 @@ def extract_package(source_filter: str | None = None) -> dict[str, Any]:
             "inspectionPages": [],
             "nonInspectionPages": [],
         }
-        with pdfplumber.open(path) as pdf:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             source["pageCount"] = len(pdf.pages)
             for page_index, page in enumerate(pdf.pages, start=1):
                 tables = page.find_tables()
@@ -642,7 +774,6 @@ def extract_package(source_filter: str | None = None) -> dict[str, Any]:
         "inspections": inspections,
         "assets": assets,
         "anomalies": package_anomalies,
-        "extractedAt": extracted_at,
     }
 
 
@@ -656,10 +787,11 @@ def count_by(records: list[dict[str, Any]], key: str) -> dict[str, int]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", help="Extract only a single inventory key, such as S1-01")
+    parser.add_argument("--source", help="Extract only a single manifest key, such as S1-01")
+    parser.add_argument("--source-root", default=str(DEFAULT_SOURCE_ROOT), help="Read-only folder containing the S1 and S15 PDF folders")
     parser.add_argument("--output", default=str(ROOT / "data/pdf-import/s1-history.json"), help="Output JSON path")
     args = parser.parse_args()
-    package = extract_package(args.source)
+    package = extract_package(args.source, Path(args.source_root))
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

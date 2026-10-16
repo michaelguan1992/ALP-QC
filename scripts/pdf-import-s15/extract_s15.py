@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Extract original S15 inspection forms into the MasterQC PDF-history package.
 
-Run with the bundled Python runtime because the shared table-cell helper uses
-pdfplumber. Source PDFs remain read only; output is written under data/pdf-import.
+Requires pdfplumber in the Python runtime used for this import (imported lazily,
+so the parser self-check runs without it). It reuses the table-cell helpers in
+scripts/pdf-import. Source PDFs are read only, resolved through the committed
+source manifest, and output is written under data/pdf-import without
+machine-specific paths or timestamps.
 """
 
 from __future__ import annotations
@@ -10,19 +13,16 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import io
 import json
 import re
 import sys
 import unicodedata
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import pdfplumber
-
 
 ROOT = Path(__file__).resolve().parents[2]
-INVENTORY = ROOT / "tmp/pdf-import/inventory.json"
 SHARED_SCRIPT_DIR = ROOT / "scripts/pdf-import"
 sys.path.insert(0, str(SHARED_SCRIPT_DIR))
 import extract_s1_history as shared  # noqa: E402
@@ -30,21 +30,26 @@ import extract_s1_history as shared  # noqa: E402
 
 FAMILY = "s15"
 ASSET_CREATED_AT = "2026-09-29T00:00:00.000Z"
-DASH_MARKERS = {"", "—", "–", "-", "_", "N/A", "NA"}
-DASH_CHARACTERS = set("—–-―－−_")
-S15_COLOR_PATTERNS = {
-    "red": re.compile(
-        r"\bs15\s*[-－–]\s*red\b|\bred\s*[:：]\s*[\d,]+\s*(?:pcs|件|台)\b|"
-        r"(?:剩余|remaining)\s*red\s*[:：]?\s*[\d,]+\s*(?:pcs|件|台)\b|"
-        r"[\d,]+\s*(?:pcs|件|台)\s*红色|红色\s*[:：]?\s*[\d,]+\s*(?:pcs|件|台)",
-        re.I,
-    ),
-    "yellow": re.compile(
-        r"\bs15\s*[-－–]\s*yellow\b|\byellow\s*[:：]\s*[\d,]+\s*(?:pcs|件|台)\b|"
-        r"(?:剩余|remaining)\s*yellow\s*[:：]?\s*[\d,]+\s*(?:pcs|件|台)\b|"
-        r"[\d,]+\s*(?:pcs|件|台)\s*黄色|黄色\s*[:：]?\s*[\d,]+\s*(?:pcs|件|台)",
-        re.I,
-    ),
+S15_COLOR_NAMES = {"red": "红色", "yellow": "黄色"}
+QUANTITY = r"(?P<quantity>\d[\d,]*)\s*(?:pcs|件|台)"
+
+
+def _quantity_patterns(name: str, chinese: str) -> tuple[re.Pattern[str], ...]:
+    """Patterns that tie a printed colour to the quantity it is stated for."""
+    return (
+        re.compile(rf"\bs15\s*[-－–]\s*{name}\s*[:：]\s*{QUANTITY}\b", re.I),
+        re.compile(rf"\b{name}\s*[:：]\s*{QUANTITY}\b", re.I),
+        re.compile(rf"(?:剩余|remaining)\s*{name}\s*[:：]?\s*{QUANTITY}\b", re.I),
+        re.compile(rf"{QUANTITY}\s*{chinese}", re.I),
+        re.compile(rf"{chinese}\s*[:：]?\s*{QUANTITY}", re.I),
+    )
+
+
+S15_COLOR_QUANTITY_PATTERNS = {
+    name: _quantity_patterns(name, chinese) for name, chinese in S15_COLOR_NAMES.items()
+}
+S15_COLOR_LABEL_PATTERNS = {
+    name: re.compile(rf"\bs15\s*[-－–]\s*{name}\b", re.I) for name in S15_COLOR_NAMES
 }
 
 
@@ -53,21 +58,54 @@ def normalize_task_identity(title: str) -> str:
     return "".join(character for character in normalized if character.isalnum())
 
 
-def derive_color(notes: str | None) -> tuple[str | None, str | None]:
+def stated_color_quantities(normalized_notes: str) -> dict[str, list[int]]:
+    """Map each S15 color that the notes mention to the sorted distinct quantities stated for it."""
+    found: dict[str, list[int]] = {}
+    for name in S15_COLOR_NAMES:
+        mentioned = bool(S15_COLOR_LABEL_PATTERNS[name].search(normalized_notes))
+        quantities: set[int] = set()
+        for pattern in S15_COLOR_QUANTITY_PATTERNS[name]:
+            for match in pattern.finditer(normalized_notes):
+                mentioned = True
+                quantities.add(int(match.group("quantity").replace(",", "")))
+        if mentioned:
+            found[name] = sorted(quantities)
+    return found
+
+
+def derive_color(
+    notes: str | None,
+    batch_quantity: int | float | None,
+) -> tuple[str | None, str | None, dict[str, Any] | None]:
+    """Assign a color only when the stated quantity for it is the whole page batch.
+
+    Returns (color, colorBasis, anomaly). A color that is stated for part of the
+    batch, or named without any quantity, stays null with an anomaly; the notes
+    are preserved either way.
+    """
     if not notes:
-        return None, None
-    normalized = shared.flattened(notes)
-    found = [name for name, pattern in S15_COLOR_PATTERNS.items() if pattern.search(normalized)]
-    if len(found) == 1:
-        return found[0], "special-notes-explicit-product-quantity"
+        return None, None, None
+    found = stated_color_quantities(shared.flattened(notes))
     if len(found) > 1:
-        return None, "special-notes-mixed-color-quantities"
-    return None, None
-
-
-def is_blank_or_dash(raw: str) -> bool:
-    normalized = shared.flattened(raw).replace(" ", "")
-    return not normalized or normalized.upper() in DASH_MARKERS or all(char in DASH_CHARACTERS for char in normalized)
+        return None, "special-notes-mixed-color-quantities", None
+    if not found:
+        return None, None, None
+    ((color, quantities),) = found.items()
+    if quantities == [batch_quantity]:
+        return color, "special-notes-explicit-product-quantity", None
+    if quantities:
+        return None, "special-notes-partial-color-quantity", {
+            "code": "partial-color-allocation",
+            "message": "Special Notes state a color quantity that is not the whole page batch quantity; the color remains null and all source notes are preserved.",
+            "batchQuantity": batch_quantity,
+            "statedColorQuantities": [{"color": color, "quantity": quantity} for quantity in quantities],
+        }
+    return None, "special-notes-color-quantity-not-stated", {
+        "code": "color-quantity-not-stated",
+        "message": "Special Notes name a color without a quantity; the batch color remains null because the whole-batch color cannot be established.",
+        "batchQuantity": batch_quantity,
+        "statedColorQuantities": [],
+    }
 
 
 def visible_factory_line(page_text: str, factory: str | None, fallback: str | None) -> str | None:
@@ -96,47 +134,6 @@ def clean_history_columns(rows: list[list[Any]], columns: dict[str, int | None])
     ]
 
 
-def numeric_parse_anomalies(
-    source_id: str,
-    inspection_id: str,
-    page_number: int,
-    printed_no: int,
-    cell_name: str,
-    raw: str,
-    parsed: int | float | None,
-    parser,
-) -> list[dict[str, Any]]:
-    cleaned = shared.flattened(raw)
-    if is_blank_or_dash(raw):
-        return []
-    if parsed is None:
-        return [
-            {
-                "code": "result-cell-unparsed",
-                "inspectionId": inspection_id,
-                "page": page_number,
-                "rowNo": printed_no,
-                "field": cell_name,
-                "message": "A printed result cell could not be parsed as a number; the raw cell is preserved and the parsed value remains null.",
-                "evidence": raw,
-            }
-        ]
-    expected = parser(raw)
-    if expected != parsed:
-        return [
-            {
-                "code": "result-cell-parse-mismatch",
-                "inspectionId": inspection_id,
-                "page": page_number,
-                "rowNo": printed_no,
-                "field": cell_name,
-                "message": "Parsed result does not match the shared parser's reading of the raw source cell.",
-                "evidence": {"raw": raw, "parsed": parsed, "expected": expected},
-            }
-        ]
-    return []
-
-
 def extract_inspection(
     page: Any,
     table: Any,
@@ -163,7 +160,7 @@ def extract_inspection(
         if shared.cell_text(value)
         and not re.search(r"Special Notes|本批次特殊情况", shared.cell_text(value), re.I)
     ) or None
-    color, color_basis = derive_color(notes)
+    color, color_basis, color_anomaly = derive_color(notes, batch_quantity)
     factory, factory_raw = shared.factory_for_page(page_text)
     factory_raw = visible_factory_line(page_text, factory, factory_raw)
     columns = shared.find_result_columns(rows)
@@ -185,6 +182,8 @@ def extract_inspection(
                 "notes": notes,
             }
         )
+    if color_anomaly is not None:
+        local_anomalies.append(color_anomaly)
 
     required_columns = ("inspected", "defective", "rate", "sampling", "time")
     missing_columns = [name for name in required_columns if columns.get(name) is None]
@@ -232,7 +231,7 @@ def extract_inspection(
                 {
                     "printedDateRaw": header["printedDateRaw"],
                     "printedBatchQuantity": header["printedBatchQuantity"],
-                    "sourceDefectiveRate": shared.percentage_value(raw_rate),
+                    "sourceDefectiveRate": shared.rate_percent_value(raw_rate),
                     "sourceDefectiveRateRaw": raw_rate or None,
                     "sourceColumn": header["sourceColumn"],
                 }
@@ -240,27 +239,18 @@ def extract_inspection(
 
         source_inspected = shared.number_value(inspected_raw)
         defective = shared.number_value(defective_raw)
-        source_rate = shared.percentage_value(rate_raw)
-        row_anomalies = []
-        for field_name, raw, parsed, value_parser in (
-            ("sourceInspectedQty", inspected_raw, source_inspected, shared.number_value),
-            ("defectiveQty", defective_raw, defective, shared.number_value),
-            ("sourceDefectiveRate", rate_raw, source_rate, shared.percentage_value),
-            ("timeSeconds", time_raw, shared.number_value(time_raw), shared.number_value),
-            ("averageTimePerUnitSeconds", average_raw, shared.number_value(average_raw), shared.number_value),
+        source_rate = shared.rate_percent_value(rate_raw)
+        time_seconds = shared.number_value(time_raw)
+        average_seconds = shared.number_value(average_raw)
+        row_anomalies: list[dict[str, Any]] = []
+        for field_name, raw, parsed, allow_percent in (
+            ("sourceInspectedQty", inspected_raw, source_inspected, False),
+            ("defectiveQty", defective_raw, defective, False),
+            ("sourceDefectiveRate", rate_raw, source_rate, True),
+            ("timeSeconds", time_raw, time_seconds, False),
+            ("averageTimePerUnitSeconds", average_raw, average_seconds, False),
         ):
-            row_anomalies.extend(
-                numeric_parse_anomalies(
-                    source_id,
-                    inspection_id,
-                    page_number,
-                    printed_no,
-                    field_name,
-                    raw,
-                    parsed,
-                    value_parser,
-                )
-            )
+            row_anomalies.extend(shared.numeric_cell_anomalies(printed_no, field_name, raw, parsed, allow_percent))
         if source_inspected is not None and batch_quantity is not None and source_inspected > batch_quantity:
             row_anomalies.append(
                 {
@@ -310,9 +300,9 @@ def extract_inspection(
             "defectiveQtyRaw": defective_raw or None,
             "sourceDefectiveRate": source_rate,
             "sourceDefectiveRateRaw": rate_raw or None,
-            "timeSeconds": shared.number_value(time_raw),
+            "timeSeconds": time_seconds,
             "timeSecondsRaw": time_raw or None,
-            "averageTimePerUnitSeconds": shared.number_value(average_raw),
+            "averageTimePerUnitSeconds": average_seconds,
             "averageTimePerUnitSecondsRaw": average_raw or None,
             "important": important,
             "importantFillRgb": fill_color,
@@ -418,45 +408,31 @@ def count_by(records: list[dict[str, Any]], field: str) -> dict[str, int]:
     return dict(sorted(result.items()))
 
 
-def load_inventory() -> list[dict[str, Any]]:
-    entries = json.loads(INVENTORY.read_text(encoding="utf-8"))
-    return sorted(
-        (entry for entry in entries if entry["key"].startswith("S15-")),
-        key=lambda entry: int(entry["key"].split("-")[1]),
-    )
+def extract_package(
+    source_filter: str | None = None,
+    include_assets: bool = True,
+    source_root: Path = shared.DEFAULT_SOURCE_ROOT,
+) -> dict[str, Any]:
+    import pdfplumber
 
-
-def extract_package(source_filter: str | None = None, include_assets: bool = True) -> dict[str, Any]:
-    inventory = load_inventory()
+    entries = shared.load_source_manifest("S15-")
     if source_filter:
-        inventory = [entry for entry in inventory if entry["key"] == source_filter]
-        if not inventory:
+        entries = [entry for entry in entries if entry["key"] == source_filter]
+        if not entries:
             raise SystemExit(f"Unknown S15 source key: {source_filter}")
 
     sources: list[dict[str, Any]] = []
     inspections: list[dict[str, Any]] = []
     assets: list[dict[str, Any]] = []
     package_anomalies: list[dict[str, Any]] = []
-    extracted_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-    for entry in inventory:
-        path = Path(entry["path"])
-        if not path.is_file():
-            package_anomalies.append(
-                {
-                    "sourceKey": entry["key"],
-                    "code": "source-pdf-not-found",
-                    "message": f"Source PDF is missing: {path}",
-                }
-            )
-            continue
-        pdf_bytes = path.read_bytes()
+    for entry in entries:
+        path = shared.resolve_source_pdf(source_root, entry)
+        pdf_bytes = shared.read_source_pdf(path)
         source_id = f"source-{entry['key'].lower()}"
         asset_id = shared.stable_id("asset", entry["key"])
         source = {
             "id": source_id,
-            "inventoryKey": entry["key"],
             "fileName": path.name,
-            "path": str(path),
             "sha256": hashlib.sha256(pdf_bytes).hexdigest(),
             "pageCount": None,
             "family": FAMILY,
@@ -464,7 +440,7 @@ def extract_package(source_filter: str | None = None, include_assets: bool = Tru
             "inspectionPages": [],
             "nonInspectionPages": [],
         }
-        with pdfplumber.open(path) as pdf:
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             source["pageCount"] = len(pdf.pages)
             for page_index, page in enumerate(pdf.pages, start=1):
                 matched_table = None
@@ -549,17 +525,17 @@ def extract_package(source_filter: str | None = None, include_assets: bool = Tru
         "inspections": inspections,
         "assets": assets,
         "anomalies": package_anomalies,
-        "extractedAt": extracted_at,
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", help="Extract only one inventory key, such as S15-15")
+    parser.add_argument("--source", help="Extract only one manifest key, such as S15-15")
+    parser.add_argument("--source-root", default=str(shared.DEFAULT_SOURCE_ROOT), help="Read-only folder containing the S1 and S15 PDF folders")
     parser.add_argument("--output", default="data/pdf-import/s15-extraction.json")
     parser.add_argument("--without-assets", action="store_true", help="Omit embedded PDF data URLs")
     args = parser.parse_args()
-    package = extract_package(args.source, include_assets=not args.without_assets)
+    package = extract_package(args.source, include_assets=not args.without_assets, source_root=Path(args.source_root))
     output = Path(args.output)
     if not output.is_absolute():
         output = ROOT / output

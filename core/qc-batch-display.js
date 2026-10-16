@@ -14,6 +14,28 @@ export function normalizeBatchDisplayNumber(value) {
   return value.replace(/^(\s*)(?:S11[-–—]S14|S(?:11|12|13|14)(?:[+/]S(?:11|12|13|14))*)(?=$|[-\s])/iu, "$1S1");
 }
 
+/** Staff-facing color label: the stored value with its first letter capitalized, such as "red" as "Red". */
+export function displayColorLabel(value) {
+  const color = text(value);
+  return color ? color.replace(/^\p{Ll}/u, (letter) => letter.toLocaleUpperCase()) : "";
+}
+
+/** Append a non-normal color to a product label; the normal red variant is omitted, as in the variant labels. */
+export function appendNonNormalColor(productLabel, color) {
+  const label = text(productLabel);
+  const colorLabel = displayColorLabel(color);
+  const colorKey = normalized(colorLabel).replace(/[\s_-]/g, "");
+  if (colorLabel && !["red", "normalred"].includes(colorKey) && !label.toLowerCase().includes(colorLabel.toLowerCase())) {
+    return `${label} ${colorLabel}`.trim();
+  }
+  return label;
+}
+
+/** Product label shown for a historical batch row or report, using the staff-facing color label. */
+export function historicalProductLabel(productLabel, color) {
+  return appendNonNormalColor(productLabel, color);
+}
+
 function withSuffix(value, ordinal) {
   const match = /^(.*?)(\s*)$/.exec(value);
   return `${match[1]}-${String(ordinal).padStart(2, "0")}${match[2]}`;
@@ -66,12 +88,7 @@ function historicalBaseName(batch, state) {
   const originalBatchNumber = text(inspection?.originalBatchNumber);
   if (originalBatchNumber) return normalizeBatchDisplayNumber(originalBatchNumber);
 
-  let product = historicalProduct(batch, inspection, state);
-  const color = text(inspection?.color) || text(batch.color);
-  const colorKey = color.toLowerCase().replace(/[\s_-]/g, "");
-  if (color && !["red", "normalred"].includes(colorKey) && !product.toLowerCase().includes(color.toLowerCase())) {
-    product = `${product} ${color}`;
-  }
+  const product = appendNonNormalColor(historicalProduct(batch, inspection, state), text(inspection?.color) || text(batch.color));
   const date = compactDate(text(batch.date) || inspection?.date);
   const factory = text(batch.factory) || text(inspection?.factory) || "Unknown factory";
   const stage = text(batch.stage) || text(inspection?.stage) || "Unknown stage";

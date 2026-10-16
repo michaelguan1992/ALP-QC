@@ -1,0 +1,157 @@
+{
+  "format": "masterqc-pdf-source-manifest",
+  "formatVersion": 1,
+  "description": "Committed key-to-file map for the authorized S1 and S15 inspection PDFs. Keys are stable identifiers used in extraction IDs; files are read from the read-only reference folder named by --source-root (default ../MasterQC/Master QC 品管主控文档). Each file must be directly inside its folder and start with %PDF-.",
+  "files": [
+    {
+      "key": "S1-01",
+      "folder": "S1",
+      "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.5.26.pdf"
+    },
+    {
+      "key": "S1-02",
+      "folder": "S1",
+      "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.1.pdf"
+    },
+    {
+      "key": "S1-03",
+      "folder": "S1",
+      "fileName": "6.11.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.16.pdf"
+    },
+    {
+      "key": "S1-04",
+      "folder": "S1",
+      "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.6.24.pdf"
+    },
+    {
+      "key": "S1-05",
+      "folder": "S1",
+      "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.24(1).pdf"
+    },
+    {
+      "key": "S1-06",
+      "folder": "S1",
+      "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List -2026.6.8.pdf"
+    },
+    {
+      "key": "S1-07",
+      "folder": "S1",
+      "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.15.pdf"
+    },
+    {
+      "key": "S1-08",
+      "folder": "S1",
+      "fileName": "7.22.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf"
+    },
+    {
+      "key": "S1-09",
+      "folder": "S1",
+      "fileName": "7.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.30.pdf"
+    },
+    {
+      "key": "S1-10",
+      "folder": "S1",
+      "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.7.8.pdf"
+    },
+    {
+      "key": "S1-11",
+      "folder": "S1",
+      "fileName": "8.12.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf"
+    },
+    {
+      "key": "S1-12",
+      "folder": "S1",
+      "fileName": "8.19.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf"
+    },
+    {
+      "key": "S1-13",
+      "folder": "S1",
+      "fileName": "8.27.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf"
+    },
+    {
+      "key": "S1-14",
+      "folder": "S1",
+      "fileName": "8.27.26AP自制-检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.27(2)(1).pdf"
+    },
+    {
+      "key": "S1-15",
+      "folder": "S1",
+      "fileName": "8.5.26AP检查资料 HyperSmoke检验规范（主控文件） HyperSmoke Master QC List 26.8.7.pdf"
+    },
+    {
+      "key": "S15-01",
+      "folder": "S15",
+      "fileName": "5.21.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.5.25.pdf"
+    },
+    {
+      "key": "S15-02",
+      "folder": "S15",
+      "fileName": "5.25.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.6.1.pdf"
+    },
+    {
+      "key": "S15-03",
+      "folder": "S15",
+      "fileName": "6.11.26-AP检查资HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.6.16.pdf"
+    },
+    {
+      "key": "S15-04",
+      "folder": "S15",
+      "fileName": "6.18.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.6.24.pdf"
+    },
+    {
+      "key": "S15-05",
+      "folder": "S15",
+      "fileName": "6.25.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.3.pdf"
+    },
+    {
+      "key": "S15-06",
+      "folder": "S15",
+      "fileName": "6.3.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List- 2026.6.8.pdf"
+    },
+    {
+      "key": "S15-07",
+      "folder": "S15",
+      "fileName": "7.10.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.15.pdf"
+    },
+    {
+      "key": "S15-08",
+      "folder": "S15",
+      "fileName": "7.20.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.22(2).pdf"
+    },
+    {
+      "key": "S15-09",
+      "folder": "S15",
+      "fileName": "7.27.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.30.pdf"
+    },
+    {
+      "key": "S15-10",
+      "folder": "S15",
+      "fileName": "7.3.26-AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.7.8.pdf"
+    },
+    {
+      "key": "S15-11",
+      "folder": "S15",
+      "fileName": "8.12.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.18(2).pdf"
+    },
+    {
+      "key": "S15-12",
+      "folder": "S15",
+      "fileName": "8.19.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.21(1).pdf"
+    },
+    {
+      "key": "S15-13",
+      "folder": "S15",
+      "fileName": "8.27.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.27(1).pdf"
+    },
+    {
+      "key": "S15-14",
+      "folder": "S15",
+      "fileName": "8.5.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.8.7.df.pdf"
+    },
+    {
+      "key": "S15-15",
+      "folder": "S15",
+      "fileName": "9.3.26AP检查资料 HyperSmoke检验规范 S15（主控文件） HyperSmoke Master QC List 26.9.3(1).pdf"
+    }
+  ]
+}
