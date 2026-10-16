@@ -11,3 +11,6 @@ npm-debug.log*
 *.sqlite-shm
 *.sqlite-wal
 !data/workspace/masterqc-main.sqlite
+
+# Scratch review output; files already tracked under tmp/ stay tracked.
+/tmp/
