@@ -153,7 +153,7 @@ export function applySaveStatus(element, status) {
  */
 export function createBatchRowRegistry() {
   const statusEntries = new Map(); // rowId -> { status, createIssueButton }
-  const inputStates = new Map(); // rowId -> row input state (see qc-ops-batches.js)
+  const inputStates = new Map(); // rowId -> row input state (see qc-batch-rows.js)
   return {
     register(rowId, status, createIssueButton, inputState) {
       statusEntries.set(rowId, { status, createIssueButton });
