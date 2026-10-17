@@ -47,6 +47,6 @@ Steps 1 to 4 (harden and update, install software, service user and directories,
 - Not implemented: the plan's automatic write block when off-site coverage is stale.
 - Not yet verified anywhere real: Caddy configuration (`caddy validate`), systemd units on a real host, backup uploads to S3, the release script as root, the restore drill.
 - Decide how `deploy/release.sh` gets code before the first scripted release. It expects a git clone at `/opt/masterqc/repo`, but the repository history contains the production database and real extracts under `tmp/` and `data/pdf-import/`, so a clone would put real data on the server. The script also does not strip `tmp/` or `data/lark-import/` from a release. Any change to the script is code work for a delegate under AGENTS.md.
-- Whether the trial should include `data/lark-import/version-history.v1.json` (the Lark version-history import package, real business data). The first release leaves it out.
+- Decided 2026-10-17: trial releases do not include `data/lark-import/version-history.v1.json` (the Lark version-history import package, real business data). Its import route then has no package to offer.
 - Optional improvement: long-lived caching for static modules (they are currently served with `Cache-Control: no-store`), which would speed up repeat page loads for distant users.
 - The phone-width layout overflows horizontally by about 200 px.

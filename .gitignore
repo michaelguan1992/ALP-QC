@@ -12,6 +12,6 @@ npm-debug.log*
 *.sqlite-wal
 !data/workspace/masterqc-main.sqlite
 
-# Scratch review output; files already tracked under tmp/ stay tracked.
+# Scratch review output. Nothing under tmp/ is tracked.
 /tmp/
 __pycache__/
