@@ -1,0 +1,37 @@
+[Unit]
+Description=MasterQC Web hosted QC service
+Documentation=file:///opt/masterqc/current/docs/deployment.md
+After=network.target
+
+[Service]
+Type=simple
+User=masterqc
+Group=masterqc
+WorkingDirectory=/opt/masterqc/current
+# Settings such as MASTERQC_DATA_DIR and MASTERQC_PUBLIC_ORIGIN. See env.example.
+EnvironmentFile=/etc/masterqc/env
+ExecStart=/usr/bin/node launcher/server.mjs --no-open
+# The server stops within about 10 seconds of SIGTERM, so systemd waits a little longer before forcing it.
+KillSignal=SIGTERM
+TimeoutStopSec=20
+Restart=always
+RestartSec=5
+SyslogIdentifier=masterqc
+
+# Hardening. The release directory is read-only; only the data directory is writable.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/masterqc
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
