@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
-import { lstat, readFile, realpath, rm, stat } from "node:fs/promises";
+import { lstat, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { API_UPLOAD_BODY_MAX_BYTES, BACKUP_MAX_BYTES, QC_COMMAND_TYPES, createQCService } from "../core/qc-service.js";
@@ -27,6 +28,22 @@ const API_BODY_MAX_BYTES = API_UPLOAD_BODY_MAX_BYTES;
 const BACKUP_BODY_MAX_BYTES = BACKUP_MAX_BYTES + 4096;
 const ALLOWED_WORKSPACES = new Set(["main", "demo"]);
 const ALLOWED_COMMANDS = new Set(QC_COMMAND_TYPES);
+// Addresses that mean this computer. Only these may listen, because hosted mode relies on the reverse proxy for public access.
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+// Time that in-flight requests get after SIGINT or SIGTERM before their connections are closed.
+const SHUTDOWN_GRACE_MS = 10_000;
+// Node's default five-minute request timeout is too short for a 64 MiB upload over a slow link.
+const REQUEST_TIMEOUT_MS = 60 * 60 * 1000;
+const GENERIC_SERVICE_ERROR = "The local QC service could not complete the request.";
+// Core raises this message for a stale expected revision; other revision messages are ordinary validation errors.
+const STALE_REVISION_MESSAGE = "This data changed since your last view";
+// Temporary files written by the snapshot route: .snapshot-<workspace>-<uuid>.sqlite, optionally with a journal.
+const SNAPSHOT_TEMPORARY_FILE = /^\.snapshot-(?:main|demo)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.sqlite(?:-journal)?$/;
+const SILENT_LOGGER = Object.freeze({ info() {}, error() {} });
+const CONSOLE_LOGGER = Object.freeze({
+  info: (line) => console.log(line),
+  error: (text) => console.error(text),
+});
 
 const CONTENT_TYPES = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -160,6 +177,111 @@ export async function checkStartupRequirements({ projectRoot = PROJECT_ROOT } = 
   return null;
 }
 
+export class ConfigurationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ConfigurationError";
+  }
+}
+
+function environmentValue(env, name) {
+  const value = env[name];
+  if (value === undefined) return null;
+  const trimmed = String(value).trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+function formatHostPort(host, port) {
+  return `${host.includes(":") ? `[${host}]` : host}:${port}`;
+}
+
+// Accepts a bare origin such as https://qc.example.com. Plain HTTP is allowed only for a loopback address.
+export function parsePublicOrigin(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new ConfigurationError("MASTERQC_PUBLIC_ORIGIN must be a full URL such as https://qc.example.com.");
+  }
+  const loopback = LOOPBACK_HOSTS.has(url.hostname.replace(/^\[(.*)\]$/, "$1"));
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    throw new ConfigurationError("MASTERQC_PUBLIC_ORIGIN must start with https:// (http:// is accepted only for localhost).");
+  }
+  if (url.username || url.password) {
+    throw new ConfigurationError("MASTERQC_PUBLIC_ORIGIN must not contain a username or password.");
+  }
+  if (url.pathname !== "/" || url.search || url.hash) {
+    throw new ConfigurationError("MASTERQC_PUBLIC_ORIGIN must contain only the scheme, host, and optional port, without a path, query, or fragment.");
+  }
+  return url.origin;
+}
+
+function parseListenPort(text) {
+  const port = /^\d{1,5}$/.test(text) ? Number(text) : NaN;
+  if (!(port >= 1 && port <= 65535)) {
+    throw new ConfigurationError("MASTERQC_LISTEN_PORT must be a whole number from 1 to 65535.");
+  }
+  return port;
+}
+
+// Reads the launcher settings once. Empty values count as unset. Invalid values throw a ConfigurationError.
+export function readServerConfig(env = process.env, { projectRoot = PROJECT_ROOT } = {}) {
+  const listenHost = environmentValue(env, "MASTERQC_LISTEN_HOST") ?? HOST;
+  if (!LOOPBACK_HOSTS.has(listenHost)) {
+    throw new ConfigurationError("MASTERQC_LISTEN_HOST must be 127.0.0.1, localhost, or ::1. Expose the app to other computers only through the HTTPS reverse proxy.");
+  }
+  const portText = environmentValue(env, "MASTERQC_LISTEN_PORT");
+  const listenPort = portText === null ? PORT : parseListenPort(portText);
+
+  const originText = environmentValue(env, "MASTERQC_PUBLIC_ORIGIN");
+  const publicOrigin = originText === null ? null : parsePublicOrigin(originText);
+
+  // The demo workspace is on for this computer and off for a hosted server unless set explicitly.
+  const demoText = environmentValue(env, "MASTERQC_DEMO");
+  let demoEnabled = publicOrigin === null;
+  if (demoText !== null) {
+    const normalized = demoText.toLowerCase();
+    if (normalized !== "on" && normalized !== "off") throw new ConfigurationError("MASTERQC_DEMO must be on or off.");
+    demoEnabled = normalized === "on";
+  }
+
+  const dataText = environmentValue(env, "MASTERQC_DATA_DIR");
+  if (dataText !== null && publicOrigin !== null && !path.isAbsolute(dataText)) {
+    throw new ConfigurationError("MASTERQC_DATA_DIR must be an absolute path when MASTERQC_PUBLIC_ORIGIN is set.");
+  }
+  const dataDirectory = dataText === null
+    ? path.resolve(projectRoot, "data", "workspace")
+    : path.resolve(dataText);
+
+  return Object.freeze({
+    hosted: publicOrigin !== null,
+    listenHost,
+    listenPort,
+    publicOrigin,
+    demoEnabled,
+    dataDirectory,
+  });
+}
+
+// The Host and Origin values one server accepts. Hosted mode adds the public origin and keeps loopback for local tools.
+function createOriginPolicy({ host, port, publicOrigin }) {
+  const loopbackHost = formatHostPort(host, port);
+  const loopbackOrigin = `http://${loopbackHost}`;
+  if (publicOrigin === null || publicOrigin === undefined) {
+    return Object.freeze({
+      hosted: false,
+      allowedHosts: Object.freeze([loopbackHost]),
+      allowedOrigins: Object.freeze([loopbackOrigin]),
+    });
+  }
+  const origin = parsePublicOrigin(publicOrigin);
+  return Object.freeze({
+    hosted: true,
+    allowedHosts: Object.freeze([new URL(origin).host, loopbackHost]),
+    allowedOrigins: Object.freeze([origin, loopbackOrigin]),
+  });
+}
+
 const SECURITY_HEADERS = {
   "Cache-Control": "no-store",
   "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-src 'self' blob:; media-src 'self' blob:",
@@ -169,6 +291,8 @@ const SECURITY_HEADERS = {
 };
 
 function send(response, statusCode, body, headers = {}) {
+  // The status is also kept on the response object so the access log can read it.
+  response.statusCode = statusCode;
   response.writeHead(statusCode, { ...SECURITY_HEADERS, ...headers });
   response.end(body);
 }
@@ -177,11 +301,64 @@ function sendJson(response, statusCode, value) {
   send(response, statusCode, JSON.stringify(value), { "Content-Type": "application/json; charset=utf-8" });
 }
 
+function rawRequestPath(url) {
+  return String(url ?? "").split("?", 1)[0];
+}
+
+// Only /api and /healthz requests get access-log lines; static files stay quiet.
+function isLoggedRoute(rawPath) {
+  return rawPath === "/healthz" || rawPath === "/api" || rawPath.startsWith("/api/");
+}
+
+function truncateForLog(value) {
+  return value.length > 200 ? `${value.slice(0, 200)}...` : value;
+}
+
+// Logs the method, path without query string, status, and duration. Headers and bodies are never included.
+function accessLogLine(request, response, startedAt) {
+  const duration = Math.round(performance.now() - startedAt);
+  return `${new Date().toISOString()} ${request.method ?? "GET"} ${truncateForLog(rawRequestPath(request.url))} ${response.statusCode ?? 0} ${duration}ms`;
+}
+
+function errorLogText(request, statusCode, error) {
+  const detail = error?.stack ?? String(error);
+  return `${new Date().toISOString()} ${request.method ?? "GET"} ${truncateForLog(rawRequestPath(request.url))} ${statusCode}\n${detail}`;
+}
+
+const PROGRAMMING_ERROR_TYPES = [TypeError, ReferenceError, RangeError, SyntaxError];
+const SQLITE_ERROR_CODE = /^(?:ERR_SQLITE|SQLITE_)/;
+// Node system errors carry an errno code such as ENOSPC or EACCES and a syscall name. Their messages reveal paths.
+const SYSTEM_ERROR_CODE = /^E[A-Z0-9]+$/;
+
+function explicitStatusCode(error) {
+  const statusCode = error?.statusCode;
+  return Number.isInteger(statusCode) && statusCode >= 400 && statusCode <= 599 ? statusCode : null;
+}
+
+function isInternalError(error) {
+  if (PROGRAMMING_ERROR_TYPES.some((type) => error instanceof type)) return true;
+  const code = typeof error?.code === "string" ? error.code : "";
+  return SQLITE_ERROR_CODE.test(code) || SYSTEM_ERROR_CODE.test(code) || typeof error?.syscall === "string";
+}
+
+// Errors that carry a statusCode keep it. Internal faults become a generic 500. Other plain errors are business
+// validation from the core, so they return 400 with their message.
 function errorStatus(error) {
-  if (error?.statusCode) return error.statusCode;
-  if (/revision|changed since your last view|reload the latest state/i.test(error?.message ?? "")) return 409;
-  if (error?.code?.startsWith?.("ERR_SQLITE") || error?.code?.startsWith?.("SQLITE_")) return 500;
+  const explicit = explicitStatusCode(error);
+  if (explicit !== null) return explicit;
+  if (typeof error?.message === "string" && error.message.startsWith(STALE_REVISION_MESSAGE)) return 409;
+  if (isInternalError(error)) return 500;
   return error instanceof Error ? 400 : 500;
+}
+
+function errorBody(error, statusCode) {
+  const body = { error: statusCode >= 500 ? GENERIC_SERVICE_ERROR : error.message };
+  if (explicitStatusCode(error) !== null && typeof error.code === "string" && error.code) {
+    body.code = error.code;
+  } else if (statusCode === 409) {
+    body.code = "stale_revision";
+  }
+  return body;
 }
 
 function requestError(statusCode, message, code = undefined) {
@@ -212,13 +389,19 @@ async function readJsonBody(request, maxBodyBytes, tooLargeMessage) {
   }
   const chunks = [];
   let totalBytes = 0;
-  for await (const chunk of request) {
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    totalBytes += bytes.byteLength;
-    if (totalBytes > maxBodyBytes) {
-      throw requestError(413, tooLargeMessage, "body_too_large");
+  try {
+    for await (const chunk of request) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += bytes.byteLength;
+      if (totalBytes > maxBodyBytes) {
+        throw requestError(413, tooLargeMessage, "body_too_large");
+      }
+      chunks.push(bytes);
     }
-    chunks.push(bytes);
+  } catch (error) {
+    if (error?.statusCode) throw error;
+    // A client that disconnects mid-upload fails the stream. That is not a server fault, so it is not logged as one.
+    throw requestError(400, "The request body was interrupted before it finished.", "body_interrupted");
   }
   try {
     const value = JSON.parse(Buffer.concat(chunks, totalBytes).toString("utf8"));
@@ -236,8 +419,8 @@ function requireRevision(value) {
   }
 }
 
-function getService(services, workspace) {
-  if (!ALLOWED_WORKSPACES.has(workspace) || !services?.[workspace]) {
+function getService(services, workspace, demoEnabled) {
+  if (!ALLOWED_WORKSPACES.has(workspace) || !services?.[workspace] || (workspace === "demo" && !demoEnabled)) {
     throw requestError(404, "QC workspace was not found.", "workspace_not_found");
   }
   return services[workspace];
@@ -251,17 +434,20 @@ function closeReadStream(stream) {
   });
 }
 
+// Only one snapshot runs at a time. Each slot is released by its own token, so a late release cannot free a newer holder.
+function acquireSnapshotSlot(gate) {
+  if (gate.holder !== null) return null;
+  const token = {};
+  gate.holder = token;
+  return () => {
+    if (gate.holder === token) gate.holder = null;
+  };
+}
+
 // Streams one consistent SQLite snapshot as a download. The temporary file stays in the data directory,
 // which is never statically served, and is removed after success, a client disconnect, or an error.
-async function sendDatabaseSnapshot(request, response, service, workspace, snapshotDirectory) {
-  // Same-origin downloads send no Origin header; a page on another site must not be able to fetch the database.
-  const fetchSite = request.headers["sec-fetch-site"];
-  if (fetchSite !== undefined && fetchSite !== "same-origin" && fetchSite !== "none") {
-    throw requestError(403, "Database snapshots can only be downloaded from this local application.", "origin_not_allowed");
-  }
-  if (!snapshotDirectory) throw requestError(503, "Database snapshots are not available for this server.", "snapshot_unavailable");
-
-  const snapshotPath = path.join(snapshotDirectory, `.snapshot-${workspace}-${randomUUID()}.sqlite`);
+async function streamDatabaseSnapshot(request, response, service, workspace, context, releaseSlot) {
+  const snapshotPath = path.join(context.snapshotDirectory, `.snapshot-${workspace}-${randomUUID()}.sqlite`);
   let stream = null;
   try {
     await service.createSnapshot(snapshotPath);
@@ -275,19 +461,44 @@ async function sendDatabaseSnapshot(request, response, service, workspace, snaps
       "Content-Length": size,
     });
     await pipeline(stream, response);
+    // The client can start another download as soon as the body is sent, so free the slot before cleanup.
+    releaseSlot();
   } catch (error) {
+    releaseSlot();
     // Before headers are sent, the caller reports the failure. Afterwards only the socket can be closed.
     if (!response.headersSent) throw error;
+    if (error?.code !== "ERR_STREAM_PREMATURE_CLOSE") {
+      context.logger.error(errorLogText(request, 200, error));
+    }
     response.destroy();
   } finally {
     await closeReadStream(stream);
     await rm(snapshotPath, { force: true }).catch((error) => {
-      console.error(`Could not delete the temporary snapshot ${snapshotPath}: ${error.message}`);
+      context.logger.error(`Could not delete the temporary snapshot ${snapshotPath}: ${error.message}`);
     });
   }
 }
 
-async function handleApiRequest(request, response, path, services, limits, snapshotDirectory) {
+async function sendDatabaseSnapshot(request, response, service, workspace, context) {
+  // Same-origin downloads send no Origin header; a page on another site must not be able to fetch the database.
+  const fetchSite = request.headers["sec-fetch-site"];
+  if (fetchSite !== undefined && fetchSite !== "same-origin" && fetchSite !== "none") {
+    throw requestError(403, "Database snapshots can only be downloaded from this local application.", "origin_not_allowed");
+  }
+  if (!context.snapshotDirectory) throw requestError(503, "Database snapshots are not available for this server.", "snapshot_unavailable");
+  // One snapshot at a time keeps the extra copy and the database read from piling up; other callers retry later.
+  const releaseSlot = acquireSnapshotSlot(context.snapshotGate);
+  if (releaseSlot === null) {
+    throw requestError(429, "Another database snapshot is already in progress. Try again when it finishes.", "snapshot_busy");
+  }
+  try {
+    await streamDatabaseSnapshot(request, response, service, workspace, context, releaseSlot);
+  } finally {
+    releaseSlot();
+  }
+}
+
+async function handleApiRequest(request, response, path, context) {
   const segments = path.split("/").filter(Boolean);
   if (segments.length < 4 || segments[0] !== "api" || segments[1] !== "qc") {
     sendJson(response, 404, { error: "API route was not found.", code: "route_not_found" });
@@ -296,7 +507,7 @@ async function handleApiRequest(request, response, path, services, limits, snaps
 
   let service;
   try {
-    service = getService(services, segments[2]);
+    service = getService(context.services, segments[2], context.demoEnabled);
   } catch (error) {
     sendJson(response, error.statusCode ?? 404, { error: error.message, code: error.code });
     return;
@@ -307,6 +518,7 @@ async function handleApiRequest(request, response, path, services, limits, snaps
   const allowedMethod = (expected) => {
     if (method !== expected) throw requestError(405, "Method is not allowed for this API route.", "method_not_allowed");
   };
+  const { limits } = context;
 
   try {
     if (action.length === 1 && action[0] === "initialize") {
@@ -353,7 +565,7 @@ async function handleApiRequest(request, response, path, services, limits, snaps
     }
     if (action.length === 2 && action[0] === "backup" && action[1] === "snapshot") {
       allowedMethod("GET");
-      await sendDatabaseSnapshot(request, response, service, segments[2], snapshotDirectory);
+      await sendDatabaseSnapshot(request, response, service, segments[2], context);
       return;
     }
     if (action.length === 1 && action[0] === "restore") {
@@ -404,10 +616,104 @@ async function handleApiRequest(request, response, path, services, limits, snaps
     sendJson(response, 404, { error: "API route was not found.", code: "route_not_found" });
   } catch (error) {
     const statusCode = errorStatus(error);
-    sendJson(response, statusCode, {
-      error: statusCode >= 500 ? "The local QC service could not complete the request." : error.message,
-      ...(statusCode === 409 ? { code: "stale_revision" } : error.code ? { code: error.code } : {}),
+    if (statusCode >= 500) context.logger.error(errorLogText(request, statusCode, error));
+    sendJson(response, statusCode, errorBody(error, statusCode));
+  }
+}
+
+// GET /healthz reports the main workspace revision through the cheap revision read. It never exposes records.
+async function handleHealthRequest(request, response, context) {
+  if (request.method !== "GET") {
+    sendJson(response, 405, { error: "Method is not allowed.", code: "method_not_allowed" });
+    return;
+  }
+  let revision;
+  try {
+    if (!context.services?.main) throw new Error("The main QC workspace is not available.");
+    revision = await context.services.main.getRevision();
+  } catch (error) {
+    context.logger.error(errorLogText(request, 503, error));
+    sendJson(response, 503, { ok: false });
+    return;
+  }
+  sendJson(response, 200, { ok: true, revision });
+}
+
+async function routeRequest(request, response, resolveTarget, origins, context) {
+  // Host decides which address the client used. X-Forwarded-* headers are deliberately ignored.
+  const host = String(request.headers.host ?? "").toLowerCase();
+  if (!origins.allowedHosts.includes(host)) {
+    send(response, 400, "Bad Request\n", { "Content-Type": "text/plain; charset=utf-8" });
+    return;
+  }
+  let requestPath;
+  try {
+    requestPath = parseSafeRequestPath(request.url);
+  } catch {
+    requestPath = null;
+  }
+  if (!requestPath) {
+    send(response, 400, "Bad Request\n", { "Content-Type": "text/plain; charset=utf-8" });
+    return;
+  }
+
+  const isApi = requestPath.startsWith("/api/");
+  const origin = request.headers.origin;
+  if (origin !== undefined && !origins.allowedOrigins.includes(origin)) {
+    if (isApi) sendJson(response, 403, { error: "Requests must come from this local application origin.", code: "origin_not_allowed" });
+    else send(response, 403, "Forbidden\n", { "Content-Type": "text/plain; charset=utf-8" });
+    return;
+  }
+
+  if (requestPath === "/healthz") {
+    await handleHealthRequest(request, response, context);
+    return;
+  }
+
+  if (isApi) {
+    if (request.method !== "GET" && request.method !== "POST") {
+      sendJson(response, 405, { error: "Method is not allowed.", code: "method_not_allowed" });
+      return;
+    }
+    if (request.method === "POST" && origin === undefined) {
+      sendJson(response, 403, { error: "POST requests require the local application origin.", code: "origin_required" });
+      return;
+    }
+    if (!context.services) {
+      sendJson(response, 503, { error: "The local QC service is not ready.", code: "service_unavailable" });
+      return;
+    }
+    await handleApiRequest(request, response, requestPath, context);
+    return;
+  }
+
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    send(response, 405, "Method Not Allowed\n", {
+      Allow: "GET, HEAD",
+      "Content-Type": "text/plain; charset=utf-8",
     });
+    return;
+  }
+
+  let target;
+  try {
+    target = await resolveTarget(request.url);
+  } catch {
+    send(response, 404, "Not Found\n", { "Content-Type": "text/plain; charset=utf-8" });
+    return;
+  }
+  if (!target) {
+    send(response, 404, "Not Found\n", { "Content-Type": "text/plain; charset=utf-8" });
+    return;
+  }
+
+  try {
+    const content = await readFile(target);
+    send(response, 200, request.method === "HEAD" ? undefined : content, {
+      "Content-Type": CONTENT_TYPES.get(path.extname(target)) ?? "application/octet-stream",
+    });
+  } catch {
+    send(response, 404, "Not Found\n", { "Content-Type": "text/plain; charset=utf-8" });
   }
 }
 
@@ -415,78 +721,35 @@ export function createRequestHandler(resolveTarget = resolveStaticTarget, {
   services = null,
   host = HOST,
   port = PORT,
+  publicOrigin = null,
+  demoEnabled = true,
   maxBodyBytes = API_BODY_MAX_BYTES,
   maxBackupBodyBytes = BACKUP_BODY_MAX_BYTES,
   snapshotDirectory = null,
+  logger = SILENT_LOGGER,
 } = {}) {
+  const origins = createOriginPolicy({ host, port, publicOrigin });
+  const context = {
+    services,
+    demoEnabled,
+    logger,
+    snapshotDirectory,
+    limits: { maxBodyBytes, maxBackupBodyBytes },
+    snapshotGate: { holder: null },
+  };
+
   return async (request, response) => {
-    if (request.headers.host !== `${host}:${port}`) {
-      send(response, 400, "Bad Request\n", { "Content-Type": "text/plain; charset=utf-8" });
-      return;
-    }
-    let requestPath;
+    const startedAt = performance.now();
+    const logged = isLoggedRoute(rawRequestPath(request.url));
     try {
-      requestPath = parseSafeRequestPath(request.url);
-    } catch {
-      requestPath = null;
-    }
-    if (!requestPath) {
-      send(response, 400, "Bad Request\n", { "Content-Type": "text/plain; charset=utf-8" });
-      return;
-    }
-
-    const isApi = requestPath.startsWith("/api/");
-    const origin = request.headers.origin;
-    const expectedOrigin = `http://${host}:${port}`;
-    if (origin !== undefined && origin !== expectedOrigin) {
-      if (isApi) sendJson(response, 403, { error: "Requests must come from this local application origin.", code: "origin_not_allowed" });
-      else send(response, 403, "Forbidden\n", { "Content-Type": "text/plain; charset=utf-8" });
-      return;
-    }
-    if (isApi) {
-      if (request.method !== "GET" && request.method !== "POST") {
-        sendJson(response, 405, { error: "Method is not allowed.", code: "method_not_allowed" });
-        return;
-      }
-      if (request.method === "POST" && origin !== expectedOrigin) {
-        sendJson(response, 403, { error: "POST requests require the local application origin.", code: "origin_required" });
-        return;
-      }
-      if (!services) {
-        sendJson(response, 503, { error: "The local QC service is not ready.", code: "service_unavailable" });
-        return;
-      }
-      await handleApiRequest(request, response, requestPath, services, { maxBodyBytes, maxBackupBodyBytes }, snapshotDirectory);
-      return;
-    }
-
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      send(response, 405, "Method Not Allowed\n", {
-        Allow: "GET, HEAD",
-        "Content-Type": "text/plain; charset=utf-8",
-      });
-      return;
-    }
-
-    let target;
-    try {
-      target = await resolveTarget(request.url);
-    } catch {
-      send(response, 404, "Not Found\n", { "Content-Type": "text/plain; charset=utf-8" });
-      return;
-    }
-    if (!target) {
-      send(response, 404, "Not Found\n", { "Content-Type": "text/plain; charset=utf-8" });
-      return;
-    }
-
-    try {
-      const content = await readFile(target);
-      send(response, 200, request.method === "HEAD" ? undefined : content, {
-        "Content-Type": CONTENT_TYPES.get(path.extname(target)) ?? "application/octet-stream",
-      });
-    } catch {
-      send(response, 404, "Not Found\n", { "Content-Type": "text/plain; charset=utf-8" });
+      await routeRequest(request, response, resolveTarget, origins, context);
+    } catch (error) {
+      // An unexpected failure must not escape the request listener. Report it, then close the response.
+      logger.error(errorLogText(request, 500, error));
+      if (!response.headersSent) sendJson(response, 500, { error: GENERIC_SERVICE_ERROR });
+      else response.destroy?.();
+    } finally {
+      if (logged) logger.info(accessLogLine(request, response, startedAt));
     }
   };
 }
@@ -497,30 +760,81 @@ export function getDefaultDataDirectory({ platform = process.platform, env = pro
   return pathApi.resolve(projectRoot, "data", "workspace");
 }
 
-export async function createQCWorkspaceServices({ dataDirectory, projectRoot = PROJECT_ROOT } = {}) {
+// Removes temporary snapshot files that an interrupted download left behind. Only names the snapshot route creates match.
+export async function removeLeftoverSnapshotFiles(directory) {
+  let names;
+  try {
+    names = await readdir(directory);
+  } catch (error) {
+    if (error.code === "ENOENT") return 0;
+    throw error;
+  }
+  let removed = 0;
+  for (const name of names) {
+    if (!SNAPSHOT_TEMPORARY_FILE.test(name)) continue;
+    const candidate = path.join(directory, name);
+    const details = await lstat(candidate).catch(() => null);
+    if (!details?.isFile()) continue;
+    await rm(candidate, { force: true });
+    removed += 1;
+  }
+  return removed;
+}
+
+export async function createQCWorkspaceServices({ dataDirectory, projectRoot = PROJECT_ROOT, demoEnabled = true } = {}) {
   const [{ createSQLiteQCAdapter }] = await Promise.all([import("../storage/sqlite-qc-adapter.mjs")]);
   const directory = path.resolve(dataDirectory ?? getDefaultDataDirectory({ projectRoot }));
   const services = {
     main: createQCService(createSQLiteQCAdapter({ databasePath: path.join(directory, WORKSPACE_DATABASE_FILES.main) })),
-    demo: createQCService(createSQLiteQCAdapter({ databasePath: path.join(directory, WORKSPACE_DATABASE_FILES.demo) })),
   };
+  // A disabled demo workspace never opens its database file, so the file is not created.
+  if (demoEnabled) {
+    try {
+      services.demo = createQCService(createSQLiteQCAdapter({ databasePath: path.join(directory, WORKSPACE_DATABASE_FILES.demo) }));
+    } catch (error) {
+      services.main.close();
+      throw error;
+    }
+  }
   return Object.freeze({
     ...services,
     close() {
       services.main.close();
-      services.demo.close();
+      services.demo?.close();
     },
   });
 }
 
-export async function createStaticServer({ dataDirectory = getDefaultDataDirectory(), services: suppliedServices, host = HOST, port = PORT } = {}) {
-  const services = suppliedServices ?? await createQCWorkspaceServices({ dataDirectory });
+export async function createStaticServer({
+  dataDirectory = getDefaultDataDirectory(),
+  services: suppliedServices,
+  host = HOST,
+  port = PORT,
+  publicOrigin = null,
+  demoEnabled = true,
+  logger = CONSOLE_LOGGER,
+} = {}) {
+  const directory = path.resolve(dataDirectory);
+  // Invalid origin settings fail here, before any database file is opened.
+  createOriginPolicy({ host, port, publicOrigin });
+  const services = suppliedServices ?? await createQCWorkspaceServices({ dataDirectory: directory, demoEnabled });
+  try {
+    const removed = await removeLeftoverSnapshotFiles(directory);
+    if (removed > 0) logger.info(`Removed ${removed} temporary snapshot file(s) left by an earlier run.`);
+  } catch (error) {
+    if (!suppliedServices) services.close();
+    throw error;
+  }
   const server = createHttpServer(createRequestHandler(resolveStaticTarget, {
     services,
     host,
     port,
-    snapshotDirectory: path.resolve(dataDirectory),
+    publicOrigin,
+    demoEnabled,
+    snapshotDirectory: directory,
+    logger,
   }));
+  server.requestTimeout = REQUEST_TIMEOUT_MS;
   server.once("close", () => services.close?.());
   server.qcServices = services;
   return server;
@@ -543,15 +857,62 @@ function openBrowser(url) {
   try {
     const child = spawn(command, args, { detached: true, stdio: "ignore", windowsHide: true });
     child.once("error", () => {
-      console.warn("已启动本地页面，但系统未能自动打开浏览器；请手动访问 http://127.0.0.1:4173");
+      console.warn(`已启动本地页面，但系统未能自动打开浏览器；请手动访问 ${url}`);
     });
     child.unref();
   } catch {
-    console.warn("已启动本地页面，但系统未能自动打开浏览器；请手动访问 http://127.0.0.1:4173");
+    console.warn(`已启动本地页面，但系统未能自动打开浏览器；请手动访问 ${url}`);
   }
 }
 
-export async function startServer({ open = true } = {}) {
+// Stops accepting connections, waits up to graceMs for in-flight requests, then closes what remains and the databases.
+export function createShutdownHandler({ server, closeServices, graceMs = SHUTDOWN_GRACE_MS, logger = CONSOLE_LOGGER }) {
+  let stopping = null;
+  async function stop(signal) {
+    logger.info(`Received ${signal}; finishing in-flight requests before stopping MasterQC Web.`);
+    const closed = new Promise((resolve) => server.close(() => resolve()));
+    server.closeIdleConnections();
+    let timer = null;
+    const timedOut = await Promise.race([
+      closed.then(() => false),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(true), graceMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (timedOut) {
+      logger.error(`In-flight requests did not finish within ${graceMs / 1000} seconds; closing their connections.`);
+      server.closeAllConnections();
+      await closed;
+    }
+    await closeServices();
+    return { timedOut };
+  }
+  return (signal) => {
+    if (!stopping) stopping = stop(signal);
+    return stopping;
+  };
+}
+
+function installShutdownHandlers(server) {
+  const shutdown = createShutdownHandler({
+    server,
+    closeServices: () => server.qcServices?.close?.(),
+  });
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.on(signal, () => {
+      shutdown(signal).then(
+        () => process.exit(0),
+        (error) => {
+          console.error(`MasterQC Web could not stop cleanly: ${error.message}`);
+          process.exit(1);
+        },
+      );
+    });
+  }
+}
+
+export async function startServer({ open = true, config = readServerConfig() } = {}) {
   const startupIssue = await checkStartupRequirements();
   if (startupIssue) {
     console.error(startupIssue);
@@ -560,24 +921,39 @@ export async function startServer({ open = true } = {}) {
 
   let server;
   try {
-    server = await createStaticServer();
+    server = await createStaticServer({
+      dataDirectory: config.dataDirectory,
+      host: config.listenHost,
+      port: config.listenPort,
+      publicOrigin: config.publicOrigin,
+      demoEnabled: config.demoEnabled,
+      logger: CONSOLE_LOGGER,
+    });
   } catch (error) {
     console.error(`Local QC database could not be opened: ${error instanceof Error ? error.message : "unknown error"}`);
     return null;
   }
+
+  const url = `http://${formatHostPort(config.listenHost, config.listenPort)}`;
   return new Promise((resolve) => {
     server.once("error", (error) => {
       if (error.code === "EADDRINUSE") {
-        console.error("Local port 4173 is already in use. Close the other program using it, then restart MasterQC Web.");
+        console.error(`Local port ${config.listenPort} is already in use. Close the other program using it, then restart MasterQC Web.`);
       } else {
         console.error(`Local server could not start: ${error.message}`);
       }
       server.qcServices?.close?.();
       resolve(null);
     });
-    server.listen(PORT, HOST, () => {
-      console.log(`MasterQC Web 已启动：${CANONICAL_URL}`);
-      if (open) openBrowser(CANONICAL_URL);
+    server.listen(config.listenPort, config.listenHost, () => {
+      if (config.hosted) {
+        console.log(`MasterQC Web is listening on ${url} and serves ${config.publicOrigin}.`);
+      } else {
+        console.log(`MasterQC Web 已启动：${url}`);
+      }
+      // A hosted server runs headless; a browser can only be opened on the computer that runs the service.
+      if (open && !config.hosted) openBrowser(url);
+      installShutdownHandlers(server);
       resolve(server);
     });
   });
@@ -590,7 +966,16 @@ if (isMain) {
     console.error("参数不受支持。可选参数：--no-open");
     process.exitCode = 2;
   } else {
-    const server = await startServer({ open: !process.argv.includes("--no-open") });
-    if (!server) process.exitCode = 1;
+    let config = null;
+    try {
+      config = readServerConfig(process.env);
+    } catch (error) {
+      console.error(`Invalid MasterQC Web configuration: ${error.message}`);
+      process.exitCode = 1;
+    }
+    if (config) {
+      const server = await startServer({ open: !process.argv.includes("--no-open"), config });
+      if (!server) process.exitCode = 1;
+    }
   }
 }

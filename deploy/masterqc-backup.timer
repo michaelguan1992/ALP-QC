@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the MasterQC encrypted backup every 30 minutes
+
+[Timer]
+# Runs at minute 0 and minute 30 of every hour. Persistent runs a missed slot once after the server comes back.
+OnCalendar=*-*-* *:00,30:00
+Persistent=true
+AccuracySec=1min
+Unit=masterqc-backup.service
+
+[Install]
+WantedBy=timers.target
