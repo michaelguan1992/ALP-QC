@@ -3,6 +3,7 @@
 // the shared preview, download, and remove handling of the attachment library.
 
 import { button, el, errorText, list, notify, text } from "./qc-ops-common.js";
+import { createSingleFlight, uploadingLabel } from "./qc-ui.js";
 import { attachmentCanPreview, downloadAttachment, formatMebibytes, previewAttachment, readAttachmentFile } from "./qc-attachments.js";
 import { DOCUMENT_MAX_BYTES } from "../core/qc-domain.js";
 import { inspectionControlName, isHistoricalBatch } from "./qc-batch-model.js";
@@ -80,9 +81,13 @@ export function renderRowAttachmentCell(row, workspace, state, ctx, readOnly) {
     const choose = button(asset ? "Replace" : "Add", () => input.click(), "button-secondary qc-ops-small-button");
     choose.setAttribute("aria-label", inspectionControlName({ action: asset ? "Replace" : "Add", slot: label }, row));
     choose.disabled = readOnly;
-    input.addEventListener("change", async () => {
+    const slotStatus = el("span", { className: "upload-feedback", role: "status", ariaLive: "polite", hidden: true });
+    const slotFlight = createSingleFlight({ controls: () => [choose, removeButton] });
+    const uploadSlotFile = async () => {
       const file = input.files?.[0];
       if (!file) return;
+      slotStatus.textContent = uploadingLabel(file.size);
+      slotStatus.hidden = false;
       try {
         const payload = await readAttachmentFile(file, { maxBytes: DOCUMENT_MAX_BYTES, category: category === "videos" ? "video" : null });
         const response = await ctx.run("setRowAttachment", {
@@ -94,8 +99,11 @@ export function renderRowAttachmentCell(row, workspace, state, ctx, readOnly) {
         if (response.ok) input.value = "";
       } catch (error) {
         notify(errorText(error, `Could not read the selected ${label.toLowerCase()} file.`), true);
+      } finally {
+        slotStatus.hidden = true;
       }
-    });
+    };
+    input.addEventListener("change", () => { void slotFlight(uploadSlotFile); });
     const previewButton = asset && attachmentCanPreview(asset)
       ? button("Preview", () => { void previewAttachment(asset, ctx.service, `${text(row.title)} · ${label}`); }, "button-quiet qc-ops-small-button")
       : null;
@@ -109,7 +117,7 @@ export function renderRowAttachmentCell(row, workspace, state, ctx, readOnly) {
     const removeButton = asset
       ? button("Remove", () => {
         if (!window.confirm(`Remove “${text(asset.name, "this attachment")}” from this inspection row?`)) return;
-        void ctx.run("removeRowAttachment", { batchId: workspace.batch.id, rowId: row.id, category });
+        void slotFlight(() => ctx.run("removeRowAttachment", { batchId: workspace.batch.id, rowId: row.id, category }));
       }, "button-quiet qc-ops-attachment-remove")
       : null;
     if (removeButton) {
@@ -123,6 +131,7 @@ export function renderRowAttachmentCell(row, workspace, state, ctx, readOnly) {
       downloadButton,
       choose,
       removeButton,
+      slotStatus,
       input,
     );
     cell.append(slot);
@@ -158,8 +167,9 @@ function attachmentActions(asset, batch, ctx) {
   if (!asset.sourcePdf) {
     const remove = button("Remove", () => {
       if (!window.confirm(`Remove “${text(asset.name, "this attachment")}” from this batch? The file remains in the file library.`)) return;
-      void ctx.run("removeBatchAttachment", { batchId: batch.id, assetId: asset.id });
+      void removeFlight(() => ctx.run("removeBatchAttachment", { batchId: batch.id, assetId: asset.id }));
     }, "button-danger qc-ops-small-button");
+    const removeFlight = createSingleFlight({ controls: () => [remove] });
     remove.disabled = locked;
     if (batch.status === "released") remove.title = "Released batch attachments are read-only.";
     actions.push(remove);
@@ -179,29 +189,38 @@ export function renderBatchAttachments(workspace, state, ctx, { compact = false 
   });
   const add = button("Add attachment", () => fileInput.click(), "button-secondary qc-ops-small-button");
   add.disabled = readOnly;
-  fileInput.addEventListener("change", async () => {
+  const uploadStatus = el("p", { className: "upload-feedback", role: "status", ariaLive: "polite", hidden: true });
+  const uploadFlight = createSingleFlight({ controls: () => [add] });
+  const uploadBatchFiles = async () => {
     const files = Array.from(fileInput.files || []);
     if (!files.length) return;
-    // Each batch attachment is its own request, so the per-file limit also bounds every request.
-    for (const file of files) {
-      if (file.size > DOCUMENT_MAX_BYTES) {
-        notify(`${file.name} exceeds the ${formatMebibytes(DOCUMENT_MAX_BYTES)} per-file limit.`, true);
-        continue;
+    try {
+      // Each batch attachment is its own request, so the per-file limit also bounds every request.
+      for (const file of files) {
+        if (file.size > DOCUMENT_MAX_BYTES) {
+          notify(`${file.name} exceeds the ${formatMebibytes(DOCUMENT_MAX_BYTES)} per-file limit.`, true);
+          continue;
+        }
+        uploadStatus.textContent = uploadingLabel(file.size);
+        uploadStatus.hidden = false;
+        try {
+          const payload = await readAttachmentFile(file, { maxBytes: DOCUMENT_MAX_BYTES });
+          const response = await ctx.run("addBatchAttachment", {
+            batchId: batch.id,
+            ...payload,
+          });
+          if (!response.ok) break;
+        } catch (error) {
+          notify(errorText(error, `Could not read ${file.name}.`), true);
+          break;
+        }
       }
-      try {
-        const payload = await readAttachmentFile(file, { maxBytes: DOCUMENT_MAX_BYTES });
-        const response = await ctx.run("addBatchAttachment", {
-          batchId: batch.id,
-          ...payload,
-        });
-        if (!response.ok) break;
-      } catch (error) {
-        notify(errorText(error, `Could not read ${file.name}.`), true);
-        break;
-      }
+    } finally {
+      uploadStatus.hidden = true;
+      fileInput.value = "";
     }
-    fileInput.value = "";
-  });
+  };
+  fileInput.addEventListener("change", () => { void uploadFlight(uploadBatchFiles); });
   const attachmentList = list(workspace.attachments);
   const items = attachmentList.length
     ? attachmentList.map((asset) => el("li", { className: "qc-ops-attachment-item" },
@@ -214,6 +233,7 @@ export function renderBatchAttachments(workspace, state, ctx, { compact = false 
       compact ? null : el("h2", {}, "Attachments"),
       add,
     ),
+    uploadStatus,
     el("ul", { className: "qc-ops-attachment-list" }, items),
     fileInput,
   );

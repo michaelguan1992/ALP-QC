@@ -181,6 +181,72 @@ test("Delete issue with unsaved edits keeps the dialog open and shows a failed d
   assert.deepEqual(context.navigations, []);
 });
 
+test("an Issue save that timed out keeps the edits, offers a reload, and does not resend on its own", async () => {
+  clearIssueDrafts();
+  const issue = issueFixture();
+  const state = stateFixture([issue]);
+  const timeout = new Error("The server did not respond in time. The change may or may not have been saved. Reload the latest data to check before trying again.");
+  timeout.code = "request_timeout";
+  const context = issueContext({
+    state,
+    run: async (type) => {
+      if (type === "saveIssue") return { ok: false, unknownOutcome: true, reloadRequired: true, error: timeout };
+      throw new Error(`unexpected command ${type}`);
+    },
+  });
+
+  openIssueDialog(issue, state, context);
+  dom.setValue(fieldNamed(dom.dialog(), "owner"), "Ann");
+  dom.click(findButton(dom.dialog(), "Save changes"));
+  await flush();
+
+  assert.equal(formErrorText(), timeout.message);
+  assert.equal(findButton(dom.dialog(), "Reload latest data").hidden, false);
+  assert.equal(storedIssueDraft("issue-a").owner, "Ann", "the edit stays in the form");
+  assert.equal(context.commands.filter((command) => command.type === "saveIssue").length, 1);
+});
+
+test("an ordinary save failure does not offer the reload action", async () => {
+  clearIssueDrafts();
+  const issue = issueFixture();
+  const state = stateFixture([issue]);
+  const context = issueContext({
+    state,
+    run: async () => ({ ok: false, error: Object.assign(new Error("Owner must be 200 characters or fewer."), { status: 400 }) }),
+  });
+
+  openIssueDialog(issue, state, context);
+  dom.setValue(fieldNamed(dom.dialog(), "owner"), "Ann");
+  dom.click(findButton(dom.dialog(), "Save changes"));
+  await flush();
+
+  assert.equal(formErrorText(), "Owner must be 200 characters or fewer.");
+  assert.equal(findButton(dom.dialog(), "Reload latest data").hidden, true);
+});
+
+test("a stale Issue save is recognised by its code even when the message does not mention reloading", async () => {
+  clearIssueDrafts();
+  const issue = issueFixture();
+  const state = stateFixture([issue]);
+  const context = issueContext({
+    state,
+    run: async () => ({
+      ok: false,
+      stale: true,
+      reloadRequired: true,
+      error: Object.assign(new Error("Someone else changed this record. Reload the latest data, then reapply your change."), { code: "stale_revision", status: 409 }),
+    }),
+  });
+
+  openIssueDialog(issue, state, context);
+  dom.setValue(fieldNamed(dom.dialog(), "owner"), "Ann");
+  dom.click(findButton(dom.dialog(), "Save changes"));
+  await flush();
+
+  assert.match(formErrorText(), /Someone else changed this record/);
+  assert.equal(findButton(dom.dialog(), "Reload latest data").hidden, false);
+});
+
 test("discarding a dialog draft removes only the Issue it names", () => {
   clearIssueDrafts();
   const issueA = issueFixture({ id: "issue-a", number: "ISS-1" });

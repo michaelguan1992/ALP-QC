@@ -1,7 +1,8 @@
 // Issue detail dialog: the Issue runtime, its unsent edits (drafts), evidence, and manual disposition save.
 // The list and creation pages live in qc-ops-issues.js; the pure Issue helpers live in qc-issue-model.js.
 import { button, dateLabel, el, errorText, field, list, notify, quantity, statusPill, text, timestampLabel } from "./qc-ops-common.js";
-import { closeDialog, showDialog } from "./qc-ui.js";
+import { closeDialog, showDialog, uploadingLabel } from "./qc-ui.js";
+import { isStaleRevisionError, isUnknownOutcomeError, messageOf } from "./qc-command-rules.js";
 import { createManualSaveController } from "./qc-manual-save.js";
 import {
   assertUploadRequestSize,
@@ -88,6 +89,9 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
   let previewCleanup = () => {};
   let previewRequest = 0;
   let pendingOperationError = null;
+  let uploadsInFlight = 0;
+  const removing = new Set();
+  const uploadStatus = el("p", { className: "upload-feedback", role: "status", ariaLive: "polite", hidden: true });
   const startOperation = (work) => {
     pendingOperationError = null;
     const operation = Promise.resolve().then(work);
@@ -143,10 +147,26 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
   photoButton.disabled = disabled;
   fileButton.disabled = disabled;
 
+  // Adding files is locked while an upload is in flight, and the status shows the size being sent.
+  const applyAddLocks = () => {
+    const locked = disabled || uploadsInFlight > 0;
+    photoButton.disabled = locked;
+    fileButton.disabled = locked;
+    photoInput.disabled = locked;
+    fileInput.disabled = locked;
+  };
+  const setUploading = (active, bytes = 0) => {
+    uploadsInFlight += active ? 1 : -1;
+    uploadStatus.textContent = uploadsInFlight > 0 ? uploadingLabel(bytes) : "";
+    uploadStatus.hidden = uploadsInFlight <= 0;
+    applyAddLocks();
+  };
+
   const upload = async (input) => {
     const selected = Array.from(input.files || []);
     if (!selected.length || disposed) return;
     markDraftForPreservation();
+    setUploading(true, selected.reduce((sum, file) => sum + (Number(file.size) || 0), 0));
     try {
       assertUploadRequestSize(selected);
       const files = await Promise.all(selected.map(async (file) => {
@@ -173,14 +193,17 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
     } catch (error) {
       pendingOperationError = error;
       notify(errorText(error, "Could not read the selected file."), true);
+    } finally {
+      setUploading(false);
     }
   };
   photoInput.addEventListener("change", () => { void startOperation(() => upload(photoInput)); });
   fileInput.addEventListener("change", () => { void startOperation(() => upload(fileInput)); });
 
   const removeAttachment = async (asset) => {
-    if (disposed || disabled) return;
+    if (disposed || disabled || removing.has(asset.id)) return;
     if (!window.confirm(`Remove “${text(asset.name, "this file")}” from this issue?`)) return;
+    removing.add(asset.id);
     markDraftForPreservation();
     try {
       const response = await issueCommand("removeIssueAttachment", { id: issue.id, assetId: asset.id }, { render: false });
@@ -196,6 +219,8 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
     } catch (error) {
       pendingOperationError = error;
       notify(errorText(error, "Could not remove the attachment."), true);
+    } finally {
+      removing.delete(asset.id);
     }
   };
 
@@ -240,6 +265,7 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
     host.replaceChildren(
       el("div", { className: "qc-ops-section-heading" }, el("h3", {}, "Evidence"),
         el("div", { className: "qc-ops-issue-attachment-actions" }, photoButton, fileButton)),
+      uploadStatus,
       listHost,
       previewHost,
       photoInput,
@@ -258,10 +284,7 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
     hasPending: () => pendingOperations.size > 0,
     setDisabled(value) {
       disabled = readOnly || Boolean(value);
-      photoButton.disabled = disabled;
-      fileButton.disabled = disabled;
-      photoInput.disabled = disabled;
-      fileInput.disabled = disabled;
+      applyAddLocks();
       removeButtons.forEach((remove) => { remove.disabled = disabled; });
     },
   };
@@ -472,9 +495,9 @@ export function openIssueDialog(issue, state, ctx) {
       form.dataset.dirty = "false";
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : String(error || "The disposition could not be saved.");
-      formError.textContent = message;
-      reloadLatestButton.hidden = !/revision|stale|another tab changed|changed since your last view/i.test(message);
+      formError.textContent = messageOf(error, "The disposition could not be saved.");
+      // A stale or unknown-outcome save is retried only after a reload; the Issue edits stay in the form.
+      reloadLatestButton.hidden = !(isStaleRevisionError(error) || isUnknownOutcomeError(error));
     },
     onDiscard: () => {
       owner.value = String(currentIssue.owner || "");

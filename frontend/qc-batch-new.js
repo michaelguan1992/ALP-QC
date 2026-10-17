@@ -3,7 +3,7 @@
 // Creation runs through the page context; the dialog then opens the new batch when its id is returned.
 
 import { button, el, errorText, field, list, quantity, setOptions, text } from "./qc-ops-common.js";
-import { closeDialog, showDialog } from "./qc-ui.js";
+import { closeDialog, createSingleFlight, showDialog } from "./qc-ui.js";
 import { getBatchVersionReadiness, getBatchVersions, getSharedBatchVersionChoices } from "../core/qc-batch-versions.js";
 import { applicablePairs, orderedLines } from "./qc-batch-model.js";
 
@@ -49,6 +49,8 @@ export function openNewBatchDialog(state, ctx) {
   showStandardsAction(false);
   const formError = el("p", { className: "qc-ops-form-error", role: "alert" });
   const submit = el("button", { type: "submit", className: "button button-primary", disabled: true }, "Create batch");
+  // One submit creates one batch: a repeated submit while the first is pending is ignored.
+  const submitFlight = createSingleFlight({ controls: () => [submit], onSettled: () => updateSubmitState() });
   const cancel = button("Cancel", () => closeDialog(), "button button-secondary");
   const currentOrderLines = () => lines.filter((entry) => entry.order.id === orderSelect.value);
   const findLine = (lineId) => currentOrderLines().find((entry) => entry.line.id === lineId);
@@ -125,7 +127,7 @@ export function openNewBatchDialog(state, ctx) {
     const selectedVersionIsReady = sharedVersionChoices.some((choice) => choice.label === versionSelect.value);
     const ordinaryFieldsReady = Boolean(orderSelect.value && dateInput.value && recorderInput.value.trim());
     const hasCommonBasis = commonReadyPairs.some((pair) => pair.factory === factorySelect.value && pair.stage === stageSelect.value);
-    submit.disabled = !(hasCommonBasis && selectedVersionIsReady && productsReady && !mixedModels && quantitiesReady && ordinaryFieldsReady);
+    submit.disabled = submitFlight.isBusy() || !(hasCommonBasis && selectedVersionIsReady && productsReady && !mixedModels && quantitiesReady && ordinaryFieldsReady);
     formError.textContent = mixedModels ? "Choose products from the same model."
       : duplicateLines ? "Select each purchase order line only once."
       : productEntries.length && productsReady && !selectedVersionIsReady ? "No shared design version is available for these products."
@@ -185,8 +187,7 @@ export function openNewBatchDialog(state, ctx) {
     el("div", { className: "qc-ops-dialog-actions" }, cancel, submit)
   );
   resetProductsForOrder();
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
+  async function submitBatch() {
     formError.textContent = "";
     if (!form.reportValidity()) return;
     const selectedProducts = productEntries.map((entry) => ({
@@ -235,6 +236,10 @@ export function openNewBatchDialog(state, ctx) {
     const createdId = result.result?.entityId || result.result?.batchId;
     if (createdId) ctx.navigate("batches", createdId);
     else ctx.navigate("batches");
+  }
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void submitFlight(submitBatch);
   });
   showDialog("New inspection batch", form);
 }

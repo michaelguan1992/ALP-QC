@@ -1,6 +1,9 @@
-import { createHttpJsonTransport } from "../storage/http-json-transport.js";
+import { createHttpJsonTransport, LONG_REQUEST_TIMEOUT_MS } from "../storage/http-json-transport.js";
 
 const WORKSPACES = new Set(["main", "demo"]);
+// Commands whose requests carry file contents. Their uploads get the long request budget.
+const UPLOAD_COMMANDS = new Set(["addPhotos", "setRowAttachment", "addBatchAttachment", "addIssueAttachments", "addDocument", "createIssue"]);
+const LONG_REQUEST = Object.freeze({ timeoutMs: LONG_REQUEST_TIMEOUT_MS });
 
 function requireWorkspace(workspace) {
   if (!WORKSPACES.has(workspace)) throw new TypeError("QC workspace must be main or demo.");
@@ -24,28 +27,32 @@ export function createQCHttpService({ workspace = "main", fetchImpl = globalThis
     command: (type, data = {}, expectedRevision) => request("/command", {
       method: "POST",
       body: { type, data, expectedRevision },
+      ...(UPLOAD_COMMANDS.has(type) ? LONG_REQUEST : {}),
     }),
     saveBatchChanges: (data, expectedRevision) => request("/command", {
       method: "POST",
       body: { type: "saveBatchChanges", data, expectedRevision },
     }),
-    getAsset: (assetId) => request(`/assets/${encodeURIComponent(assetId)}`),
+    // Attachment content can be large on a slow link, so reads of it use the long budget.
+    getAsset: (assetId) => request(`/assets/${encodeURIComponent(assetId)}`, LONG_REQUEST),
     getBatchWorkspace: (batchId, options = { mode: "lightweight" }) => request(
       options === "lightweight" || options?.mode === "lightweight"
         ? `/batches/${encodeURIComponent(batchId)}/lightweight`
         : `/batches/${encodeURIComponent(batchId)}`,
     ),
     getPurchaseOrderProgress: (orderId) => request(`/orders/${encodeURIComponent(orderId)}/progress`),
-    exportBackup: () => request("/backup"),
+    exportBackup: () => request("/backup", LONG_REQUEST),
     // Same-origin download link for a SQLite snapshot; the browser streams it to disk without loading it here.
     backupSnapshotUrl: () => `${root}/backup/snapshot`,
     importBackup: (backup, expectedRevision) => request("/restore", {
       method: "POST",
       body: { backup, expectedRevision },
+      ...LONG_REQUEST,
     }),
     importHistory: (historyPackage, expectedRevision) => request("/history", {
       method: "POST",
       body: { historyPackage, expectedRevision },
+      ...LONG_REQUEST,
     }),
   });
 }
