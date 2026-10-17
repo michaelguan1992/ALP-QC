@@ -89,7 +89,7 @@ When state used by a decision can change, validation and writes must operate on 
 
 ## Implementation Slices and Acceptance
 
-Build each slice through frontend, core, and storage, with observable behavior before expanding. Concrete code implementation is delegated to Luna Max; the primary agent owns interface design, integration, review, and acceptance.
+Build each slice through frontend, core, and storage, with observable behavior before expanding. Concrete code implementation is delegated to Haiku Max (Claude Haiku subagents at maximum reasoning effort); the primary agent owns interface design, integration, review, and acceptance.
 
 1. **Catalog and standards:** distinguish the two inspection families, models, and variants; resolve applicable factory/stage items for a version. Verify that variants share the intended requirements without losing their identities.
 2. **Create and inspect a batch:** lock the inspection basis, save one item's result, and reload it after refresh. Verify that subsequent source-standard changes do not alter that batch and that results in separate batches remain separate.

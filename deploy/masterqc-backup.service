@@ -1,0 +1,34 @@
+[Unit]
+Description=MasterQC encrypted off-site database backup
+Documentation=file:///opt/masterqc/current/docs/deployment.md
+After=network-online.target masterqc.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=masterqc
+Group=masterqc
+WorkingDirectory=/opt/masterqc/current
+# The data directory comes from /etc/masterqc/env. The backup settings and secrets come from /etc/masterqc/backup.env.
+EnvironmentFile=/etc/masterqc/env
+EnvironmentFile=/etc/masterqc/backup.env
+# The AWS CLI keeps its cache under HOME, so HOME points at the writable staging area.
+Environment=HOME=/var/lib/masterqc-backups
+ExecStart=/opt/masterqc/current/deploy/masterqc-backup.sh
+TimeoutStartSec=45min
+SyslogIdentifier=masterqc-backup
+
+# Hardening. The database is read, never written; only the staging directory is writable.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/masterqc-backups
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+UMask=0077

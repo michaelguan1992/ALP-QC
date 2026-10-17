@@ -3,11 +3,14 @@
 // through the manual save controller, which also flushes them before in-app departure.
 
 import { button, dateLabel, el, errorText, field, list, notify, pageHeading, quantity, statusPill, text } from "./qc-ops-common.js";
-import { applySaveStatus, batchRowDrafts, clearDraftsForBatch, createBatchRowRegistry, deleteDetailDraft, getDetailDraft, pruneSavedBatchDrafts, reconcileSavedDetailDraft, reconcileSavedRowDraft, setDetailDraft } from "./qc-batch-drafts.js";
+import { createSingleFlight } from "./qc-ui.js";
+import { applySaveStatus, batchRowDrafts, clearDraftsForBatch, createBatchRowRegistry, deleteDetailDraft, dismissBatchDraftNotice, getDetailDraft, openBatchDrafts, persistBatchDraftsNow, rebaseBatchDrafts, reconcileSavedDetailDraft, reconcileSavedRowDraft, sameDetailDraft, setDetailDraft } from "./qc-batch-drafts.js";
 import { createManualSaveController } from "./qc-manual-save.js";
+import { NOT_SAVED_SEE_MESSAGE, isStaleRevisionError } from "./qc-command-rules.js";
+import { renderDraftNotice } from "./qc-draft-notice.js";
 import { batchReleaseBlockers } from "../core/qc-inspections.js";
 import { resolveBatchDisplayNumber } from "../core/qc-batch-display.js";
-import { batchProducts, isHistoricalBatch, navigateWithDraftWarning, orderById, productLabel, totalProductQuantity } from "./qc-batch-model.js";
+import { batchProducts, isHistoricalBatch, navigateWithDraftWarning, operationalTaskTitle, orderById, productLabel, totalProductQuantity } from "./qc-batch-model.js";
 import { batchAttachments, renderBatchAttachments } from "./qc-batch-attachments.js";
 import { makeOperationalInspectionTable, settleRowDraftAfterSave } from "./qc-batch-rows.js";
 import { renderHistoricalBatchDetail } from "./qc-batch-historical.js";
@@ -24,16 +27,20 @@ function validIsoDate(value) {
 
 function renderReleaseBlockers(workspace, ctx, manualSaveController) {
   const blockerHost = el("div", { className: "qc-ops-release-blockers" });
-  const release = button("Release full batch", async () => {
-    const releaseSavedBatch = async () => {
-      const result = await ctx.run("releaseBatch", { id: workspace.batch.id });
-      if (result.ok) notify("The full batch was released.");
-    };
-    if (manualSaveController?.hasPending()) {
-      await ctx.resolveManualChanges?.("release this batch", releaseSavedBatch);
-      return;
-    }
-    await releaseSavedBatch();
+  // A second click while the release is pending is ignored, so the batch is released once.
+  const releaseFlight = createSingleFlight({ controls: () => [release] });
+  const release = button("Release full batch", () => {
+    void releaseFlight(async () => {
+      const releaseSavedBatch = async () => {
+        const result = await ctx.run("releaseBatch", { id: workspace.batch.id });
+        if (result.ok) notify("The full batch was released.");
+      };
+      if (manualSaveController?.hasPending()) {
+        await ctx.resolveManualChanges?.("release this batch", releaseSavedBatch);
+        return;
+      }
+      await releaseSavedBatch();
+    });
   }, "button button-danger");
   const refresh = () => {
     const alreadyReleased = workspace.batch.status === "released";
@@ -71,7 +78,14 @@ export function renderBatchDetail(root, ctx) {
     }
     const isReleased = batch.status === "released";
     const savedDetails = savedDetailsFrom(batch);
-    pruneSavedBatchDrafts(batch, list(workspace.rows), { historical: false, savedDetails });
+    // Restores stored drafts when this page has none, and reconciles every draft with the saved values first.
+    const draftNotice = openBatchDrafts(batch.id, {
+      rows: list(workspace.rows),
+      details: savedDetails,
+      revision: state.revision ?? null,
+      readOnly: isReleased,
+      describeRow: (row) => operationalTaskTitle(row, workspace, state),
+    });
     const draftDetails = getDetailDraft(batch.id) || savedDetails;
     const order = workspace.order || orderById(state).get(batch.orderId);
     const products = batchProducts(batch, state, workspace);
@@ -93,6 +107,9 @@ export function renderBatchDetail(root, ctx) {
     });
     let releasePanel = null;
     const saveError = el("p", { className: "qc-ops-form-error qc-ops-save-error", role: "alert" });
+    // A stale save is explained once, by the banner above the page. The header and rows only say it was not saved.
+    let saveFailureIsStale = false;
+    let restoreNoticeElement = null;
     const rows = createBatchRowRegistry();
     const onRowDraftChange = (rowId = null, status = null, createIssueButton = null, inputState = null) => {
       if (rowId && status) {
@@ -101,8 +118,10 @@ export function renderBatchDetail(root, ctx) {
       }
       releasePanel?.refresh();
     };
+    // The core stores the recorder and the notes trimmed, so surrounding spaces are not a change that needs saving.
     const detailsDiffer = (value) => value.date !== (savedDetails.date || "") ||
-      value.recorder !== (savedDetails.recorder || "") || value.notes !== (savedDetails.notes || "");
+      String(value.recorder ?? "").trim() !== String(savedDetails.recorder || "").trim() ||
+      String(value.notes ?? "").trim() !== String(savedDetails.notes || "").trim();
     const hasChanges = () => batchRowDrafts(batch.id).length > 0 ||
       Boolean(getDetailDraft(batch.id) && detailsDiffer(getDetailDraft(batch.id)));
     const readSnapshot = () => ({
@@ -154,10 +173,17 @@ export function renderBatchDetail(root, ctx) {
       },
       save: (snapshot) => ctx.run("saveBatchChanges", readCommandData(snapshot), { manualSave: true, render: false, silent: true }),
       onError: (error) => {
-        saveError.textContent = `This page remains open because the changes could not be saved: ${errorText(error, "Check the highlighted changes and try again.")}`;
+        saveFailureIsStale = isStaleRevisionError(error);
+        saveError.textContent = saveFailureIsStale
+          ? NOT_SAVED_SEE_MESSAGE
+          : `This page remains open because the changes could not be saved: ${errorText(error, "Check the highlighted changes and try again.")}`;
       },
       onSaved: (snapshot, response) => {
+        saveFailureIsStale = false;
         saveError.textContent = "";
+        dismissBatchDraftNotice(batch.id);
+        restoreNoticeElement?.remove();
+        restoreNoticeElement = null;
         const savedBatch = list(response.state?.batches).find((candidate) => candidate.id === batch.id) ||
           list(response.result?.changes?.batches).find((candidate) => candidate.id === batch.id);
         if (!savedBatch) throw new Error("The saved batch changes could not be confirmed.");
@@ -179,8 +205,11 @@ export function renderBatchDetail(root, ctx) {
           batch.date = savedDetails.date;
           batch.recorder = savedDetails.recorder;
           batch.notes = savedDetails.notes;
+          // Only what was typed after the save was sent stays unsaved. Comparing with the server's copy would count the
+          // server's trimming as a change, and the departure would save the same details again without end.
           const currentDetails = readDetailValue();
-          if (detailsDiffer(currentDetails)) {
+          const typedAfterSubmit = !sameDetailDraft(currentDetails, snapshot.details);
+          if (typedAfterSubmit && detailsDiffer(currentDetails)) {
             setDetailDraft(batch.id, { date: currentDetails.date, recorder: currentDetails.recorder, notes: currentDetails.notes });
           } else {
             deleteDetailDraft(batch.id);
@@ -190,6 +219,9 @@ export function renderBatchDetail(root, ctx) {
           notesSummary.textContent = `Notes: ${text(savedDetails.notes, "—")}`;
           notesSummary.title = savedDetails.notes;
         }
+        // The saved values are now the page's own, so every draft that is still changed is judged against them.
+        rebaseBatchDrafts(batch.id);
+        persistBatchDraftsNow(batch.id);
         const currentState = response.state || ctx.state || state;
         workspace.releaseBlockers = batchReleaseBlockers(currentState, savedBatch);
         releasePanel?.refresh();
@@ -205,9 +237,12 @@ export function renderBatchDetail(root, ctx) {
           rowInputState.updateStatus();
         }
         saveError.textContent = "";
+        saveFailureIsStale = false;
+        restoreNoticeElement?.remove();
+        restoreNoticeElement = null;
       },
       onStatus: (status) => {
-        applySaveStatus(detailStatus, status);
+        applySaveStatus(detailStatus, status === "Save failed" && saveFailureIsStale ? "" : status);
         rows.applyStatus(batch.id, status);
         releasePanel?.refresh();
       },
@@ -235,17 +270,20 @@ export function renderBatchDetail(root, ctx) {
     releasePanel = renderReleaseBlockers(workspace, ctx, manualSaveController);
     const sharedVersionAtBatchLevel = typeof batch.versionLabel === "string" && batch.versionLabel.trim() !== "" &&
       products.every((product) => product.versionLabel === batch.versionLabel);
-    const deleteBatchButton = button("Delete", async () => {
+    const deleteFlight = createSingleFlight({ controls: () => [deleteBatchButton] });
+    const deleteBatchButton = button("Delete", () => {
       if (!window.confirm(`Delete batch ${text(workspace.displayNumber ?? resolveBatchDisplayNumber(state, batch.id, batch.number), "Batch")}? This action cannot be undone.`)) return;
-      const deleteSavedBatch = async () => {
-        // The deleted batch is not re-rendered; the page moves to the batch list at once.
-        const response = await ctx.run("deleteBatch", { id: batch.id }, { render: false });
-        if (!response.ok) return;
-        clearDraftsForBatch(batch.id);
-        await ctx.navigate("batches", null, true);
-      };
-      if (manualSaveController.hasPending()) await ctx.resolveManualChanges?.("delete this batch", deleteSavedBatch);
-      else await deleteSavedBatch();
+      void deleteFlight(async () => {
+        const deleteSavedBatch = async () => {
+          // The deleted batch is not re-rendered; the page moves to the batch list at once.
+          const response = await ctx.run("deleteBatch", { id: batch.id }, { render: false });
+          if (!response.ok) return;
+          clearDraftsForBatch(batch.id);
+          await ctx.navigate("batches", null, true);
+        };
+        if (manualSaveController.hasPending()) await ctx.resolveManualChanges?.("delete this batch", deleteSavedBatch);
+        else await deleteSavedBatch();
+      });
     }, "button button-danger");
     deleteBatchButton.disabled = batch.status !== "draft";
     const headerActions = [
@@ -285,8 +323,20 @@ export function renderBatchDetail(root, ctx) {
       el("div", { className: "qc-ops-section-heading" }, el("h2", {}, "Batch inspection")),
       makeOperationalInspectionTable(workspace, state, ctx, manualSaveController, onRowDraftChange)
     );
+    // "Discard restored edits" discards this batch's unsent edits through the controller, which also resets the inputs.
+    const restoreAction = () => {
+      if (draftNotice?.applied > 0) {
+        if (!manualSaveController.discardAll()) return;
+      } else {
+        dismissBatchDraftNotice(batch.id);
+      }
+      restoreNoticeElement?.remove();
+      restoreNoticeElement = null;
+    };
+    restoreNoticeElement = draftNotice ? renderDraftNotice(draftNotice, { onAction: restoreAction }) : null;
     root.replaceChildren(
       pageHeading(text(workspace.displayNumber ?? resolveBatchDisplayNumber(state, batch.id, batch.number), "Batch"), "", headerActions),
+      ...(restoreNoticeElement ? [restoreNoticeElement] : []),
       metadata,
       intro,
       renderBatchAttachments({ ...workspace, attachments: Array.isArray(workspace.attachments) ? workspace.attachments : batchAttachments(batch, state) }, state, ctx, { compact: true }),

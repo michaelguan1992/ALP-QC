@@ -4,7 +4,7 @@
 
 import { button, dateLabel, el, field, list, pageHeading, quantity, text } from "./qc-ops-common.js";
 import { getBatchVersionReadiness, getBatchVersions } from "../core/qc-batch-versions.js";
-import { draftCounts, hasAnyBatchDrafts, pendingBatchIds } from "./qc-batch-drafts.js";
+import { hasAnyBatchDrafts, unsentBatchEdits } from "./qc-batch-drafts.js";
 import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { applicablePairs, batchProducts, isHistoricalBatch, orderedLines, productLabel, sourceValue, totalProductQuantity, variantsById } from "./qc-batch-model.js";
 import { batchAttachments } from "./qc-batch-attachments.js";
@@ -130,14 +130,17 @@ function renderBatchList(root, ctx) {
       button("Open standards", () => ctx.navigate("standards"), "button button-primary")
     ));
   }
-  if (hasAnyBatchDrafts()) {
-    const counts = draftCounts();
+  // Unsent edits are listed whether they are in memory or only stored in this browser (after a reload).
+  const unsent = [...unsentBatchEdits()].filter(([batchId]) => batches.some((batch) => batch.id === batchId));
+  if (unsent.length) {
+    const rowCount = unsent.reduce((total, [, edit]) => total + edit.rows, 0);
+    const detailCount = unsent.reduce((total, [, edit]) => total + edit.details, 0);
     sections.unshift(el("section", { className: "card qc-ops-draft-warning" },
-      el("strong", {}, "Unsaved edits are held in this tab"),
-      el("p", {}, `${counts.rows} inspection row(s) and ${counts.details} batch detail set(s) need saving.`),
-      ...pendingBatchIds().map((batchId) => {
+      el("strong", {}, "Unsaved edits are kept in this browser until saved"),
+      el("p", {}, `${rowCount} inspection row(s) and ${detailCount} batch detail set(s) need saving.`),
+      ...unsent.map(([batchId]) => {
         const batch = batches.find((item) => item.id === batchId);
-        return batch ? button(`Resume ${text(displayNumbers.get(batch.id) ?? batch.number)}`, () => ctx.navigate("batches", batchId, true), "button button-secondary qc-ops-small-button") : null;
+        return button(`Resume ${text(displayNumbers.get(batch.id) ?? batch.number)}`, () => ctx.navigate("batches", batchId, true), "button button-secondary qc-ops-small-button");
       })
     ));
   }

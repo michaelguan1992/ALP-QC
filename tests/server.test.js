@@ -1,16 +1,84 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   CANONICAL_URL,
+  ConfigurationError,
   HOST,
   PORT,
   checkStartupRequirements,
   createRequestHandler,
+  parsePublicOrigin,
+  readReleaseIdentifier,
+  readServerConfig,
   resolveStaticTarget,
 } from "../launcher/server.mjs";
+
+const execFileAsync = promisify(execFile);
+
+// Calls the request handler in-process, the way the HTTP server would, without opening a socket.
+async function invoke(handler, { method = "GET", url = "/", headers = {}, body = undefined } = {}) {
+  const requestHeaders = { host: `${HOST}:${PORT}` };
+  for (const [name, value] of Object.entries(headers)) requestHeaders[name.toLowerCase()] = value;
+  if (body !== undefined) {
+    requestHeaders["content-type"] ??= "application/json";
+    requestHeaders["content-length"] = Buffer.byteLength(body);
+  }
+  const request = {
+    method,
+    url,
+    headers: requestHeaders,
+    async *[Symbol.asyncIterator]() {
+      if (body !== undefined) yield Buffer.from(body);
+    },
+  };
+  const response = {
+    statusCode: null,
+    headers: null,
+    body: "",
+    writeHead(statusCode, values) {
+      this.statusCode = statusCode;
+      this.headers = values;
+    },
+    end(value) {
+      this.body = value === undefined ? "" : String(value);
+    },
+  };
+  await handler(request, response);
+  return {
+    status: response.statusCode,
+    headers: response.headers,
+    text: response.body,
+    json: () => JSON.parse(response.body),
+  };
+}
+
+function captureLogs() {
+  const logs = { info: [], error: [] };
+  return {
+    logs,
+    logger: {
+      info: (line) => logs.info.push(line),
+      error: (text) => logs.error.push(text),
+    },
+  };
+}
+
+function fakeMainService(overrides = {}) {
+  return {
+    async getRevision() { return 3; },
+    async getState() { return { revision: 3 }; },
+    async initialize() { return { revision: 0 }; },
+    async command() { return { revision: 4 }; },
+    ...overrides,
+  };
+}
 
 async function createRoots() {
   const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "masterqc-web-test-"));
@@ -228,4 +296,314 @@ test("QC HTTP routes carry lightweight mode and expose on-demand asset reads", a
     ["getAsset", "asset-1"],
     ["getBatchWorkspace", "batch-1", { mode: "lightweight" }],
   ]);
+});
+
+test("readServerConfig keeps the local defaults when no hosted settings are present", () => {
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const config = readServerConfig({}, { projectRoot });
+  assert.deepEqual({ ...config }, {
+    hosted: false,
+    listenHost: "127.0.0.1",
+    listenPort: 4173,
+    publicOrigin: null,
+    demoEnabled: true,
+    dataDirectory: path.resolve(projectRoot, "data", "workspace"),
+    trustedUserHeader: null,
+    release: JSON.parse(readFileSync(path.join(projectRoot, "package.json"), "utf8")).version,
+  });
+  assert.equal(Object.isFrozen(config), true);
+});
+
+test("readServerConfig enables hosted mode from the public origin and keeps the demo off by default", () => {
+  const hosted = readServerConfig({
+    MASTERQC_PUBLIC_ORIGIN: "https://QC.example.com:443/",
+    MASTERQC_LISTEN_PORT: "4300",
+    MASTERQC_DATA_DIR: path.resolve("/var/lib/masterqc"),
+  });
+  assert.equal(hosted.hosted, true);
+  assert.equal(hosted.publicOrigin, "https://qc.example.com");
+  assert.equal(hosted.listenPort, 4300);
+  assert.equal(hosted.demoEnabled, false);
+  assert.equal(hosted.dataDirectory, path.resolve("/var/lib/masterqc"));
+  assert.equal(readServerConfig({ MASTERQC_PUBLIC_ORIGIN: "https://qc.example.com", MASTERQC_DEMO: "ON" }).demoEnabled, true);
+  assert.equal(readServerConfig({ MASTERQC_DEMO: "off" }).demoEnabled, false);
+  assert.equal(readServerConfig({ MASTERQC_PUBLIC_ORIGIN: "  ", MASTERQC_LISTEN_PORT: "" }).hosted, false, "blank values count as unset");
+});
+
+test("readServerConfig rejects invalid settings and names the setting in the error", () => {
+  const cases = [
+    [{ MASTERQC_LISTEN_PORT: "0" }, "MASTERQC_LISTEN_PORT"],
+    [{ MASTERQC_LISTEN_PORT: "65536" }, "MASTERQC_LISTEN_PORT"],
+    [{ MASTERQC_LISTEN_PORT: "4173x" }, "MASTERQC_LISTEN_PORT"],
+    [{ MASTERQC_LISTEN_HOST: "0.0.0.0" }, "MASTERQC_LISTEN_HOST"],
+    [{ MASTERQC_LISTEN_HOST: "192.168.1.10" }, "MASTERQC_LISTEN_HOST"],
+    [{ MASTERQC_DEMO: "maybe" }, "MASTERQC_DEMO"],
+    [{ MASTERQC_PUBLIC_ORIGIN: "qc.example.com" }, "MASTERQC_PUBLIC_ORIGIN"],
+    [{ MASTERQC_PUBLIC_ORIGIN: "http://qc.example.com" }, "MASTERQC_PUBLIC_ORIGIN"],
+    [{ MASTERQC_PUBLIC_ORIGIN: "https://qc.example.com/app" }, "MASTERQC_PUBLIC_ORIGIN"],
+    [{ MASTERQC_PUBLIC_ORIGIN: "https://user:secret@qc.example.com" }, "MASTERQC_PUBLIC_ORIGIN"],
+    [{ MASTERQC_PUBLIC_ORIGIN: "https://qc.example.com?x=1" }, "MASTERQC_PUBLIC_ORIGIN"],
+    [{ MASTERQC_PUBLIC_ORIGIN: "https://qc.example.com", MASTERQC_DATA_DIR: "relative/data" }, "MASTERQC_DATA_DIR"],
+  ];
+  for (const [env, setting] of cases) {
+    assert.throws(() => readServerConfig(env), (error) => {
+      assert.ok(error instanceof ConfigurationError, JSON.stringify(env));
+      assert.ok(error.message.includes(setting), `${setting} missing from: ${error.message}`);
+      assert.equal(error.message.includes("secret"), false, "credentials must not be echoed");
+      return true;
+    }, JSON.stringify(env));
+  }
+});
+
+test("public origins accept only https, or http on a loopback address, without credentials or paths", () => {
+  assert.equal(parsePublicOrigin("https://qc.example.com:8443"), "https://qc.example.com:8443");
+  assert.equal(parsePublicOrigin("https://qc.example.com/"), "https://qc.example.com");
+  assert.equal(parsePublicOrigin("http://127.0.0.1:4173"), "http://127.0.0.1:4173");
+  assert.equal(parsePublicOrigin("http://[::1]:4173"), "http://[::1]:4173");
+  for (const value of ["http://qc.example.com", "https://qc.example.com/app", "ftp://qc.example.com", "not a url", "https://a:b@qc.example.com", "https://qc.example.com/?q=1", "https://qc.example.com/#x"]) {
+    assert.throws(() => parsePublicOrigin(value), ConfigurationError, value);
+  }
+});
+
+test("local mode keeps the exact loopback Host and Origin rules and keeps the demo workspace", async () => {
+  const { logger } = captureLogs();
+  const services = {
+    main: fakeMainService(),
+    demo: fakeMainService({ async getRevision() { return 7; } }),
+  };
+  const handler = createRequestHandler(async () => null, { services, logger });
+
+  assert.equal((await invoke(handler, { url: "/api/qc/main/revision" })).status, 200);
+  assert.equal((await invoke(handler, { url: "/api/qc/demo/revision" })).json().revision, 7);
+
+  const foreignHost = await invoke(handler, { url: "/api/qc/main/revision", headers: { host: "qc.example.com" } });
+  assert.equal(foreignHost.status, 400);
+  const localhostName = await invoke(handler, { url: "/api/qc/main/revision", headers: { host: "localhost:4173" } });
+  assert.equal(localhostName.status, 400, "local mode accepts only the configured loopback address");
+
+  const foreignOrigin = await invoke(handler, { url: "/api/qc/main/revision", headers: { origin: "https://qc.example.com" } });
+  assert.equal(foreignOrigin.status, 403);
+  assert.equal(foreignOrigin.json().code, "origin_not_allowed");
+  const unsignedPost = await invoke(handler, { method: "POST", url: "/api/qc/main/initialize" });
+  assert.equal(unsignedPost.status, 403);
+  assert.equal(unsignedPost.json().code, "origin_required");
+  const signedPost = await invoke(handler, { method: "POST", url: "/api/qc/main/initialize", headers: { origin: CANONICAL_URL }, body: "{}" });
+  assert.equal(signedPost.status, 200);
+
+  const ipv6 = createRequestHandler(async () => null, { host: "::1", port: 4173, services, logger });
+  assert.equal((await invoke(ipv6, { url: "/api/qc/main/revision", headers: { host: "[::1]:4173" } })).status, 200);
+  assert.equal((await invoke(ipv6, { url: "/api/qc/main/revision", headers: { host: "127.0.0.1:4173" } })).status, 400);
+});
+
+test("GET /healthz reports the main revision and 503 when the database cannot be read", async () => {
+  const { logs, logger } = captureLogs();
+  const healthy = createRequestHandler(async () => null, {
+    services: { main: fakeMainService({ async getRevision() { return 12; } }) },
+    logger,
+  });
+  const ok = await invoke(healthy, { url: "/healthz?probe=1" });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(ok.json(), { ok: true, revision: 12 });
+  assert.match(logs.info[0], /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z GET \/healthz 200 \d+ms$/);
+
+  const broken = createRequestHandler(async () => null, {
+    services: { main: fakeMainService({ async getRevision() { throw new Error("database is locked"); } }) },
+    logger,
+  });
+  const down = await invoke(broken, { url: "/healthz" });
+  assert.equal(down.status, 503);
+  assert.deepEqual(down.json(), { ok: false });
+  assert.match(logs.error.at(-1), /database is locked/);
+
+  const wrongHost = await invoke(healthy, { url: "/healthz", headers: { host: "example.invalid" } });
+  assert.equal(wrongHost.status, 400);
+  const posted = await invoke(healthy, { method: "POST", url: "/healthz", headers: { origin: CANONICAL_URL }, body: "{}" });
+  assert.equal(posted.status, 405);
+  const notReady = await invoke(createRequestHandler(async () => null, { logger }), { url: "/healthz" });
+  assert.equal(notReady.status, 503);
+  assert.deepEqual(notReady.json(), { ok: false });
+});
+
+test("a request body that breaks mid-upload is a client error and is not logged as a server fault", async () => {
+  const { logs, logger } = captureLogs();
+  const handler = createRequestHandler(async () => null, { services: { main: fakeMainService() }, logger });
+  const request = {
+    method: "POST",
+    url: "/api/qc/main/initialize",
+    headers: { host: `${HOST}:${PORT}`, origin: CANONICAL_URL, "content-type": "application/json" },
+    async *[Symbol.asyncIterator]() {
+      yield Buffer.from("{\"mode\":");
+      const aborted = new Error("aborted");
+      aborted.code = "ECONNRESET";
+      throw aborted;
+    },
+  };
+  const response = {
+    statusCode: null,
+    body: "",
+    writeHead(statusCode) { this.statusCode = statusCode; },
+    end(value) { this.body = String(value ?? ""); },
+  };
+  await handler(request, response);
+  assert.equal(response.statusCode, 400);
+  assert.equal(JSON.parse(response.body).code, "body_interrupted");
+  assert.equal(logs.error.length, 0);
+});
+
+test("access logs record one line per API or health request, without query strings, headers, or bodies", async () => {
+  const { logs, logger } = captureLogs();
+  const handler = createRequestHandler(async () => null, { services: { main: fakeMainService() }, logger });
+
+  await invoke(handler, {
+    url: "/api/qc/main/revision?token=QUERY-SECRET",
+    headers: { authorization: "Basic QVVUSC1TRUNSRVQ=" },
+  });
+  await invoke(handler, {
+    method: "POST",
+    url: "/api/qc/main/initialize",
+    headers: { origin: CANONICAL_URL },
+    body: JSON.stringify({ mode: "lightweight", note: "BODY-SECRET" }),
+  });
+  await invoke(handler, { url: "/frontend/index.html" });
+
+  assert.equal(logs.info.length, 2, "static requests are not logged");
+  assert.match(logs.info[0], /^\S+ GET \/api\/qc\/main\/revision 200 \d+ms$/);
+  assert.match(logs.info[1], /^\S+ POST \/api\/qc\/main\/initialize 200 \d+ms$/);
+  const everything = [...logs.info, ...logs.error].join("\n");
+  for (const secret of ["QUERY-SECRET", "QVVUSC1TRUNSRVQ=", "BODY-SECRET", "Basic"]) {
+    assert.equal(everything.includes(secret), false, `${secret} must not be logged`);
+  }
+});
+
+test("error mapping hides internal faults, keeps business messages, and honors explicit status codes", async () => {
+  const cases = [
+    { name: "TypeError", error: new TypeError("Cannot read properties of undefined (reading 'orders')"), status: 500, generic: true, logged: true },
+    { name: "ReferenceError", error: new ReferenceError("state is not defined"), status: 500, generic: true, logged: true },
+    {
+      name: "SQLite error",
+      error: Object.assign(new Error("database disk image is malformed"), { code: "ERR_SQLITE_ERROR" }),
+      status: 500, generic: true, logged: true,
+    },
+    {
+      name: "system error",
+      error: Object.assign(new Error("ENOSPC: no space left on device, write '/var/lib/masterqc/tmp'"), { code: "ENOSPC", syscall: "write" }),
+      status: 500, generic: true, logged: true,
+    },
+    { name: "business validation", error: new Error("Order number is required."), status: 400, message: "Order number is required.", logged: false },
+    {
+      name: "legacy revision wording",
+      error: new Error("Expected revision must be a non-negative whole number."),
+      status: 400, message: "Expected revision must be a non-negative whole number.", logged: false,
+    },
+    {
+      name: "stale revision",
+      error: new Error("This data changed since your last view. Reload the latest state and retry."),
+      status: 409, message: "This data changed since your last view. Reload the latest state and retry.", code: "stale_revision", logged: false,
+    },
+    {
+      name: "explicit status with code",
+      error: Object.assign(new Error("Too many rows."), { statusCode: 422, code: "row_limit" }),
+      status: 422, message: "Too many rows.", code: "row_limit", logged: false,
+    },
+    {
+      name: "explicit conflict without code",
+      error: Object.assign(new Error("Conflict."), { statusCode: 409 }),
+      status: 409, message: "Conflict.", code: "stale_revision", logged: false,
+    },
+    {
+      name: "explicit server error",
+      error: Object.assign(new Error("Index unavailable."), { statusCode: 503 }),
+      status: 503, generic: true, logged: true,
+    },
+  ];
+
+  for (const testCase of cases) {
+    const { logs, logger } = captureLogs();
+    const handler = createRequestHandler(async () => null, {
+      services: { main: fakeMainService({ async getState() { throw testCase.error; } }) },
+      logger,
+    });
+    const response = await invoke(handler, { url: "/api/qc/main/state" });
+    assert.equal(response.status, testCase.status, testCase.name);
+    const body = response.json();
+    if (testCase.generic) {
+      assert.equal(body.error, "The QC server could not complete the request.", testCase.name);
+      assert.equal(response.text.includes("ENOSPC"), false, `${testCase.name} leaked its message`);
+      assert.equal(response.text.includes("/var/lib"), false, `${testCase.name} leaked a path`);
+    } else {
+      assert.equal(body.error, testCase.message, testCase.name);
+    }
+    assert.equal(body.code, testCase.code, testCase.name);
+    if (testCase.logged) {
+      assert.equal(logs.error.length, 1, testCase.name);
+      assert.match(logs.error[0], /\n\s+at /, `${testCase.name} must log a stack trace`);
+      assert.ok(logs.error[0].includes(testCase.error.message), testCase.name);
+    } else {
+      assert.equal(logs.error.length, 0, testCase.name);
+    }
+  }
+});
+
+// Creates a project-like directory with a package.json, and optionally a RELEASE file, for release identifier tests.
+async function releaseProject(t, { releaseFile = null } = {}) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "masterqc-release-test-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(path.join(directory, "package.json"), JSON.stringify({ name: "masterqc-web", version: "3.2.1" }));
+  if (releaseFile !== null) await writeFile(path.join(directory, "RELEASE"), releaseFile);
+  return directory;
+}
+
+test("the release identifier comes from the environment, then the RELEASE file, then the package version", async (t) => {
+  const plain = await releaseProject(t);
+  assert.equal(readReleaseIdentifier({ env: {}, projectRoot: plain }), "3.2.1", "the package version is the last resort");
+
+  const withFile = await releaseProject(t, { releaseFile: "20261017T010203Z-abc1234\n" });
+  assert.equal(readReleaseIdentifier({ env: {}, projectRoot: withFile }), "20261017T010203Z-abc1234", "the RELEASE file is trimmed");
+  assert.equal(readReleaseIdentifier({ env: { MASTERQC_RELEASE_ID: "  from-env  " }, projectRoot: withFile }), "from-env");
+  assert.equal(readServerConfig({ MASTERQC_RELEASE_ID: "configured" }, { projectRoot: withFile }).release, "configured");
+  assert.equal(readServerConfig({}, { projectRoot: withFile }).release, "20261017T010203Z-abc1234");
+});
+
+test("an invalid release identifier stops startup and names its source", async (t) => {
+  const withFile = await releaseProject(t, { releaseFile: "" });
+  assert.throws(() => readReleaseIdentifier({ env: {}, projectRoot: withFile }), (error) => {
+    assert.ok(error instanceof ConfigurationError);
+    assert.match(error.message, /The RELEASE file must be 1 to 100 printable characters/);
+    return true;
+  });
+  const plain = await releaseProject(t);
+  assert.throws(() => readReleaseIdentifier({ env: { MASTERQC_RELEASE_ID: "x".repeat(101) }, projectRoot: plain }), /MASTERQC_RELEASE_ID must be 1 to 100 printable characters/);
+  assert.throws(() => readReleaseIdentifier({ env: { MASTERQC_RELEASE_ID: "tab\there" }, projectRoot: plain }), /MASTERQC_RELEASE_ID must be 1 to 100 printable characters/);
+  assert.equal(readReleaseIdentifier({ env: { MASTERQC_RELEASE_ID: "x".repeat(100) }, projectRoot: plain }).length, 100);
+});
+
+test("a script started through a symlinked directory is still its entry point", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "masterqc-entry-test-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const entryPointUrl = new URL("../launcher/entry-point.mjs", import.meta.url).href;
+  const releaseDirectory = path.join(directory, "releases", "release-one");
+  await mkdir(releaseDirectory, { recursive: true });
+  await writeFile(path.join(releaseDirectory, "probe.mjs"), [
+    `import { isEntryPoint } from ${JSON.stringify(entryPointUrl)};`,
+    "console.log(String(isEntryPoint(import.meta.url)));",
+    "console.log(String(isEntryPoint(\"file:///nowhere/else.mjs\")));",
+    "",
+  ].join("\n"));
+  // The `current` link is a directory symlink, so the path used to start the script goes through it.
+  await symlink(releaseDirectory, path.join(directory, "current"));
+  const { stdout } = await execFileAsync(process.execPath, [path.join(directory, "current", "probe.mjs")]);
+  assert.deepEqual(stdout.trim().split("\n"), ["true", "false"]);
+});
+
+test("the trusted operator header is read as a lower-case name and invalid names stop startup", () => {
+  assert.equal(readServerConfig({ MASTERQC_TRUSTED_USER_HEADER: "X-Remote-User" }).trustedUserHeader, "x-remote-user");
+  assert.equal(readServerConfig({ MASTERQC_TRUSTED_USER_HEADER: "" }).trustedUserHeader, null, "blank counts as unset");
+  assert.equal(readServerConfig({}).trustedUserHeader, null);
+  for (const value of ["bad header", "x-remote-user:", "name\u0001", "a".repeat(65)]) {
+    assert.throws(() => readServerConfig({ MASTERQC_TRUSTED_USER_HEADER: value }), (error) => {
+      assert.ok(error instanceof ConfigurationError, value);
+      assert.match(error.message, /^MASTERQC_TRUSTED_USER_HEADER must be an HTTP header name/);
+      return true;
+    });
+  }
 });

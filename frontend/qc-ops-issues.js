@@ -10,7 +10,7 @@ import {
   statusPill,
   text,
 } from "./qc-ops-common.js";
-import { closeDialog, showDialog } from "./qc-ui.js";
+import { closeDialog, createSingleFlight, showDialog, uploadingLabel } from "./qc-ui.js";
 import {
   assertUploadRequestSize,
   issueAttachmentCategory,
@@ -112,8 +112,10 @@ export function openNewIssueDialog(state, ctx, options = {}) {
       field("Inspection row (optional)", rowSelect),
     );
   const submit = el("button", { type: "submit", className: "button button-primary" }, "Create issue");
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
+  const uploadStatus = el("p", { className: "upload-feedback", role: "status", ariaLive: "polite", hidden: true });
+  // Photos and files are sent with the Issue, so the controls stay disabled until the request settles.
+  const submitFlight = createSingleFlight({ controls: () => [submit, photosButton, filesButton] });
+  async function submitIssue() {
     formError.textContent = "";
     const reportedBy = reportedByInput.value.trim();
     if (!reportedBy) {
@@ -127,7 +129,6 @@ export function openNewIssueDialog(state, ctx, options = {}) {
       photosButton.focus();
       return;
     }
-    submit.disabled = true;
     const data = { reportedBy, owner: initialOwnerInput.value.trim(), title: titleInput.value.trim(), requestId, files: [] };
     const description = descriptionInput.value.trim();
     if (description) data.description = description;
@@ -135,6 +136,8 @@ export function openNewIssueDialog(state, ctx, options = {}) {
     const rowId = fixedRow?.id || rowSelect.value;
     if (batchId) data.batchId = batchId;
     if (rowId) data.rowId = rowId;
+    uploadStatus.textContent = uploadingLabel(selectedFiles.reduce((sum, entry) => sum + (Number(entry.file.size) || 0), 0));
+    uploadStatus.hidden = false;
     try {
       assertUploadRequestSize(selectedFiles.map((entry) => entry.file));
       data.files = await Promise.all(selectedFiles.map(async (entry) => {
@@ -145,14 +148,14 @@ export function openNewIssueDialog(state, ctx, options = {}) {
         return { ...payload, category: entry.category };
       }));
     } catch (error) {
+      uploadStatus.hidden = true;
       formError.textContent = errorText(error, "Could not read the selected file.");
-      submit.disabled = false;
       return;
     }
     const result = await ctx.run("createIssue", data);
+    uploadStatus.hidden = true;
     if (!result.ok) {
       formError.textContent = errorText(result.error);
-      submit.disabled = false;
       return;
     }
     closeDialog(true);
@@ -160,6 +163,10 @@ export function openNewIssueDialog(state, ctx, options = {}) {
     const issueId = result.result?.entityId || result.result?.issueId;
     if (issueId) ctx.navigate("issues", issueId, true);
     else ctx.navigate("issues", null, true);
+  }
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void submitFlight(submitIssue);
   });
   form.append(
     field("Reported by", reportedByInput),
@@ -177,6 +184,7 @@ export function openNewIssueDialog(state, ctx, options = {}) {
       photoInput,
       fileInput,
     ),
+    uploadStatus,
     formError,
     el("div", { className: "qc-ops-dialog-actions" }, button("Cancel", () => closeDialog(), "button button-secondary"), submit)
   );

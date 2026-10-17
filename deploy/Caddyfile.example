@@ -1,0 +1,49 @@
+# Example Caddy configuration for MasterQC Web. Caddy 2.8 or later is recommended.
+#
+# 1. Copy this file to /etc/caddy/Caddyfile and replace qc.example.com.
+# 2. Create one bcrypt hash per person with `caddy hash-password` and paste each hash after its username.
+#    Never store plain-text passwords here.
+# 3. Check and apply the configuration:
+#      sudo caddy validate --config /etc/caddy/Caddyfile
+#      sudo systemctl reload caddy
+
+{
+	servers {
+		timeouts {
+			read_header 30s
+			# Uploads of up to about 90 MiB can take a long time over slow links.
+			read_body 60m
+			write 2h
+			idle 10m
+		}
+	}
+}
+
+qc.example.com {
+	encode zstd gzip
+
+	basic_auth {
+		# Usernames are case-sensitive. Replace each placeholder with the output of `caddy hash-password`.
+		alice $2a$14$REPLACE_WITH_BCRYPT_HASH_FOR_ALICE
+		bob $2a$14$REPLACE_WITH_BCRYPT_HASH_FOR_BOB
+	}
+
+	# The application accepts up to 90,527,062 bytes (86.3 MiB). 95MB is above that limit in decimal and binary units.
+	# A decimal 90MB (90,000,000 bytes) would reject valid uploads, so keep this value at or above the application limit.
+	request_body {
+		max_size 95MB
+	}
+
+	reverse_proxy 127.0.0.1:4173 {
+		# Caddy forwards the original Host header. Hosted mode checks it against MASTERQC_PUBLIC_ORIGIN.
+		# The application records the operator from X-Remote-User (MASTERQC_TRUSTED_USER_HEADER). header_up replaces any
+		# value a browser sent with the Basic Auth user name, so nobody can choose the name in the audit trail. A
+		# request_header delete alone would remove the client's value without setting the operator, so it is not enough.
+		header_up X-Remote-User {http.auth.user.id}
+		transport http {
+			dial_timeout 5s
+			read_timeout 2h
+			write_timeout 60m
+		}
+	}
+}

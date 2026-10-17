@@ -141,6 +141,49 @@ function findDirtyDialogForm(dialog) {
   return [...dialog.querySelectorAll('form[data-dirty="true"]')].find((form) => !form.dataset.issueId) ?? null;
 }
 
+/** True while the shared dialog is open with an edited form that the generic prompt guards. */
+export function hasUnsavedDialogForm() {
+  const dialog = document.querySelector("#qc-dialog");
+  return Boolean(dialog?.open && findDirtyDialogForm(dialog));
+}
+
+/**
+ * Single-flight guard for a submit or action handler. While `work` runs, the controls returned by
+ * `controls()` are disabled and repeated calls return at once without running `work`. When it settles,
+ * the controls that were enabled are enabled again and `onSettled` runs, so the caller can recompute
+ * any state that depends on them.
+ */
+export function createSingleFlight({ controls = () => [], onSettled = null } = {}) {
+  let busy = false;
+  const guard = (work) => {
+    if (busy) return undefined;
+    busy = true;
+    const disabledHere = controls().filter((control) => control && !control.disabled);
+    for (const control of disabledHere) control.disabled = true;
+    const finish = () => {
+      busy = false;
+      for (const control of disabledHere) control.disabled = false;
+      onSettled?.();
+    };
+    let pending;
+    try {
+      pending = Promise.resolve(work());
+    } catch (error) {
+      finish();
+      throw error;
+    }
+    return pending.finally(finish);
+  };
+  guard.isBusy = () => busy;
+  return guard;
+}
+
+/** The status line for an upload in flight, with the size of the data being sent. */
+export function uploadingLabel(bytes) {
+  const megabytes = Math.max(0, Number(bytes) || 0) / (1024 * 1024);
+  return `Uploading… (${megabytes < 0.1 ? "0.1" : megabytes.toFixed(1)} MB)`;
+}
+
 /** Runs the close behavior of the content on screen (Escape, Close button). */
 export function requestDialogClose() {
   if (currentCloseRequest) return currentCloseRequest();

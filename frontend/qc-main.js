@@ -1,24 +1,66 @@
 import { qcService, createDemoQCService } from "../core/qc-app.js";
 import { renderAdminPage } from "./qc-admin.js";
 import { renderOperationsPage } from "./qc-operations.js";
-import { button, el, notify, showDialog, closeDialog } from "./qc-ui.js";
+import { button, el, notify, showDialog, closeDialog, hasUnsavedDialogForm } from "./qc-ui.js";
 import { createManualSaveRegistry } from "./qc-manual-save-registry.js";
+import { createQCSession } from "./qc-session.js";
+import { SHARED_CHANGE_MESSAGE, messageOf } from "./qc-command-rules.js";
+import { configureDraftRecovery, purgeExpiredStoredDrafts } from "./qc-draft-recovery.js";
+import { RELEASE_NOTICE_MESSAGE, createReleaseWatch, readServerSession } from "./qc-server-session.js";
 
 const app = document.querySelector("#app");
 const routes = new Set(["batches", "batch-report", "issues", "catalog", "standards", "orders", "library", "settings", "backup"]);
 const operationRoutes = new Set(["batches", "batch-report", "issues"]);
 const demoMode = new URLSearchParams(location.search).get("workspace") === "demo";
 const service = demoMode ? await createDemoQCService() : qcService;
-let state = null;
 let currentRoute = "batches";
 let selectedId = null;
-let staleMessage = "";
 let renderNumber = 0;
 let channel = null;
+let releaseWatch = null;
+let releaseAvailable = false;
 const saves = createManualSaveRegistry();
-let commandQueue = Promise.resolve();
-let needsAuthoritativeRefresh = false;
-let commandInFlight = 0;
+
+function updateNotices({ blocking, sharedChange }) {
+  const warning = document.querySelector("#stale-warning");
+  if (warning) {
+    warning.hidden = !blocking;
+    const message = warning.querySelector(".stale-message");
+    if (message) message.textContent = blocking;
+  }
+  // While the blocking banner explains a rejected save, the informational notice stays out of the way.
+  const notice = document.querySelector("#shared-change-notice");
+  if (notice) notice.hidden = !sharedChange || Boolean(blocking);
+}
+
+function updateReleaseNotice() {
+  const notice = document.querySelector("#release-notice");
+  if (notice) notice.hidden = !releaseAvailable;
+}
+
+/** Reloads for a newer release. Pending edits are saved first, or the user decides; unsent edits survive a reload in this browser. */
+async function reloadForNewRelease() {
+  const reload = () => {
+    location.reload();
+  };
+  if (saves.hasPending()) {
+    await saves.resolve("reload this page", reload);
+    return;
+  }
+  if (hasUnsavedForm()) {
+    promptToDiscard("reload", reload);
+    return;
+  }
+  reload();
+}
+
+const session = createQCSession({
+  service,
+  notify,
+  render: () => renderApp(),
+  announceRevision: (revision) => channel?.postMessage({ revision }),
+  onNotices: updateNotices,
+});
 
 function readRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
@@ -55,12 +97,6 @@ function dirtyForms() {
   return [...app.querySelectorAll('.app-main form[data-dirty="true"]:not([data-autosave-form="true"]):not([data-issue-id])')];
 }
 
-function enqueueCommand(work) {
-  const pending = commandQueue.then(work, work);
-  commandQueue = pending.then(() => undefined, () => undefined);
-  return pending;
-}
-
 function routeHash(route, id) {
   if (route === "batch-report" && id) return `#/batches/${encodeURIComponent(id)}/report`;
   return `#/${route}${id ? `/${encodeURIComponent(id)}` : ""}`;
@@ -79,25 +115,10 @@ function promptToDiscard(actionLabel, action) {
   ));
 }
 
-function updateStaleWarning() {
-  const warning = document.querySelector("#stale-warning");
-  if (!warning) return;
-  warning.hidden = !staleMessage;
-  const message = warning.querySelector(".stale-message");
-  if (message) message.textContent = staleMessage;
-}
-
-function setStale(message) {
-  staleMessage = message;
-  updateStaleWarning();
-}
-
-async function readLatestState() {
-  const next = await service.getState({ mode: "lightweight" });
-  state = next;
-  needsAuthoritativeRefresh = false;
-  staleMessage = "";
-  renderApp();
+async function refreshLatest() {
+  const result = await session.loadLatest();
+  if (result.ok) notify("Latest data loaded.");
+  else notify(messageOf(result.error, "The latest data could not be loaded."), true);
 }
 
 async function requestRefresh() {
@@ -111,16 +132,6 @@ async function requestRefresh() {
     return;
   }
   void refreshLatest();
-}
-
-async function refreshLatest() {
-  try {
-    await readLatestState();
-    notify("Latest local data loaded.");
-  } catch (error) {
-    setStale("The latest data could not be loaded. Your current page is still open; try again.");
-    notify(error instanceof Error ? error.message : "The latest data could not be loaded.", true);
-  }
 }
 
 async function navigate(route, id = null, force = false) {
@@ -162,138 +173,13 @@ function settingsNavItem() {
   return item;
 }
 
-function applyCommandProjection(commandResult) {
-  const changes = commandResult?.changes;
-  if (!changes || !state) return false;
-  const next = { ...state };
-  for (const collection of ["batches", "issues", "audit", "orders"]) {
-    const updates = changes[collection];
-    if (!Array.isArray(updates) || !updates.length) continue;
-    const values = [...(Array.isArray(next[collection]) ? next[collection] : [])];
-    for (const update of updates) {
-      if (!update?.id) continue;
-      const index = values.findIndex((value) => value?.id === update.id);
-      if (index < 0) values.push(update);
-      else values[index] = { ...values[index], ...update };
-    }
-    next[collection] = values;
-  }
-  const revision = Number(commandResult.revision ?? commandResult.result?.revision);
-  if (Number.isSafeInteger(revision) && revision >= Number(next.revision || 0)) next.revision = revision;
-  state = next;
-  return true;
-}
-
-function getContext(thisRender) {
-  return {
-    service,
-    isDemo: demoMode,
-    state,
-    navigate,
-    refresh: requestRefresh,
-    announceChange: (revision) => channel?.postMessage({ revision }),
-    selectedId,
-    isCurrentRender: () => thisRender === renderNumber,
-    registerManualSaveController: (controller) => {
-      // A replaced page must not guard departure, so its controller is disposed at once.
-      if (thisRender !== renderNumber) {
-        controller.dispose?.();
-        return () => {};
-      }
-      return saves.register(controller);
-    },
-    resolveManualChanges: (actionLabel, action, options) => saves.resolve(actionLabel, action, options),
-    refreshState: async ({ render = false } = {}) => enqueueCommand(async () => {
-      commandInFlight += 1;
-      try {
-        const latest = await service.getState({ mode: "lightweight" });
-        commandInFlight -= 1;
-        state = latest;
-        needsAuthoritativeRefresh = false;
-        staleMessage = "";
-        channel?.postMessage({ revision: latest.revision });
-        if (render) renderApp();
-        else updateStaleWarning();
-        return { ok: true, state: latest };
-      } catch (error) {
-        commandInFlight -= 1;
-        setStale("The latest data could not be loaded. Reload before making another change.");
-        return { ok: false, error };
-      }
-    }),
-    run: async (type, data, options = {}) => {
-      return enqueueCommand(async () => {
-        if (!state) return { ok: false, error: new Error("The local workspace is not ready.") };
-        if (needsAuthoritativeRefresh) {
-          try {
-            state = await service.getState({ mode: "lightweight" });
-            needsAuthoritativeRefresh = false;
-          } catch (error) {
-            setStale("The saved change is awaiting a fresh read. Reload before making another change.");
-            if (!options.silent) notify(error instanceof Error ? error.message : "The latest data could not be loaded.", true);
-            return { ok: false, error };
-          }
-        }
-        const baseRevision = state.revision;
-        let result;
-        commandInFlight += 1;
-        try {
-          result = await service.command(type, data, baseRevision);
-        } catch (error) {
-          commandInFlight -= 1;
-          const message = error instanceof Error ? error.message : "The change could not be saved.";
-          if (/revision|stale|reload|changed in another/i.test(message)) {
-            setStale("Another tab changed this workspace. Reload the latest data before saving again.");
-          }
-          if (!options.silent) notify(message, true);
-          return { ok: false, error, stale: /revision|stale|reload|changed in another/i.test(message) };
-        }
-        const commandRevision = Number(result?.revision ?? result?.result?.revision);
-        if (applyCommandProjection(result)) {
-          commandInFlight -= 1;
-          needsAuthoritativeRefresh = false;
-          staleMessage = "";
-          channel?.postMessage({ revision: state.revision });
-          if (options.render !== false) renderApp();
-          else updateStaleWarning();
-          return { ok: true, result, state, revision: state.revision, refreshed: true, projected: true };
-        }
-        try {
-          const latest = await service.getState({ mode: "lightweight" });
-          commandInFlight -= 1;
-          state = latest;
-          needsAuthoritativeRefresh = false;
-          staleMessage = "";
-          channel?.postMessage({ revision: latest.revision });
-          if (options.render !== false) renderApp();
-          else updateStaleWarning();
-          return { ok: true, result, state: latest, revision: latest.revision, refreshed: true };
-        } catch (readError) {
-          commandInFlight -= 1;
-          if (Number.isSafeInteger(commandRevision) && commandRevision >= baseRevision) {
-            state = { ...state, revision: commandRevision };
-          }
-          needsAuthoritativeRefresh = true;
-          setStale("The change was saved, but the updated data could not be reloaded. Reload before making another change.");
-          if (!options.silent) notify(readError instanceof Error ? readError.message : "The change was saved, but the page could not reload.", true);
-          return { ok: false, committed: true, refreshed: false, result, revision: commandRevision, error: readError };
-        }
-      });
-    },
-  };
-}
-
-function releaseRetiredWhenCurrent(thisRender) {
-  return () => {
-    if (thisRender === renderNumber) saves.releaseRetired();
-  };
-}
-
 function renderApp() {
+  const state = session.state;
   if (!state) return;
   // Controllers of the replaced page keep guarding departure until this render has registered its own.
   saves.retireRendered();
   const thisRender = ++renderNumber;
+  const notices = session.notices;
   const shell = el("div", { className: "app-frame" });
   const homeUrl = demoMode ? "/?workspace=demo" : "/";
   const sidebar = el("aside", { className: "app-sidebar", "aria-label": "Main navigation" },
@@ -313,7 +199,7 @@ function renderApp() {
     ),
     el("div", { className: "sidebar-footer", role: "status", "aria-label": "Storage location" },
       el("span", { className: "local-dot" }),
-      el("span", {}, "On this computer"),
+      el("span", {}, "Shared workspace"),
     ),
     el("div", { className: "sidebar-settings" }, settingsNavItem()),
   );
@@ -327,9 +213,18 @@ function renderApp() {
       el("a", { href: `${realUrl.pathname}${realUrl.search}${realUrl.hash}` }, "Open your real workspace"),
     ));
   }
-  workspace.append(el("div", { id: "stale-warning", className: "stale-warning", hidden: true, role: "alert" },
-    el("span", { className: "stale-message" }, staleMessage),
+  // The blocking warning is for a rejected save or a failed reload. The notice only reports newer changes.
+  workspace.append(el("div", { id: "stale-warning", className: "stale-warning", hidden: !notices.blocking, role: "alert" },
+    el("span", { className: "stale-message" }, notices.blocking),
     button("Reload latest data", requestRefresh, "button-secondary"),
+  ));
+  workspace.append(el("div", { id: "shared-change-notice", className: "shared-change-notice", hidden: !notices.sharedChange || Boolean(notices.blocking), role: "status" },
+    el("span", {}, SHARED_CHANGE_MESSAGE),
+    button("Reload", requestRefresh, "button-secondary"),
+  ));
+  workspace.append(el("div", { id: "release-notice", className: "release-notice", hidden: !releaseAvailable, role: "status" },
+    el("span", {}, RELEASE_NOTICE_MESSAGE),
+    button("Reload now", reloadForNewRelease, "button-secondary"),
   ));
   const main = el("main", { className: "app-main", id: "main-content" });
   const slot = el("div", { className: "page-render-slot" });
@@ -338,7 +233,6 @@ function renderApp() {
   shell.append(sidebar, workspace);
   app.replaceChildren(shell);
   app.classList.remove("app-loading");
-  updateStaleWarning();
 
   const context = getContext(thisRender);
   if (operationRoutes.has(currentRoute)) {
@@ -358,6 +252,36 @@ function renderApp() {
       ));
     });
   }
+}
+
+function releaseRetiredWhenCurrent(thisRender) {
+  return () => {
+    if (thisRender === renderNumber) saves.releaseRetired();
+  };
+}
+
+function getContext(thisRender) {
+  return {
+    service,
+    isDemo: demoMode,
+    state: session.state,
+    navigate,
+    refresh: requestRefresh,
+    announceChange: (revision) => channel?.postMessage({ revision }),
+    selectedId,
+    isCurrentRender: () => thisRender === renderNumber,
+    registerManualSaveController: (controller) => {
+      // A replaced page must not guard departure, so its controller is disposed at once.
+      if (thisRender !== renderNumber) {
+        controller.dispose?.();
+        return () => {};
+      }
+      return saves.register(controller);
+    },
+    resolveManualChanges: (actionLabel, action, options) => saves.resolve(actionLabel, action, options),
+    refreshState: session.refreshState,
+    run: session.run,
+  };
 }
 
 document.addEventListener("click", (event) => {
@@ -411,7 +335,8 @@ window.addEventListener("popstate", () => {
 });
 
 window.addEventListener("beforeunload", (event) => {
-  if (saves.hasPending() || saves.active()?.isSaving?.()) {
+  // Unsaved batch or Issue edits, and an edited form in an open dialog, all warn before the tab closes.
+  if (saves.hasPending() || saves.active()?.isSaving?.() || hasUnsavedDialogForm()) {
     event.preventDefault();
     event.returnValue = "";
   }
@@ -419,43 +344,52 @@ window.addEventListener("beforeunload", (event) => {
 
 async function start() {
   try {
-    state = await service.initialize({ mode: "lightweight" });
+    const [initialState, serverSession] = await Promise.all([
+      service.initialize({ mode: "lightweight" }),
+      readServerSession(),
+    ]);
+    // Unsent edits are kept per origin, workspace, and signed-in user. Without a known user, "anonymous" is used.
+    configureDraftRecovery({ origin: location.origin, workspace: service.workspace, actor: serverSession?.actor ?? "anonymous" });
+    purgeExpiredStoredDrafts();
+    releaseWatch = createReleaseWatch({
+      startRelease: serverSession?.release ?? null,
+      onNewRelease: () => {
+        releaseAvailable = true;
+        updateReleaseNotice();
+      },
+    });
+    session.setInitialState(initialState);
     const initial = readRoute();
     currentRoute = initial.route;
     selectedId = initial.id;
     if (!location.hash || initial.legacyHistory || initial.legacyReports) history.replaceState({ route: currentRoute, id: selectedId }, "", routeHash(currentRoute, selectedId));
     channel = new BroadcastChannel(`masterqc-web-qc:${service.workspace}`);
     channel.addEventListener("message", (event) => {
-      const remoteRevision = Number(event.data?.revision);
-      if (Number.isFinite(remoteRevision) && remoteRevision > state.revision) {
-        setStale("Another tab changed this workspace. Reload the latest data before saving again.");
-      }
+      session.noteRemoteRevision(event.data?.revision);
     });
-    const checkForSharedChanges = async () => {
-      if (!state || commandInFlight > 0) return;
-      try {
-        const latestRevision = await service.getRevision();
-        if (latestRevision > state.revision) {
-          setStale("Another browser or window changed this workspace. Reload the latest data before saving again.");
-        }
-      } catch {
-        // Preserve the current page and any unsaved edits if the local server is briefly unavailable.
-      }
-    };
-    window.setInterval(() => { void checkForSharedChanges(); }, 5000);
-    window.addEventListener("focus", () => { void checkForSharedChanges(); });
+    // The release is checked on this same poll, at most every five minutes, and again when the page regains focus.
+    window.setInterval(() => {
+      void session.checkForSharedChanges();
+      releaseWatch?.tick();
+    }, 5000);
+    window.addEventListener("focus", () => {
+      void session.checkForSharedChanges();
+      void releaseWatch?.check();
+    });
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") void checkForSharedChanges();
+      if (document.visibilityState !== "visible") return;
+      void session.checkForSharedChanges();
+      void releaseWatch?.check();
     });
     renderApp();
   } catch (error) {
-    const message = error instanceof Error ? error.message : "The local workspace could not be opened.";
+    const message = messageOf(error, "The QC workspace could not be opened.");
     app.replaceChildren(el("main", { className: "startup-error" },
       el("p", { className: "eyebrow" }, "MasterQC Web"),
-      el("h1", {}, "The local QC service is unavailable"),
+      el("h1", {}, "The QC server is unavailable"),
       el("p", {}, message),
-      el("p", {}, "Start the local server and open http://127.0.0.1:4173 in a regular browser window, then retry."),
-      button("Retry", () => { app.replaceChildren(el("p", {}, "Connecting to the local QC service…")); void start(); }, "button-primary"),
+      el("p", {}, "Check that the MasterQC server is running and reachable, then retry."),
+      button("Retry", () => { app.replaceChildren(el("p", {}, "Connecting to the QC server…")); void start(); }, "button-primary"),
     ));
   }
 }

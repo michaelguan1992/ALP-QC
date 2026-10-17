@@ -147,7 +147,7 @@ test("saveBatchChanges rejects invalid and stale writes without partial data or 
   await assert.rejects(service.saveBatchChanges({
     batchId,
     rows: [{ rowId: rows[0].id, defectiveQty: 0, actualTimeSeconds: 0, remarks: "Stale" }],
-  }, before.revision), /changed since your last view/i);
+  }, before.revision), /Someone else changed this record since you opened it/);
   assert.deepEqual(await service.getState(), after);
   assert.equal(successful.revision, after.revision);
 });

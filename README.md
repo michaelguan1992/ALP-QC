@@ -82,6 +82,10 @@ The current app uses SQLite and no longer offers direct browser migration. To im
 
 Saved changes go to SQLite. The retired initialization draft and AP table prototype pages and their dedicated files have been removed; existing browser data is not cleared.
 
+## Hosted Deployment
+
+The same server can run as a shared service on one Linux machine behind Caddy, with HTTPS, individual Basic Auth accounts, and encrypted off-site backups. Hosted mode is enabled only by setting `MASTERQC_PUBLIC_ORIGIN`; local startup works as before. See [Hosted Deployment](docs/deployment.md) for the step-by-step procedure. Later releases are installed and rolled back with `deploy/release.sh`, which verifies each release against a copy of production before it goes live. That procedure has not yet been tested on a real server.
+
 ## Development Checks
 
 ```sh
@@ -102,7 +106,7 @@ Put business rules in `core/` and database implementation in `storage/`. See [Ar
 
 Browsers on one computer share the local service database. Copying the project with its production database includes the saved records and attachments. Two computers then make independent local changes; Git does not provide live synchronization. Snapshot restore (service stopped) and additive JSON restore remain available for data transfer.
 
-Concrete implementation uses Luna Max subagents; the primary agent coordinates requirements, integration, review, and acceptance. The Lark edition and its live data remain outside this project's mutation scope.
+Concrete implementation uses Claude Haiku subagents at maximum reasoning effort (Haiku Max); the primary agent coordinates requirements, integration, review, and acceptance. The Lark edition and its live data remain outside this project's mutation scope.
 
 ## Verification Boundaries
 

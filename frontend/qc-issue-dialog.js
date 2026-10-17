@@ -1,8 +1,12 @@
 // Issue detail dialog: the Issue runtime, its unsent edits (drafts), evidence, and manual disposition save.
 // The list and creation pages live in qc-ops-issues.js; the pure Issue helpers live in qc-issue-model.js.
 import { button, dateLabel, el, errorText, field, list, notify, quantity, statusPill, text, timestampLabel } from "./qc-ops-common.js";
-import { closeDialog, showDialog } from "./qc-ui.js";
+import { closeDialog, showDialog, uploadingLabel } from "./qc-ui.js";
+import { isStaleRevisionError, isUnknownOutcomeError, messageOf } from "./qc-command-rules.js";
 import { createManualSaveController } from "./qc-manual-save.js";
+import { ISSUE_FIELDS, classifyFields, savedTextOf } from "./qc-draft-model.js";
+import { discardAllStoredDrafts, discardStoredDraft, draftTimestamp, readStoredDraft, scheduleDraftWrite, writeDraftNow } from "./qc-draft-recovery.js";
+import { renderDraftNotice } from "./qc-draft-notice.js";
 import {
   assertUploadRequestSize,
   attachmentCanPreview,
@@ -36,10 +40,18 @@ import {
 } from "./qc-issue-model.js";
 
 // Unsent Issue edits, keyed by Issue id. They survive re-rendering so that a reload or a
-// departure guard can still see them.
+// departure guard can still see them. Disposition edits are also mirrored to browser-local storage.
 const issueDrafts = new Map();
 let activeIssueDialogRuntime = null;
 const issueDialogCloseListeners = new WeakSet();
+// The saved text each changed disposition field was edited from (its base), by Issue id. A reload applies a
+// field only while its saved value still matches the base; otherwise the user is told (see reconcileIssueDraft).
+const issueBases = new Map();
+const issueNotices = new Map();
+const issueTouchedAt = new Map();
+// Returns the Issue and revision the dialog last rendered from, so that writes compare against saved values.
+const issueViews = new Map();
+const ISSUE_KIND = "issue";
 
 export function hasUnsavedIssueWork() {
   return issueDrafts.size > 0 || Boolean(activeIssueDialogRuntime?.manualSaveController?.hasPending?.());
@@ -47,6 +59,10 @@ export function hasUnsavedIssueWork() {
 
 export function clearIssueDrafts() {
   issueDrafts.clear();
+  issueBases.clear();
+  issueNotices.clear();
+  issueTouchedAt.clear();
+  discardAllStoredDrafts(ISSUE_KIND);
 }
 
 /** The unsent draft held for one Issue, or undefined when it has none. */
@@ -64,6 +80,128 @@ function issueDraft(issue) {
   };
 }
 
+/** The disposition part of an in-memory draft, as the flat field names of ISSUE_FIELDS. */
+function dispositionTextOf(draft) {
+  return {
+    owner: String(draft.owner ?? ""),
+    disposition: String(draft.disposition ?? ""),
+    confirmation1: String(draft.confirmations?.[0] ?? ""),
+    confirmation2: String(draft.confirmations?.[1] ?? ""),
+    confirmation3: String(draft.confirmations?.[2] ?? ""),
+  };
+}
+
+/** An in-memory draft built from flat disposition values, keeping the discussion fields of `discussion`. */
+function draftFromDispositionText(values, discussion = {}) {
+  return {
+    owner: values.owner,
+    disposition: values.disposition,
+    confirmations: [values.confirmation1, values.confirmation2, values.confirmation3],
+    discussionAuthorName: discussion.discussionAuthorName ?? "",
+    discussionText: discussion.discussionText ?? "",
+  };
+}
+
+/** Forgets an Issue's unsent edits, its notice, and its stored copy. */
+function forgetIssueDraft(issueId) {
+  issueDrafts.delete(issueId);
+  issueBases.delete(issueId);
+  issueNotices.delete(issueId);
+  issueTouchedAt.delete(issueId);
+  discardStoredDraft(ISSUE_KIND, issueId);
+}
+
+/** Keeps the base of each changed disposition field: a newly changed field takes its saved text as the base. */
+function refreshIssueBases(issue) {
+  const draft = issueDrafts.get(issue.id);
+  if (!draft) {
+    issueBases.delete(issue.id);
+    return;
+  }
+  const values = dispositionTextOf(draft);
+  const saved = savedTextOf(ISSUE_FIELDS, issue);
+  const previous = issueBases.get(issue.id) ?? {};
+  const next = {};
+  for (const name of Object.keys(ISSUE_FIELDS)) {
+    if (ISSUE_FIELDS[name].same(values[name], saved[name])) continue;
+    next[name] = previous[name] !== undefined ? previous[name] : saved[name];
+  }
+  if (Object.keys(next).length) issueBases.set(issue.id, next);
+  else issueBases.delete(issue.id);
+}
+
+/**
+ * The stored form of an Issue's unsent disposition edits: only the changed fields, each with its base. Returns null
+ * when nothing is left to keep, and undefined while the dialog's view is not known, which leaves storage alone.
+ */
+function serializeIssueDraft(issueId) {
+  const view = issueViews.get(issueId)?.();
+  if (!view) return undefined;
+  const draft = issueDrafts.get(issueId);
+  if (!draft) return null;
+  const values = dispositionTextOf(draft);
+  const saved = savedTextOf(ISSUE_FIELDS, view.issue);
+  const bases = issueBases.get(issueId) ?? {};
+  const changes = {};
+  const baseValues = {};
+  for (const name of Object.keys(ISSUE_FIELDS)) {
+    if (ISSUE_FIELDS[name].same(values[name], saved[name])) continue;
+    changes[name] = values[name];
+    baseValues[name] = bases[name] !== undefined ? bases[name] : saved[name];
+  }
+  if (!Object.keys(changes).length) return null;
+  return { savedAt: draftTimestamp(), baseRevision: view.revision ?? null, base: baseValues, draft: changes };
+}
+
+/** Loads an Issue's stored disposition edits into memory, over its saved values. Returns the saved time, or null. */
+function loadStoredIssueDraft(issue) {
+  const record = readStoredDraft(ISSUE_KIND, issue.id);
+  if (!record) return null;
+  const names = Object.keys(ISSUE_FIELDS).filter((name) => typeof record.draft[name] === "string");
+  if (names.length) {
+    const values = savedTextOf(ISSUE_FIELDS, issue);
+    for (const name of names) values[name] = record.draft[name];
+    issueDrafts.set(issue.id, draftFromDispositionText(values));
+    const bases = Object.fromEntries(names.filter((name) => typeof record.base[name] === "string").map((name) => [name, record.base[name]]));
+    if (Object.keys(bases).length) issueBases.set(issue.id, bases);
+  }
+  return record.savedAt;
+}
+
+/**
+ * Reconciles an Issue's unsent disposition edits with its saved values, as batch drafts are. A changed field whose
+ * saved value still matches its base is kept. One that someone else has since changed is not applied, and is
+ * reported as a conflict. Returns the applied count and the conflicts.
+ */
+function reconcileIssueDraft(issue) {
+  const draft = issueDrafts.get(issue.id);
+  if (!draft) return { applied: 0, conflicts: [] };
+  const values = dispositionTextOf(draft);
+  const saved = savedTextOf(ISSUE_FIELDS, issue);
+  const bases = issueBases.get(issue.id) ?? {};
+  const { keep, conflicts } = classifyFields(ISSUE_FIELDS, { draft: values, saved, bases });
+  const merged = {};
+  const nextBases = {};
+  for (const name of Object.keys(ISSUE_FIELDS)) {
+    merged[name] = Object.hasOwn(keep, name) ? keep[name] : saved[name];
+    if (Object.hasOwn(keep, name)) nextBases[name] = saved[name];
+  }
+  const next = draftFromDispositionText(merged, draft);
+  if (hasIssueDraft(issue, next)) {
+    issueDrafts.set(issue.id, next);
+    if (Object.keys(nextBases).length) issueBases.set(issue.id, nextBases);
+    else issueBases.delete(issue.id);
+  } else {
+    issueDrafts.delete(issue.id);
+    issueBases.delete(issue.id);
+  }
+  return { applied: Object.keys(keep).length, conflicts };
+}
+
+function scheduleIssueWrite(issueId) {
+  scheduleDraftWrite(ISSUE_KIND, issueId, () => serializeIssueDraft(issueId));
+}
+
 window.addEventListener("beforeunload", (event) => {
   if (hasUnsavedIssueWork()) {
     event.preventDefault();
@@ -75,7 +213,7 @@ window.addEventListener("masterqc:discard-operation-drafts", clearIssueDrafts);
 window.addEventListener("masterqc:discard-dialog-draft", (event) => {
   // Discard only the Issue named by the event. An event without an Issue id discards nothing.
   const issueId = event.detail?.issueId;
-  if (issueId) issueDrafts.delete(issueId);
+  if (issueId) forgetIssueDraft(issueId);
 });
 
 function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreservation, onIssueUpdated = null, runIssueCommand = null) {
@@ -88,6 +226,9 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
   let previewCleanup = () => {};
   let previewRequest = 0;
   let pendingOperationError = null;
+  let uploadsInFlight = 0;
+  const removing = new Set();
+  const uploadStatus = el("p", { className: "upload-feedback", role: "status", ariaLive: "polite", hidden: true });
   const startOperation = (work) => {
     pendingOperationError = null;
     const operation = Promise.resolve().then(work);
@@ -143,10 +284,26 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
   photoButton.disabled = disabled;
   fileButton.disabled = disabled;
 
+  // Adding files is locked while an upload is in flight, and the status shows the size being sent.
+  const applyAddLocks = () => {
+    const locked = disabled || uploadsInFlight > 0;
+    photoButton.disabled = locked;
+    fileButton.disabled = locked;
+    photoInput.disabled = locked;
+    fileInput.disabled = locked;
+  };
+  const setUploading = (active, bytes = 0) => {
+    uploadsInFlight += active ? 1 : -1;
+    uploadStatus.textContent = uploadsInFlight > 0 ? uploadingLabel(bytes) : "";
+    uploadStatus.hidden = uploadsInFlight <= 0;
+    applyAddLocks();
+  };
+
   const upload = async (input) => {
     const selected = Array.from(input.files || []);
     if (!selected.length || disposed) return;
     markDraftForPreservation();
+    setUploading(true, selected.reduce((sum, file) => sum + (Number(file.size) || 0), 0));
     try {
       assertUploadRequestSize(selected);
       const files = await Promise.all(selected.map(async (file) => {
@@ -173,14 +330,17 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
     } catch (error) {
       pendingOperationError = error;
       notify(errorText(error, "Could not read the selected file."), true);
+    } finally {
+      setUploading(false);
     }
   };
   photoInput.addEventListener("change", () => { void startOperation(() => upload(photoInput)); });
   fileInput.addEventListener("change", () => { void startOperation(() => upload(fileInput)); });
 
   const removeAttachment = async (asset) => {
-    if (disposed || disabled) return;
+    if (disposed || disabled || removing.has(asset.id)) return;
     if (!window.confirm(`Remove “${text(asset.name, "this file")}” from this issue?`)) return;
+    removing.add(asset.id);
     markDraftForPreservation();
     try {
       const response = await issueCommand("removeIssueAttachment", { id: issue.id, assetId: asset.id }, { render: false });
@@ -196,6 +356,8 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
     } catch (error) {
       pendingOperationError = error;
       notify(errorText(error, "Could not remove the attachment."), true);
+    } finally {
+      removing.delete(asset.id);
     }
   };
 
@@ -240,6 +402,7 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
     host.replaceChildren(
       el("div", { className: "qc-ops-section-heading" }, el("h3", {}, "Evidence"),
         el("div", { className: "qc-ops-issue-attachment-actions" }, photoButton, fileButton)),
+      uploadStatus,
       listHost,
       previewHost,
       photoInput,
@@ -258,10 +421,7 @@ function renderIssueAttachments(issue, state, ctx, readOnly, markDraftForPreserv
     hasPending: () => pendingOperations.size > 0,
     setDisabled(value) {
       disabled = readOnly || Boolean(value);
-      photoButton.disabled = disabled;
-      fileButton.disabled = disabled;
-      photoInput.disabled = disabled;
-      fileInput.disabled = disabled;
+      applyAddLocks();
       removeButtons.forEach((remove) => { remove.disabled = disabled; });
     },
   };
@@ -361,6 +521,26 @@ export function openIssueDialog(issue, state, ctx) {
   let currentIssue = issue;
   let currentState = state;
   const readOnly = currentIssue.status === "closed";
+  issueViews.set(issue.id, () => ({ issue: currentIssue, revision: currentState?.revision ?? null }));
+  // A dialog with no edits of its own restores the stored ones. Then every edit is reconciled with the saved Issue.
+  const hadDraft = issueDrafts.has(issue.id);
+  // A closed Issue cannot take saves, so a stored copy for it is no longer of any use.
+  if (readOnly && !hadDraft) discardStoredDraft(ISSUE_KIND, issue.id);
+  const restoredAt = !readOnly && !hadDraft ? loadStoredIssueDraft(issue) : null;
+  if (!hadDraft && restoredAt === null) issueNotices.delete(issue.id);
+  const outcome = readOnly ? { applied: 0, conflicts: [] } : reconcileIssueDraft(issue);
+  if (restoredAt !== null || outcome.conflicts.length) {
+    if (outcome.applied > 0 || outcome.conflicts.length) {
+      issueNotices.set(issue.id, {
+        savedAt: restoredAt ?? issueTouchedAt.get(issue.id) ?? draftTimestamp(),
+        applied: outcome.applied,
+        conflicts: outcome.conflicts,
+      });
+    }
+    writeDraftNow(ISSUE_KIND, issue.id, () => serializeIssueDraft(issue.id));
+  }
+  const restoreNotice = readOnly ? null : issueNotices.get(issue.id) ?? null;
+  let restoreNoticeElement = null;
   const draft = issueDraft(currentIssue);
   const owner = el("input", { type: "text", maxLength: "200", value: draft.owner, disabled: readOnly, name: "owner" });
   const disposition = el("textarea", { rows: "3", maxLength: "1200", disabled: readOnly, name: "disposition" }, draft.disposition);
@@ -401,9 +581,13 @@ export function openIssueDialog(issue, state, ctx) {
     updateIssueListProjection();
     return true;
   };
-  const storeDraft = (current) => {
+  const storeDraft = (current, { persistNow = false } = {}) => {
     if (hasIssueDraft(currentIssue, current)) issueDrafts.set(currentIssue.id, current);
     else issueDrafts.delete(currentIssue.id);
+    refreshIssueBases(currentIssue);
+    issueTouchedAt.set(currentIssue.id, draftTimestamp());
+    if (persistNow) writeDraftNow(ISSUE_KIND, currentIssue.id, () => serializeIssueDraft(currentIssue.id));
+    else scheduleIssueWrite(currentIssue.id);
   };
   const markDraftForPreservation = () => {
     const current = captureDraft();
@@ -468,19 +652,27 @@ export function openIssueDialog(issue, state, ctx) {
       const latestIssue = list(latestState.issues).find((item) => item.id === currentIssue.id);
       if (!latestIssue) throw new Error("The saved Issue changes could not be confirmed.");
       adoptLatestIssue(latestIssue, latestState);
-      storeDraft(captureDraft());
+      // The saved values are now the Issue's own, so anything still changed is judged against them.
+      issueBases.delete(currentIssue.id);
+      issueNotices.delete(currentIssue.id);
+      restoreNoticeElement?.remove();
+      restoreNoticeElement = null;
+      storeDraft(captureDraft(), { persistNow: true });
       form.dataset.dirty = "false";
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : String(error || "The disposition could not be saved.");
-      formError.textContent = message;
-      reloadLatestButton.hidden = !/revision|stale|another tab changed|changed since your last view/i.test(message);
+      formError.textContent = messageOf(error, "The disposition could not be saved.");
+      // A stale or unknown-outcome save is retried only after a reload; the Issue edits stay in the form.
+      reloadLatestButton.hidden = !(isStaleRevisionError(error) || isUnknownOutcomeError(error));
     },
     onDiscard: () => {
       owner.value = String(currentIssue.owner || "");
       disposition.value = String(currentIssue.disposition || "");
       confirmationInputs.forEach((input, index) => { input.value = String(currentIssue.confirmations?.[index] || ""); });
-      storeDraft(captureDraft());
+      issueNotices.delete(currentIssue.id);
+      restoreNoticeElement?.remove();
+      restoreNoticeElement = null;
+      storeDraft(captureDraft(), { persistNow: true });
       formError.textContent = "";
       form.dataset.dirty = "false";
     },
@@ -521,7 +713,7 @@ export function openIssueDialog(issue, state, ctx) {
         }
         const latestIssue = list(result.state?.issues).find((item) => item.id === currentIssue.id);
         if (latestIssue) adoptLatestIssue(latestIssue, result.state);
-        issueDrafts.delete(currentIssue.id);
+        forgetIssueDraft(currentIssue.id);
         closeDialog(true);
         runtime?.dispose();
         await ctx.navigate("issues", null, true);
@@ -566,7 +758,7 @@ export function openIssueDialog(issue, state, ctx) {
           else currentState = refresh.state;
         }
         deleted = true;
-        issueDrafts.delete(currentIssue.id);
+        forgetIssueDraft(currentIssue.id);
         runtime?.dispose();
         closeDialog(true);
         await ctx.navigate("issues", null, true);
@@ -650,8 +842,7 @@ export function openIssueDialog(issue, state, ctx) {
       const remainingDraft = remainingIssueDraftAfterDiscussion(latestDraft, current);
       if (discussionAuthorName.value === current.discussionAuthorName) discussionAuthorName.value = remainingDraft.discussionAuthorName;
       if (discussionText.value === current.discussionText) discussionText.value = remainingDraft.discussionText;
-      if (hasIssueDraft(currentIssue, remainingDraft)) issueDrafts.set(currentIssue.id, remainingDraft);
-      else issueDrafts.delete(currentIssue.id);
+      storeDraft(remainingDraft);
     } finally {
       discussionSubmitting = false;
       if (discussionButton) discussionButton.disabled = readOnly;
@@ -676,7 +867,19 @@ export function openIssueDialog(issue, state, ctx) {
     input.addEventListener("change", updateDraft);
   });
   form.addEventListener("submit", (event) => event.preventDefault());
+  // "Discard restored edits" discards this Issue's unsent disposition edits through its controller, which resets the fields.
+  const restoreAction = () => {
+    if (restoreNotice.applied > 0) {
+      if (!manualSaveController?.discardAll()) return;
+    } else {
+      issueNotices.delete(currentIssue.id);
+    }
+    restoreNoticeElement?.remove();
+    restoreNoticeElement = null;
+  };
+  restoreNoticeElement = restoreNotice ? renderDraftNotice(restoreNotice, { onAction: restoreAction }) : null;
   form.append(
+    ...(restoreNoticeElement ? [restoreNoticeElement] : []),
     sourceCard(currentIssue, currentState, ctx),
     evidence.element,
     el("div", { className: "qc-ops-form-grid" }, field("Disposition owner", owner), field("Formal disposition", disposition)),

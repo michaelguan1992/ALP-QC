@@ -90,11 +90,15 @@ test("SQLite QC adapter commits atomically, rejects stale revisions, and survive
   }, initial.revision);
   const committed = await service.getState();
 
-  await assert.rejects(service.command("createOrder", {
-    number: "SQLITE-PO-STALE",
+  // A stale edit to the order created above conflicts with that change; an unrelated stale order would not.
+  await assert.rejects(service.command("saveOrder", {
+    id: created.entityId,
+    number: "SQLITE-PO-1",
     date: DATE,
-    lines: [{ variantId: variant.id, orderedQty: 25 }],
-  }, initial.revision), /changed since your last view/i);
+    supplier: "Supplier",
+    notes: "Stale durable edit",
+    lines: [{ id: committed.orders[0].lines[0].id, variantId: variant.id, orderedQty: 25 }],
+  }, initial.revision), /Someone else changed this record since you opened it/);
   await assert.rejects(adapter.transact((current) => {
     current.revision += 1;
     current.orders.push({ id: "rolled-back" });
@@ -225,10 +229,15 @@ test("two HTTP clients share main records across restart while demo stays isolat
   assert.equal((await running.main.getRevision()), created.revision);
   assert.equal((await running.main.getState()).orders.length, 1);
   assert.equal((await running.demo.getState()).orders.length, 0);
-  await assert.rejects(running.main.command("createOrder", {
-    number: "HTTP-STALE-PO",
+  // The second client edits the order that the first client created, so its stale save conflicts.
+  const sharedOrder = (await running.main.getState()).orders.find((order) => order.id === created.entityId);
+  await assert.rejects(running.main.command("saveOrder", {
+    id: sharedOrder.id,
+    number: "HTTP-SHARED-PO",
     date: DATE,
-    lines: [{ variantId: variant.id, orderedQty: 10 }],
+    supplier: "Shared supplier",
+    notes: "Stale second client",
+    lines: [{ id: sharedOrder.lines[0].id, variantId: variant.id, orderedQty: 40 }],
   }, secondClientState.revision), (error) => error.status === 409);
 
   const committed = await running.main.getState();

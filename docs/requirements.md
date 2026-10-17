@@ -105,7 +105,7 @@ Remaining decisions and scope boundaries:
 - The local service serves allowlisted application files and routes business operations through the existing core service to SQLite storage. The database directory is not served as static files.
 - SQLite serves browsers on this computer through the local application backend. LAN access, shared multi-computer hosting, and user accounts remain outside this phase.
 - Existing IndexedDB data belongs to the original browser and fixed website origin. Migrate it explicitly with the existing full backup format and validated additive restore, including attachments; never clear the source browser. Subsequent app loads and saved changes use the shared local database. Copying the project together with its production database moves a saved snapshot to another computer; this is not continuous synchronization.
-- Concrete code implementation uses a Luna Max subagent. The primary agent coordinates, reviews, and verifies the work.
+- Concrete code implementation uses a Claude Haiku subagent at maximum reasoning effort (Haiku Max; changed from Luna Max on 2026-10-17). The primary agent coordinates, reviews, and verifies the work.
 
 ## Complete Local Edition Scope
 
@@ -223,3 +223,24 @@ See [Local App Contract](app-contract.md) for command interfaces, data shapes, m
 - Everyday sidebar navigation contains only Batches, Issues, Standards, and Purchase orders, without category labels. Show one storage indicator, `On this computer`; keep the demo workspace's separate banner. Put Backup and restore below the everyday links. Put initialization and prototype references in a secondary disclosure on that page.
 - Use restrained, neutral surfaces and borders, modest radii, and clear focus states. Keep the active route easy to recognize, preserve readable inputs and numeric affordances, and reserve green row emphasis for important checks.
 - Remove repeated explanatory copy and duplicate modal footer close actions when the modal header already provides a safe close control. Keep business data, validation messages, and consequential confirmations visible.
+
+## Trial Hosting Decisions (2026-10-17)
+
+- The first hosted edition is trust-based: every signed-in team member may perform every operation, including deletion, publication, export, and restore. Access credentials keep outsiders out; they do not create roles.
+- Batch and Issue edits are kept as browser-local drafts so an accidental refresh or tab close does not lose them. The user accepted that shared computers then retain unsent business data in that browser until the draft is saved or discarded.
+- Michael owns the domain, the cloud server account, and backup alerts.
+- Concurrent users must not block each other: a save is rejected as stale only when a record it changes was changed by someone else since the user's view, not whenever any other record in the workspace changed.
+
+- Development and automated tests never use real data; trial users enter real data directly into the hosted production database from the first day. At cutover the production database moves to the server, which then holds the only authoritative copy, and the repository stops tracking it.
+- No synthetic sample-data generator for now; revisit after real use shows which data shapes matter.
+- Every release is verified automatically on the server before it goes live: the release script starts the new code on an internal port against a fresh copy of the production database, checks startup, data upgrades, health, record counts, and attachments, and switches production only when all checks pass. No persistent staging environment.
+- The release process includes a release and rollback script, and open pages show a "new version available" notice so users reload onto the new code without losing edits.
+
+## Browser Draft Recovery (2026-10-17)
+
+- Unsent batch edits (inspection results, remarks, time, and batch details) and unsent Issue disposition edits (owner, formal disposition, and the three confirmations) are kept in the browser's `localStorage` until they are saved or discarded. Only the changed fields are stored, each with the saved value it was edited from. Attachment bodies, Data URLs, and credentials are never stored.
+- The key is `masterqc:draft:v1:<origin>:<workspace>:<actor>:<kind>:<recordId>`. The actor comes from `GET /api/session`; without a known actor the key uses `anonymous`. Writes follow each edit after a short pause and happen at once after an acknowledged save, a discard, or the page being hidden. A stored copy is removed when its save is acknowledged or the user discards it. Copies older than 14 days are deleted at start-up. A browser that blocks, fills, or throws on storage keeps the in-memory behaviour, with no error.
+- When a page opens with a stored copy, or after **Reload latest data**, each restored field is applied only while its saved value still equals the value it was edited from. A field that someone else has since saved is not applied; the notice lists it with the value the user typed, so it can be entered again. **Discard restored edits** discards the page's unsent edits.
+- A stale save shows its explanation once, in the banner above the page with one **Reload latest data** action. The batch header reads **Not saved — see message above**, the row reads **Save failed**, and no toast appears. The informational "Newer changes" notice is hidden while the banner is shown.
+- `GET /api/session` returns the server release. The page reads it at start-up, checks it every five minutes on the existing poll, and checks again on focus. When the release changes, a persistent, non-blocking notice offers **Reload now**, which saves pending batch edits first (or asks about open Issue or form edits) and then reloads. A server without the route, or a failed read, shows nothing.
+- Accepted trade-off: on a shared computer, unsent batch and Issue edits remain in that browser until they are saved or discarded. Backups and other computers do not include them.
