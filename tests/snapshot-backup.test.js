@@ -186,6 +186,7 @@ test("the snapshot route streams a valid SQLite download with headers and remove
 
   const sameOrigin = await httpGet(port, "/api/qc/main/backup/snapshot", { Origin: `http://127.0.0.1:${port}` });
   assert.equal(sameOrigin.status, 200);
+  await waitForSnapshotCleanup(directory);
   const fetchSameOrigin = await httpGet(port, "/api/qc/main/backup/snapshot", { "Sec-Fetch-Site": "same-origin" });
   assert.equal(fetchSameOrigin.status, 200);
   await waitForSnapshotCleanup(directory);
