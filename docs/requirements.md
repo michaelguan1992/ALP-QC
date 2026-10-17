@@ -237,6 +237,13 @@ See [Local App Contract](app-contract.md) for command interfaces, data shapes, m
 - The release process includes a release and rollback script, and open pages show a "new version available" notice so users reload onto the new code without losing edits.
 - Hosting (2026-10-17, final for the trial): BandwagonHost E-Commerce VPS in Los Angeles (USCA_9), 2 GiB RAM, 2 TB/month, premium routes to all three mainland carriers, about USD 30/month billed quarterly. Hong Kong premium plans were over budget and Tencent Cloud was declined because of payment friction; the trial must still cover Telecom, Unicom, and Mobile at evening peak. US users are on the West Coast. The owner buys a domain now and the trial starts on that domain, so the address never changes: moving to another server (for example a Hong Kong premium-route server) later only changes the DNS record, and users keep saved logins and unsent browser drafts.
 - Off-site backups (2026-10-17): AWS S3 in Singapore (ap-southeast-1), in an AWS account separate from the server provider, with Object Lock in compliance mode.
+- Fast prototype launch (2026-10-17, supersedes the items above for the trial period): the priority is to put the prototype online now so users in mainland China and the US can try it. The old system keeps running in parallel and keeps the records, so losing data entered during the trial is acceptable. For the trial:
+  - One shared Basic Auth account (`team`) for the whole group instead of personal accounts. Audit entries therefore record `team` as the operator.
+  - No off-site backups. The S3 setup, the heartbeat monitor, and the restore drill wait until the trial confirms the system is usable.
+  - A temporary free address of the form `<server IP with dashes>.sslip.io` instead of a purchased domain. Moving to a real domain later changes the address: users need the new bookmark and must sign in again, and unsent browser drafts do not carry over.
+  - The hosted database starts from a verified snapshot of the owner's local database, imported with the validated restore. From then on the two copies are independent and are not synchronized.
+  - The PDF history package (`data/pdf-import/`) and the Lark version-history package (`data/lark-import/`) are not deployed; the production database already contains their records.
+  - Personal accounts, backups, and a purchased domain come after the trial.
 
 ## Browser Draft Recovery (2026-10-17)
 

@@ -1,6 +1,6 @@
 # Hosted Deployment (Ubuntu 24.04)
 
-> **Status: sections 1 to 3 ran on the real server on 2026-10-17** (hardening, software, service user, first release with a smoke test on a scratch directory). **Everything from section 4 on is NOT yet tested on a real server.** The code paths were checked locally: unit tests, `systemd-analyze verify` on the unit files, an `age` round trip, and the hosted server started with the production settings on a development machine. The release script (`deploy/release.sh`) and its verification checks were exercised only by the automated tests, with a stub service manager and synthetic data; they have not run on Ubuntu 24.04 with systemd, Caddy, or real S3 storage. The steps below have not been run on Ubuntu 24.04, behind Caddy, with real S3 storage, or in a restore drill. Treat them as a draft until the restore drill in section 11 passes on a disposable server. The AWS steps in section 0 and the backup job's S3 calls were also not run against real AWS; the automated tests use a stub AWS CLI.
+> **Status: sections 1 to 3 ran on the real server on 2026-10-17** (hardening, software, service user, first release with a smoke test on a scratch directory), and so did the trial variants of sections 4 to 6: the service settings, the data import, the `masterqc` service, and Caddy with one shared account on a temporary sslip.io address. **The backup service and timer, sections 9 to 12, and per-person accounts are NOT yet tested on a real server.** The code paths were checked locally: unit tests, `systemd-analyze verify` on the unit files, an `age` round trip, and the hosted server started with the production settings on a development machine. The release script (`deploy/release.sh`) and its verification checks were exercised only by the automated tests, with a stub service manager and synthetic data; they have not run on Ubuntu 24.04 with systemd, Caddy, or real S3 storage. The steps below have not been run on Ubuntu 24.04, behind Caddy, with real S3 storage, or in a restore drill. Treat them as a draft until the restore drill in section 11 passes on a disposable server. The AWS steps in section 0 and the backup job's S3 calls were also not run against real AWS; the automated tests use a stub AWS CLI.
 
 This setup runs one Node process and one SQLite database on one Linux server. Caddy terminates HTTPS and enforces individual Basic Auth accounts. Encrypted snapshots go to off-site object storage every 30 minutes. The decision record is [Shared Server Deployment and Data Recovery Plan](server-deployment-plan.md). This guide does not authorize a purchase.
 
@@ -327,6 +327,18 @@ sudo rm -f /var/lib/masterqc-backups/import.sqlite
 
 The restore checks SQLite integrity, the MasterQC format, and every attachment digest before it writes `/var/lib/masterqc/masterqc-main.sqlite`. Do not copy the file by hand, because that skips these checks. The command reads the same settings as the service (`MASTERQC_DATA_DIR`, `MASTERQC_LISTEN_HOST`, and `MASTERQC_LISTEN_PORT`), so the sourced environment file above makes it check the configured port. It refuses to run while the service listens there. Always stop the service first.
 
+What ran on 2026-10-17: the snapshot was made on the owner's Mac from the closed local database with `node scripts/backup-snapshot.mjs --data-dir data/workspace --out-dir <scratch directory>` (it opens the source read-only), streamed to the server, checked against the manifest's `sha256`, and restored before `/etc/masterqc/env` existed:
+
+```sh
+ssh root@<server> 'install -m 0600 -o masterqc -g masterqc /dev/stdin /var/lib/masterqc-backups/import.sqlite' < masterqc-main-<UTC time>-r<revision>.sqlite
+echo "<sha256 from the manifest>  /var/lib/masterqc-backups/import.sqlite" | sudo sha256sum -c -
+cd /opt/masterqc/current
+sudo runuser -u masterqc -- env MASTERQC_DATA_DIR=/var/lib/masterqc node launcher/restore-snapshot.mjs /var/lib/masterqc-backups/import.sqlite
+sudo rm /var/lib/masterqc-backups/import.sqlite
+```
+
+The restore reported revision 11, 89 batches, 22 versions, and 32 attachments (22.52 MiB), all verified, in 2.0 s.
+
 ## 6. Start the services
 
 ```sh
@@ -346,6 +358,18 @@ sudoedit /etc/caddy/Caddyfile
 sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
+
+#### Trial setup: one shared account and a temporary address
+
+For the trial (see "Fast prototype launch" in the requirements), the site runs on the free address `<server IP with dashes>.sslip.io`, which resolves to that IP without a purchased domain, with one shared account `team`. Set `MASTERQC_PUBLIC_ORIGIN=https://<server IP with dashes>.sslip.io` in `/etc/masterqc/env`. Prepare a template from `deploy/Caddyfile.example`: replace `qc.example.com` with the sslip.io name and the whole `basic_auth` block with a single line `team __PASSWORD_HASH__`. Install it as `/etc/caddy/Caddyfile.masterqc-template`, keep the package's file as `/etc/caddy/Caddyfile.default`, and check the template with a throwaway hash (`caddy hash-password --plaintext <dummy>`) in a scratch file.
+
+The owner then sets the password on the server, so that it never passes through anyone else. The command asks for the password twice, validates the new file before it replaces the old one, and reloads Caddy:
+
+```sh
+H="$(caddy hash-password)" && sed "s|__PASSWORD_HASH__|$H|" /etc/caddy/Caddyfile.masterqc-template > /etc/caddy/Caddyfile.new && caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile.new && mv /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile && systemctl reload caddy && echo DONE
+```
+
+Run the same command again to change the password. Caddy obtained a Let's Encrypt certificate within a minute of the reload. `caddy validate` warns that the Caddyfile input is not formatted (tabs and spaces from the example); the warning is harmless. Checks from outside: a request without credentials or with a wrong password returns `401`, and `http://` redirects to `https://` with `308`. Later, moving to a purchased domain means changing `MASTERQC_PUBLIC_ORIGIN` and the site name in the Caddyfile, then restarting `masterqc` and reloading Caddy.
 
 The firewall was set up in section 1 (22, 80, and 443 only). Port 4173 stays on loopback; `sudo ufw status` should still list only those three ports.
 
