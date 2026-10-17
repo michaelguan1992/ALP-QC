@@ -37,6 +37,7 @@ import { correctHistoricalRecords, recordHistoryCorrectionAudit } from "./qc-his
 import { importLarkVersionHistory } from "./qc-lark-versions.js";
 import { mergeSupersededAPVersionDuplicates } from "./qc-version-merge.js";
 import { removeAuthorizedS15TrialVersion, S15_TRIAL_VERSION_ID } from "./qc-version-cleanup.js";
+import { createChangeLog, diffRecordKeys, recordKeysOf } from "./qc-change-log.js";
 
 export { PHOTO_MAX_BYTES, DOCUMENT_MAX_BYTES, ASSET_TOTAL_MAX_BYTES, BACKUP_MAX_BYTES, API_UPLOAD_BODY_MAX_BYTES, UPLOAD_REQUEST_MAX_BYTES };
 
@@ -102,10 +103,33 @@ function defaultNow() {
   return new Date().toISOString();
 }
 
-function validateExpectedRevision(expectedRevision, state) {
-  if (expectedRevision === undefined || expectedRevision === null) return;
+const STALE_REVISION_MESSAGE = "Someone else changed this record since you opened it. Reload the latest data and try again.";
+
+function staleRevisionError() {
+  failWithStatus(409, "stale_revision", STALE_REVISION_MESSAGE);
+}
+
+// Commands classify their base revision before the handler runs: "none" when no base was supplied, "current" when it
+// equals the stored revision, and "stale" when it is older. A base newer than the stored revision is stale too.
+function classifyExpectedRevision(expectedRevision, state) {
+  if (expectedRevision === undefined || expectedRevision === null) return "none";
   if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail("Expected revision must be a non-negative whole number.");
-  if (expectedRevision !== state.revision) fail("This data changed since your last view. Reload the latest state and retry.");
+  if (expectedRevision === state.revision) return "current";
+  if (expectedRevision > state.revision) staleRevisionError();
+  return "stale";
+}
+
+// Whole-workspace imports keep the strict rule: the base must equal the stored revision.
+function validateExpectedRevision(expectedRevision, state) {
+  if (classifyExpectedRevision(expectedRevision, state) === "stale") staleRevisionError();
+}
+
+function intersects(first, second) {
+  const [smaller, larger] = first.size <= second.size ? [first, second] : [second, first];
+  for (const key of smaller) {
+    if (larger.has(key)) return true;
+  }
+  return false;
 }
 
 function requireAdapter(adapter) {
@@ -187,11 +211,28 @@ export function createQCService(adapter, options = {}) {
   const idFactory = options.idFactory ?? defaultIdFactory;
   const now = options.now ?? options.clock ?? defaultNow;
   const assetValidationCache = createAssetValidationCache();
+  // Per service instance and in memory only. Commits made outside command() clear it, so their older views fall back to rejection.
+  const changeLog = createChangeLog();
   const validationClientId = typeof options.validationClientId === "string" && options.validationClientId
     ? options.validationClientId
     : "qc-service";
   let restoreId = 0;
   let openPromise = null;
+
+  // Commits outside command() can advance the revision without a recorded change set. Such a commit clears the log,
+  // so older views are rejected. A commit that leaves the revision unchanged keeps the log, because the
+  // ordinary startup check runs this path on every page load.
+  async function transactUntracked(mutator, transactOptions) {
+    let advanced = false;
+    const result = await adapter.transact((current) => {
+      const previousRevision = current === null ? null : current.revision;
+      const outcome = mutator(current);
+      advanced = previousRevision === null || outcome.state.revision !== previousRevision;
+      return outcome;
+    }, transactOptions);
+    if (advanced) changeLog.clear();
+    return result;
+  }
 
   function validationOptions(state) {
     return {
@@ -260,7 +301,10 @@ export function createQCService(adapter, options = {}) {
         validateQCState(legacyState);
         if (legacyState.history?.sources?.length) await verifyHistoryStateAssets(legacyState);
       };
-      openPromise = Promise.resolve().then(() => adapter.initialize({ validateLegacyState }));
+      // Opening can convert the stored layout, so the log is cleared once the conversion has committed.
+      openPromise = Promise.resolve()
+        .then(() => adapter.initialize({ validateLegacyState }))
+        .then(() => changeLog.clear());
     }
     await openPromise;
   }
@@ -278,7 +322,7 @@ export function createQCService(adapter, options = {}) {
       const pendingVersionMerge = mergeSupersededAPVersionDuplicates(correctionPreview);
       const pendingTrialCleanup = removeAuthorizedS15TrialVersion(correctionPreview);
       if (existing.history?.inspections?.length || pendingHistoryCorrection.changed || pendingVersionCorrection.versionIds.length || pendingVersionMerge.changed || pendingTrialCleanup.versionIds.length) {
-        await adapter.transact((current) => {
+        await transactUntracked((current) => {
           if (current === null) return { state: createInitialQCState(), result: null };
           validateState(current);
           const state = clone(current);
@@ -337,7 +381,7 @@ export function createQCService(adapter, options = {}) {
       }
       return includeAssetContent ? clone(existing) : projectLightweightState(existing, trustedAssetValidation());
     }
-    await adapter.transact((current) => {
+    await transactUntracked((current) => {
       if (current !== null) {
         validateState(current);
         return { state: current, result: null };
@@ -372,19 +416,35 @@ export function createQCService(adapter, options = {}) {
     await ensureOpen();
     const handler = COMMANDS.get(type);
     if (!handler) fail(`Unknown QC command: ${String(type)}.`);
+    // Set inside the transaction and applied to the change log only after the adapter has committed.
+    let logUpdate = null;
     // Command handlers judge attachments from stored metadata (IDs, sizes, ownership), so no body is loaded here.
-    return adapter.transact((current) => {
+    const result = await adapter.transact((current) => {
       const state = current === null ? createInitialQCState() : current;
       const currentValidation = validationOptions(state);
       validateState(state, currentValidation);
-      validateExpectedRevision(expectedRevision, state);
+      const expectation = classifyExpectedRevision(expectedRevision, state);
+      // The handler always runs against the latest state. Only the records it changes decide whether a stale base conflicts.
+      const beforeKeys = recordKeysOf(state);
       const outcome = handler(state, data, {
         idFactory,
         now,
         trustedAssetValidation: currentValidation.trustedAssetValidation,
       });
+      const writeSet = diffRecordKeys(beforeKeys, state);
+      if (expectation === "stale") {
+        // Throwing here rolls the whole transaction back, so a rejected save leaves no partial write.
+        const changedSince = changeLog.changedSince(expectedRevision, state.revision);
+        if (changedSince === null || intersects(writeSet, changedSince)) staleRevisionError();
+      }
+      const revisionFields = {
+        ...(expectedRevision === undefined || expectedRevision === null ? {} : { baseRevision: expectedRevision }),
+        ...(expectation === "stale" ? { rebased: true } : {}),
+      };
       const auditStart = state.audit.length;
       if (outcome.changed === false) {
+        // A handler that wrote without advancing the revision would leave an untracked change, so the log is dropped.
+        if (writeSet.size > 0) logUpdate = { clear: true };
         return {
           state,
           result: {
@@ -393,12 +453,14 @@ export function createQCService(adapter, options = {}) {
             ...(type === "autosaveInspection" || type === "saveBatchChanges" ? { changed: false } : {}),
             ...(outcome.counts ? { counts: outcome.counts } : {}),
             ...(type === "saveBatchChanges" ? { changes: projectCommandChanges(type, state, outcome.entityId, auditStart) } : {}),
+            ...revisionFields,
           },
         };
       }
       state.revision += 1;
       addAudit(state, { idFactory, now, action: outcome.action || type, entityId: outcome.entityId, summary: outcome.summary || type });
       validateState(state, validationOptions(state));
+      logUpdate = { revision: state.revision, keys: writeSet };
       return {
         state,
         result: {
@@ -408,9 +470,13 @@ export function createQCService(adapter, options = {}) {
           ...(["saveBatchChanges", "saveIssue", "createOrder", "saveOrder"].includes(type)
             ? { changes: projectCommandChanges(type, state, outcome.entityId, auditStart) }
             : {}),
+          ...revisionFields,
         },
       };
     }, { includeAssetContent: false });
+    if (logUpdate?.clear) changeLog.clear();
+    else if (logUpdate) changeLog.record(logUpdate.revision, logUpdate.keys);
+    return result;
   }
 
   async function saveBatchChanges(data, expectedRevision) {
@@ -478,7 +544,7 @@ export function createQCService(adapter, options = {}) {
     const omittedBackupTrial = removeAuthorizedS15TrialVersion(savedBackup.state);
     await ensureOpen();
     restoreId += 1;
-    return adapter.transact((current) => {
+    return transactUntracked((current) => {
       const state = current === null ? createInitialQCState() : current;
       validateState(state);
       validateExpectedRevision(expectedRevision, state);
@@ -533,7 +599,7 @@ export function createQCService(adapter, options = {}) {
     await verifyHistoryPackage(savedPackage);
     await ensureOpen();
     restoreId += 1;
-    return adapter.transact((current) => {
+    return transactUntracked((current) => {
       const state = current === null ? createInitialQCState() : current;
       validateState(state);
       validateExpectedRevision(expectedRevision, state);

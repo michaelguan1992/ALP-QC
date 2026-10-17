@@ -311,7 +311,8 @@ test("inspection autosave persists partial rows, completes and clears results, a
   assert.equal(repeated.changed, false);
   assert.equal(repeated.revision, state.revision);
   const beforeStale = await service.getState();
-  await assert.rejects(service.command("autosaveInspection", { ...partialPayload, remarks: "Stale edit" }, state.revision - 1), /changed since your last view/i);
+  // The partial autosave changed this batch two revisions back; the Issue created since then changed no batch record.
+  await assert.rejects(service.command("autosaveInspection", { ...partialPayload, remarks: "Stale edit" }, state.revision - 2), /Someone else changed this record since you opened it/);
   assert.deepEqual(await service.getState(), beforeStale);
 
   const invalidPayloads = [
