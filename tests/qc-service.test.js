@@ -563,8 +563,12 @@ test("failed commands and stale revisions do not commit any state changes", asyn
     number: "PO-REV", date: DATE, supplier: "", notes: "", lines: [{ variantId: variant.id, orderedQty: 1 }],
   }, state.revision);
   const afterWrite = await harness.state();
+  const order = afterWrite.orders.find((candidate) => candidate.number === "PO-REV");
   const beforeStale = harness.writes;
-  await assert.rejects(harness.command("setVariantActive", { id: variant.id, active: false }, state.revision), /changed since your last view/i);
+  // Setting a variant inactive touches no record that the order write changed, so the stale edit must target that order.
+  await assert.rejects(harness.service.command("saveOrder", {
+    id: order.id, number: "PO-REV", date: DATE, supplier: "", notes: "Stale edit", lines: [{ id: order.lines[0].id, variantId: variant.id, orderedQty: 1 }],
+  }, state.revision), /Someone else changed this record since you opened it/);
   assert.equal(harness.writes, beforeStale);
   assert.equal((await harness.state()).revision, afterWrite.revision);
 });
