@@ -1,6 +1,6 @@
 # Hosted Deployment (Ubuntu 24.04)
 
-> **Status: NOT yet tested on a real server.** The code paths were checked locally: unit tests, `systemd-analyze verify` on the unit files, an `age` round trip, and the hosted server started with the production settings on a development machine. The release script (`deploy/release.sh`) and its verification checks were exercised only by the automated tests, with a stub service manager and synthetic data; they have not run on Ubuntu 24.04 with systemd, Caddy, or real S3 storage. The steps below have not been run on Ubuntu 24.04, behind Caddy, with real S3 storage, or in a restore drill. Treat them as a draft until the restore drill in section 11 passes on a disposable server. The AWS steps in section 0 and the backup job's S3 calls were also not run against real AWS; the automated tests use a stub AWS CLI.
+> **Status: sections 1 to 3 ran on the real server on 2026-10-17** (hardening, software, service user, first release with a smoke test on a scratch directory). **Everything from section 4 on is NOT yet tested on a real server.** The code paths were checked locally: unit tests, `systemd-analyze verify` on the unit files, an `age` round trip, and the hosted server started with the production settings on a development machine. The release script (`deploy/release.sh`) and its verification checks were exercised only by the automated tests, with a stub service manager and synthetic data; they have not run on Ubuntu 24.04 with systemd, Caddy, or real S3 storage. The steps below have not been run on Ubuntu 24.04, behind Caddy, with real S3 storage, or in a restore drill. Treat them as a draft until the restore drill in section 11 passes on a disposable server. The AWS steps in section 0 and the backup job's S3 calls were also not run against real AWS; the automated tests use a stub AWS CLI.
 
 This setup runs one Node process and one SQLite database on one Linux server. Caddy terminates HTTPS and enforces individual Basic Auth accounts. Encrypted snapshots go to off-site object storage every 30 minutes. The decision record is [Shared Server Deployment and Data Recovery Plan](server-deployment-plan.md). This guide does not authorize a purchase.
 
@@ -128,15 +128,67 @@ Notes:
 
 ## 1. Install the software
 
+> **Run on the BandwagonHost Los Angeles server (Ubuntu 24.04.4) on 2026-10-17**, as root over SSH, for the hardening, software, service user, and first-release steps (sections 1 to 3). The commands below are the ones that ran, written with `sudo` for a non-root administrator.
+
+### Update and harden the server
+
+Check key login first. After a reinstall from the provider's panel, `/root/.ssh/authorized_keys` was empty, even though the panel had shown a key login working before the reinstall. If key login is refused, use the provider's web console (KiwiVM: **Root shell – basic**) to check `ssh-keygen -lf /root/.ssh/authorized_keys` against the fingerprint of your local public key, append the public key line, and try again. The web console does not use SSH or the firewall, so it is also the way back in if a later step locks SSH.
+
+The provider's minimal image has neither `ufw`, `git`, nor `xz-utils`, and its firewall accepts everything. Update and install the base tools:
+
 ```sh
 sudo apt-get update
-sudo apt-get install -y age unzip curl
+sudo DEBIAN_FRONTEND=noninteractive apt-get -y upgrade
+sudo apt-get install -y ufw age unzip curl git xz-utils
+ls /var/run/reboot-required 2>/dev/null && echo "Reboot needed"
 ```
 
-Install Node.js 22, pinned. `22.22.0` is the version used for local tests; check for the latest 22.x security release first:
+`xz-utils` is needed to unpack the Node.js archive. On this image `networking.service` shows as failed from the first boot: it tries DHCP on `eth1`, the provider's private-network interface, which is not enabled. The public interface `eth0` is configured separately and works; the failure is harmless and can be left alone.
+
+Firewall: deny incoming by default and open only SSH, HTTP, and HTTPS. Ports 80 and 443 must stay open to everyone for certificate issuance and renewal. Check that `22/tcp` is in the added rules before you enable it:
 
 ```sh
-NODE_VERSION=22.22.0
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow 22/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw show added
+sudo ufw --force enable
+sudo ufw status verbose
+```
+
+Open a new SSH connection before you close the current one. Right after the first `ufw enable`, `systemctl is-active ufw` prints `inactive`, because ufw was installed after boot and its unit has not run yet; the rules are active (`iptables -S ufw-user-input`), and `ENABLED=yes` in `/etc/ufw/ufw.conf` with the enabled unit loads them at every boot.
+
+Allow key login only. The file name starts with `00-` so that it wins over any later file in the directory (sshd uses the first value it reads). Keep one SSH connection open while you change this, and verify with a new one:
+
+```sh
+sudo install -m 0644 /dev/stdin /etc/ssh/sshd_config.d/00-masterqc.conf <<'EOF'
+# MasterQC hardening: key-only SSH login.
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password
+EOF
+sudo sshd -t
+sudo sshd -T | grep -Ei '^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin|pubkeyauthentication) '
+sudo systemctl reload ssh
+```
+
+`sshd -T` must show `passwordauthentication no`, `kbdinteractiveauthentication no`, `pubkeyauthentication yes`, and `permitrootlogin without-password` (the older name of `prohibit-password`). Ubuntu 24.04 starts SSH through `ssh.socket`; `systemctl reload ssh` is enough. From your computer, in a new terminal, check both directions before you close the old session:
+
+```sh
+ssh root@<server> 'echo key-login-ok'
+ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-interactive root@<server> true
+```
+
+The first prints `key-login-ok`; the second must fail with `Permission denied (publickey)`. Keep a copy of the SSH private key in your password manager. If it is lost, add a new public key through the provider's web console.
+
+### Install Node.js, Caddy, and the AWS CLI
+
+Install Node.js 22, pinned. `22.23.3` (2026-09-23) is installed on the server; `22.22.0` was used for local tests. Check for the latest 22.x security release first:
+
+```sh
+NODE_VERSION=22.23.3
 curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz"
 curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt"
 grep " node-v${NODE_VERSION}-linux-x64.tar.xz$" SHASUMS256.txt | sha256sum -c -
@@ -145,9 +197,38 @@ sudo ln -sfn "/opt/node-v${NODE_VERSION}-linux-x64/bin/node" /usr/bin/node
 node --version
 ```
 
-If a distribution `nodejs` package is installed, remove it first so that `/usr/bin/node` is the pinned build.
+If a distribution `nodejs` package is installed, remove it first so that `/usr/bin/node` is the pinned build. Node prints an `ExperimentalWarning` for `node:sqlite` at start-up; it is expected.
 
-Install Caddy from the official Debian and Ubuntu repository ([instructions](https://caddyserver.com/docs/install#debian-ubuntu-raspbian)) and AWS CLI v2 from the [official installer](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
+Install Caddy from the official Debian and Ubuntu repository ([instructions](https://caddyserver.com/docs/install#debian-ubuntu-raspbian)):
+
+```sh
+sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https gnupg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list
+gpg --show-keys --with-fingerprint /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+sudo apt-get update
+sudo apt-get install -y caddy
+caddy version
+```
+
+The key fingerprint was `6576 0C51 EDEA 2017 CEA2 CA15 155B 6D79 CA56 EA34` (Caddy Web Server), and Caddy `2.11.7` was installed. The package enables and starts Caddy at once with a default site that serves a static welcome page on port 80 and nothing else; section 6 replaces it.
+
+Install AWS CLI v2 with the [official installer](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and check its signature first. Copy the "AWS CLI Team" PGP public key from that page into `aws-cli.pub`; its fingerprint is `FB5D B77F D5C1 18B8 0511 ADA8 A631 0ACC 4672 475C`:
+
+```sh
+export GNUPGHOME="$(mktemp -d)"
+gpg --import aws-cli.pub
+gpg --fingerprint
+curl -fsSLo awscliv2.zip https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+curl -fsSLo awscliv2.sig https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip.sig
+gpg --verify awscliv2.sig awscliv2.zip
+unzip -q awscliv2.zip
+sudo ./aws/install
+aws --version
+```
+
+Continue only if `gpg --verify` reports a good signature from the AWS CLI Team. `aws-cli/2.38.1` was installed to `/usr/local/bin/aws`.
 
 ## 2. Create the service user and directories
 
@@ -161,17 +242,35 @@ sudo install -d -o root -g masterqc -m 0750 /etc/masterqc
 
 ## 3. Install a release
 
-Deploy from a tagged commit. Exclude the committed production database and the PDF import sources, which the server does not serve:
+Build the first release on your own computer and stream it to the server, so that the server never receives a clone. The repository still tracks the production database and real historical extracts, and a clone would copy them in its history. Exclude every data path when you build the archive:
 
 ```sh
-RELEASE=2026-10-17-1
-sudo install -d -m 0755 "/opt/masterqc/releases/$RELEASE"
-git archive --format=tar <tag> | sudo tar -x -C "/opt/masterqc/releases/$RELEASE"
-sudo rm -rf "/opt/masterqc/releases/$RELEASE/data/workspace" "/opt/masterqc/releases/$RELEASE/data/pdf-import"
-sudo ln -sfn "/opt/masterqc/releases/$RELEASE" /opt/masterqc/current
+REF=<tag or commit>
+ID="$(date -u '+%Y%m%dT%H%M%SZ')-$(git rev-parse --short=7 "$REF")"
+git archive --format=tar "$REF" -- . ':(exclude)data/workspace' ':(exclude)data/pdf-import' \
+    ':(exclude)data/lark-import' ':(exclude)tmp' \
+  | ssh root@<server> "set -e; test ! -e /opt/masterqc/releases/$ID
+      install -d -m 0755 /opt/masterqc/releases/$ID
+      tar -x -C /opt/masterqc/releases/$ID
+      echo $ID | install -m 0644 /dev/stdin /opt/masterqc/releases/$ID/RELEASE
+      ln -sfn /opt/masterqc/releases/$ID /opt/masterqc/current"
 ```
 
-Replace `<tag>` with the release tag. Use this manual procedure for the first installation only. Later releases use `deploy/release.sh` (section 9), which creates the new directory and switches the `current` link after verification. Never copy the database into a release directory.
+The name follows `deploy/release.sh` (`<UTC time>-<short commit>`), and the `RELEASE` file makes `/api/session` report it. `tmp/` holds working extracts of real PDF history, and `data/lark-import/` holds the Lark version-history package that the server offers for import. Both are left out during the trial. The app runs without either. The app has no npm dependencies, so nothing else is installed.
+
+Check that no data came along, then run a short smoke test as the service user on a scratch directory and a spare port. It does not touch `/var/lib/masterqc`:
+
+```sh
+find /opt/masterqc/current -name '*.sqlite*' -o -name '*history*.json'
+D="$(mktemp -d /tmp/mqc-smoke.XXXX)"; sudo chown masterqc:masterqc "$D"
+cd /opt/masterqc/current
+sudo timeout 12 runuser -u masterqc -- env MASTERQC_DATA_DIR="$D" MASTERQC_LISTEN_PORT=4174 MASTERQC_DEMO=off \
+  node launcher/server.mjs --no-open &
+sleep 5; curl -sS http://127.0.0.1:4174/healthz; curl -sS http://127.0.0.1:4174/api/session; wait
+sudo rm -r "$D"
+```
+
+`find` prints nothing. `/healthz` returns `{"ok":true,"revision":0}`, and `/api/session` reports the release ID. Use this manual procedure for the first installation only. Later releases use `deploy/release.sh` (section 9), which creates the new directory and switches the `current` link after verification. Never copy the database into a release directory.
 
 ## 4. Configure the service and backups
 
@@ -248,14 +347,7 @@ sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 
-Open only the ports you need. Restrict SSH to administrator addresses where possible. Port 4173 stays on loopback:
-
-```sh
-sudo ufw allow 22/tcp
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw enable
-```
+The firewall was set up in section 1 (22, 80, and 443 only). Port 4173 stays on loopback; `sudo ufw status` should still list only those three ports.
 
 Start the backup timer, run one backup now, and check its log:
 
@@ -367,6 +459,7 @@ Use this when changing provider or plan, for example to another BandwagonHost lo
 
 ## 13. Known limits and open items
 
+- `deploy/release.sh` needs a git clone at `/opt/masterqc/repo`. While the repository tracks `data/workspace/masterqc-main.sqlite` and real extracts under `tmp/` and `data/pdf-import/`, that clone would put real data on the server in its history, which the trial forbids. The script also removes only `data/workspace` and `data/pdf-import` from a release, not `tmp/` or `data/lark-import/`. Decide how releases are fetched (for example, an archive streamed from the owner's computer, or a history without the data files) before the first scripted release.
 - The release script and its checks were tested only with a stub service manager, synthetic data, and a development machine. Before relying on the script in production, run one ordinary release and one rollback on a disposable copy of the server. Check that the `masterqc` account can read `/var/lib/masterqc-backups/pre-release/`.
 - A release that intentionally removes records during its startup cleanup (for example, a superseded version) fails the count check. The script then leaves production unchanged, and the release has to be reviewed before it is installed.
 - The script never deletes `/var/lib/masterqc-backups/pre-release/`. Each release adds one full database copy and each verification run adds none, so watch the disk and prune old snapshots by hand once they are no longer needed.
