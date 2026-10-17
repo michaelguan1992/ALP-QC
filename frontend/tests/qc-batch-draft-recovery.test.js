@@ -51,6 +51,7 @@ function fakeStorage({ failing = false } = {}) {
 
 let storage = null;
 function configure(options = {}) {
+  saveCalls = 0;
   storage = fakeStorage(options);
   recovery.configureDraftRecovery({ storage, origin: ORIGIN, workspace: "main", actor: "ann", now: () => NOW });
 }
@@ -133,11 +134,27 @@ function workspaceFixture({ rows = rowFixtures() } = {}) {
 
 function savedResponse(request, revision) {
   const updated = batchFixture();
+  // The server returns the batch as saved. The core trims the recorder and the notes, so the saved text is the trimmed text.
+  if (request.details) {
+    Object.assign(updated, {
+      date: request.details.date,
+      recorder: request.details.recorder.trim(),
+      notes: request.details.notes.trim(),
+    });
+  }
   updated.rows = rowFixtures().map((row) => {
     const change = request.rows.find((candidate) => candidate.rowId === row.id);
     return change ? { ...row, defectiveQty: change.defectiveQty, actualTimeSeconds: change.actualTimeSeconds ?? row.actualTimeSeconds } : row;
   });
   return { ok: true, revision, state: stateFixture({ batches: [updated], revision }) };
+}
+
+// A departure that keeps saving would loop forever, so a test's saves are counted and the test fails after a few.
+let saveCalls = 0;
+function boundedSave(data) {
+  saveCalls += 1;
+  if (saveCalls > 3) throw new Error("Departure kept saving: the page did not settle after the save.");
+  return savedResponse(data, 5);
 }
 
 function batchContext({ service, state = stateFixture(), run = async () => ({ ok: true, state }) }) {
@@ -242,6 +259,103 @@ test("a field that someone else changed since the edit is not restored, and the 
   assert.equal(drafts.getRowDraft("batch-1", "row-1"), undefined);
   assert.match(noticeIn(reloaded).textContent, /Not restored because someone else changed it: Row 1: Check label · Defective quantity \(your value: 3\)/);
   assert.equal(storage.items.has(KEY), false, "the conflicting edit is not kept in storage either");
+});
+
+// Regression: a restored draft must be pending for in-app departure, exactly like a typed edit. Departure
+// is the page's own resolveManualChanges call; a restored draft that did not count as pending would leave
+// no save command behind, and the value would stay only in browser storage.
+test("a restored draft is pending: departure sends the save command for it, as it would for a typed edit", async () => {
+  configure();
+  const service = { getBatchWorkspace: async () => workspaceFixture() };
+  const root = mount();
+  await renderBatchesPage(root, batchContext({ service }));
+  dom.setValue(inputLabelled(root, DEFECTIVE_LABEL), "3");
+  await recovery.flushDraftWrites();
+
+  drafts.forgetBatchDraftsInMemory();
+  const reopened = batchContext({ service, run: async (type, data) => boundedSave(data) });
+  const reopenedRoot = mount();
+  await renderBatchesPage(reopenedRoot, reopened);
+  assert.equal(inputLabelled(reopenedRoot, DEFECTIVE_LABEL).value, "3");
+  assert.equal(drafts.hasBatchDrafts("batch-1"), true, "the restored edit is an unsaved edit of this page");
+
+  let left = false;
+  await reopened.resolveManualChanges("leave for batches", () => {
+    left = true;
+  });
+  await flush();
+
+  const saves = reopened.commands.filter((command) => command.type === "saveBatchChanges");
+  assert.equal(saves.length, 1, "departure issued one save for the restored edit");
+  assert.deepEqual(saves[0].data.rows.map((row) => [row.rowId, row.defectiveQty]), [["row-1", 3]]);
+  assert.equal(left, true, "departure continued after the acknowledgment");
+  assert.equal(storage.items.has(KEY), false, "the acknowledged edit is no longer stored");
+});
+
+test("restored batch details are sent on departure", async () => {
+  configure();
+  const service = { getBatchWorkspace: async () => workspaceFixture() };
+  const root = mount();
+  await renderBatchesPage(root, batchContext({ service }));
+  const recorder = root.querySelectorAll("input").find((input) => input.getAttribute("aria-label") === "Recorded by 记录人员");
+  dom.setValue(recorder, "Bea");
+  await recovery.flushDraftWrites();
+
+  drafts.forgetBatchDraftsInMemory();
+  const reopened = batchContext({ service, run: async (type, data) => boundedSave(data) });
+  await renderBatchesPage(mount(), reopened);
+  await reopened.resolveManualChanges("leave for batches", () => {});
+  await flush();
+
+  const saves = reopened.commands.filter((command) => command.type === "saveBatchChanges");
+  assert.equal(saves.length, 1);
+  assert.equal(saves[0].data.details.recorder, "Bea");
+});
+
+// Regression: the core trims the recorder on save. The page must not treat the trimmed saved text as a new change, or the
+// departure would save the same details again and again and never leave the page.
+test("a recorder and notes typed with trailing spaces are saved once, and departure completes", async () => {
+  configure();
+  const service = { getBatchWorkspace: async () => workspaceFixture() };
+  const root = mount();
+  const context = batchContext({ service, run: async (type, data) => boundedSave(data) });
+  await renderBatchesPage(root, context);
+  const recorder = root.querySelectorAll("input").find((input) => input.getAttribute("aria-label") === "Recorded by 记录人员");
+  const notes = root.querySelectorAll("textarea").find((input) => input.getAttribute("aria-label") === "Special notes 本批次特殊情况");
+  dom.setValue(recorder, "Bea ");
+  dom.setValue(notes, "Second lot ");
+
+  let left = false;
+  await context.resolveManualChanges("leave for batches", () => {
+    left = true;
+  });
+  await flush();
+
+  const saves = context.commands.filter((command) => command.type === "saveBatchChanges");
+  assert.equal(saves.length, 1, "the trimmed saved text is not a further change");
+  assert.equal(left, true, "departure completes");
+});
+
+test("the batch list shows unsent edits that survive a reload, and Resume opens the batch again", async () => {
+  configure();
+  const service = { getBatchWorkspace: async () => workspaceFixture() };
+  const root = mount();
+  await renderBatchesPage(root, batchContext({ service }));
+  dom.setValue(inputLabelled(root, DEFECTIVE_LABEL), "3");
+  await recovery.flushDraftWrites();
+
+  // A new tab of the same browser profile opens the list, with nothing held in memory.
+  drafts.forgetBatchDraftsInMemory();
+  const listRoot = mount();
+  const list = { ...batchContext({ service }), selectedId: null };
+  await renderBatchesPage(listRoot, list);
+
+  const banner = listRoot.querySelector(".qc-ops-draft-warning");
+  assert.ok(banner, "the list warns about the unsent edit");
+  assert.match(banner.textContent, /Unsaved edits are kept in this browser until saved/);
+  assert.match(banner.textContent, /1 inspection row\(s\) and 0 batch detail set\(s\) need saving\./);
+  dom.click(banner.querySelectorAll("button").find((candidate) => candidate.textContent.startsWith("Resume ")));
+  assert.deepEqual(list.navigations.at(-1), ["batches", "batch-1", true]);
 });
 
 test("a stored copy is removed as soon as its save is acknowledged", async () => {

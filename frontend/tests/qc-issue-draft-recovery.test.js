@@ -112,6 +112,10 @@ function noticeIn() {
   return dom.dialog()?.querySelector(".qc-draft-notice") ?? null;
 }
 
+function dialogTitleText() {
+  return dom.dialog()?.querySelector(".dialog-header h2")?.textContent ?? null;
+}
+
 /** Opens the Issue in a fresh copy of the dialog module, as a reloaded page would. Nothing is held in memory. */
 async function reopenAfterReload(issue, state, context) {
   closeDialog(true);
@@ -154,6 +158,58 @@ test("a reload restores the edit into the form, still unsaved, with a notice", a
   assert.equal(saveStatusText(), "Unsaved changes");
   assert.match(noticeIn().textContent, /Restored unsaved edits from /);
   assert.ok(findButton(noticeIn(), "Discard restored edits"));
+  closeDialog(true);
+});
+
+// Regression: a restored disposition edit must behave like a typed one. Save changes is enabled and sends the restored value,
+// and closing the dialog asks first.
+test("a restored Issue edit enables Save changes, and that save sends the restored value", async () => {
+  configure();
+  dialogModule.clearIssueDrafts();
+  const issue = issueFixture();
+  const state = stateFixture([issue]);
+  const saved = [];
+  const context = issueContext({
+    state,
+    run: async (type, data) => {
+      saved.push([type, data.owner]);
+      return { ok: true, state: stateFixture([{ ...issue, owner: data.owner }], 4), revision: 4 };
+    },
+  });
+  dialogModule.openIssueDialog(issue, state, context);
+  dom.setValue(fieldNamed(dom.dialog(), "owner"), "Ann");
+  await recovery.flushDraftWrites();
+  await reopenAfterReload(issue, state, context);
+
+  const save = findButton(dom.dialog(), "Save changes");
+  assert.equal(save.disabled, false, "Save changes is enabled for the restored edit");
+  dom.click(save);
+  await flush();
+
+  assert.deepEqual(saved, [["saveIssue", "Ann"]]);
+  assert.equal(storage.items.has(KEY), false);
+  assert.equal(saveStatusText(), "Saved");
+  closeDialog(true);
+});
+
+test("closing an Issue with restored edits asks Save, Discard, or Cancel first", async () => {
+  configure();
+  dialogModule.clearIssueDrafts();
+  const issue = issueFixture();
+  const state = stateFixture([issue]);
+  const context = issueContext({ state, run: async () => ({ ok: true, state }) });
+  dialogModule.openIssueDialog(issue, state, context);
+  dom.setValue(fieldNamed(dom.dialog(), "owner"), "Ann");
+  await recovery.flushDraftWrites();
+  await reopenAfterReload(issue, state, context);
+
+  dom.click(findButton(dom.dialog(), "Close"));
+  await flush();
+
+  assert.equal(dialogTitleText(), "Unsaved changes");
+  assert.ok(findButton(dom.dialog(), "Save changes"));
+  assert.ok(findButton(dom.dialog(), "Discard changes"));
+  assert.ok(findButton(dom.dialog(), "Cancel"));
   closeDialog(true);
 });
 

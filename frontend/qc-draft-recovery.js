@@ -110,6 +110,11 @@ export function readStoredDraft(kind, recordId) {
   return store ? store.read(kind, String(recordId)) : null;
 }
 
+/** Ids of the records of one kind that hold a stored copy in this origin, workspace, and actor. */
+export function storedDraftIds(kind) {
+  return store ? store.recordIds(kind) : [];
+}
+
 /** Writes every waiting record at once. Runs when the page is hidden or closed, which cannot wait. */
 export function flushDraftWrites() {
   for (const entry of [...pending.values()]) {
