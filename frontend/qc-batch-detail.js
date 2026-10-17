@@ -4,7 +4,7 @@
 
 import { button, dateLabel, el, errorText, field, list, notify, pageHeading, quantity, statusPill, text } from "./qc-ops-common.js";
 import { createSingleFlight } from "./qc-ui.js";
-import { applySaveStatus, batchRowDrafts, clearDraftsForBatch, createBatchRowRegistry, deleteDetailDraft, dismissBatchDraftNotice, getDetailDraft, openBatchDrafts, persistBatchDraftsNow, rebaseBatchDrafts, reconcileSavedDetailDraft, reconcileSavedRowDraft, setDetailDraft } from "./qc-batch-drafts.js";
+import { applySaveStatus, batchRowDrafts, clearDraftsForBatch, createBatchRowRegistry, deleteDetailDraft, dismissBatchDraftNotice, getDetailDraft, openBatchDrafts, persistBatchDraftsNow, rebaseBatchDrafts, reconcileSavedDetailDraft, reconcileSavedRowDraft, sameDetailDraft, setDetailDraft } from "./qc-batch-drafts.js";
 import { createManualSaveController } from "./qc-manual-save.js";
 import { NOT_SAVED_SEE_MESSAGE, isStaleRevisionError } from "./qc-command-rules.js";
 import { renderDraftNotice } from "./qc-draft-notice.js";
@@ -118,8 +118,10 @@ export function renderBatchDetail(root, ctx) {
       }
       releasePanel?.refresh();
     };
+    // The core stores the recorder and the notes trimmed, so surrounding spaces are not a change that needs saving.
     const detailsDiffer = (value) => value.date !== (savedDetails.date || "") ||
-      value.recorder !== (savedDetails.recorder || "") || value.notes !== (savedDetails.notes || "");
+      String(value.recorder ?? "").trim() !== String(savedDetails.recorder || "").trim() ||
+      String(value.notes ?? "").trim() !== String(savedDetails.notes || "").trim();
     const hasChanges = () => batchRowDrafts(batch.id).length > 0 ||
       Boolean(getDetailDraft(batch.id) && detailsDiffer(getDetailDraft(batch.id)));
     const readSnapshot = () => ({
@@ -203,8 +205,11 @@ export function renderBatchDetail(root, ctx) {
           batch.date = savedDetails.date;
           batch.recorder = savedDetails.recorder;
           batch.notes = savedDetails.notes;
+          // Only what was typed after the save was sent stays unsaved. Comparing with the server's copy would count the
+          // server's trimming as a change, and the departure would save the same details again without end.
           const currentDetails = readDetailValue();
-          if (detailsDiffer(currentDetails)) {
+          const typedAfterSubmit = !sameDetailDraft(currentDetails, snapshot.details);
+          if (typedAfterSubmit && detailsDiffer(currentDetails)) {
             setDetailDraft(batch.id, { date: currentDetails.date, recorder: currentDetails.recorder, notes: currentDetails.notes });
           } else {
             deleteDetailDraft(batch.id);

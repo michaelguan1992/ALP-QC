@@ -52,11 +52,14 @@ export function rowFieldNames(historical) {
     : ["defectiveQty", "actualTimeSeconds", "remarks"];
 }
 
-/** Batch details fields. */
+/**
+ * Batch details fields. The core stores the recorder and the notes trimmed, so they are compared trimmed: a space typed
+ * at the end is not a change to restore or save.
+ */
 export const DETAIL_FIELDS = Object.freeze({
   date: Object.freeze({ label: "Batch date", same: sameText, read: (details) => textOf(details.date) }),
-  recorder: Object.freeze({ label: "Recorded by", same: sameText, read: (details) => textOf(details.recorder) }),
-  notes: Object.freeze({ label: "Special notes", same: sameText, read: (details) => textOf(details.notes) }),
+  recorder: Object.freeze({ label: "Recorded by", same: sameTrimmedText, read: (details) => textOf(details.recorder) }),
+  notes: Object.freeze({ label: "Special notes", same: sameTrimmedText, read: (details) => textOf(details.notes) }),
 });
 
 /** Disposition fields of an Issue. Confirmations are compared trimmed, as the save command compares them. */

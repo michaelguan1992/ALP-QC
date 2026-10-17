@@ -11,7 +11,7 @@
 // qc-draft-recovery.js and removed once they are saved or discarded.
 
 import { DETAIL_FIELDS as DETAIL_FIELD_SPECS, ROW_FIELDS as ROW_FIELD_SPECS, classifyFields, pickFields, rowFieldNames, savedTextOf, textOf } from "./qc-draft-model.js";
-import { discardAllStoredDrafts, discardStoredDraft, draftTimestamp, readStoredDraft, scheduleDraftWrite, writeDraftNow } from "./qc-draft-recovery.js";
+import { discardAllStoredDrafts, discardStoredDraft, draftTimestamp, readStoredDraft, scheduleDraftWrite, storedDraftIds, writeDraftNow } from "./qc-draft-recovery.js";
 
 const KEY_SEPARATOR = "::";
 const DRAFT_KIND = "batch";
@@ -107,19 +107,44 @@ export function hasBatchDrafts(batchId) {
   return batchRowDrafts(batchId).length > 0 || batchDetailDrafts.has(detailKey(batchId));
 }
 
+/**
+ * Whether any batch holds unsent edits, in memory or only in browser storage. A stored copy counts as much as a
+ * draft in memory: after a reload the edits are still unsaved, so leaving the page must still warn about them.
+ */
 export function hasAnyBatchDrafts() {
-  return rowDrafts.size > 0 || batchDetailDrafts.size > 0;
+  return rowDrafts.size > 0 || batchDetailDrafts.size > 0 || storedDraftIds(DRAFT_KIND).length > 0;
 }
 
 export function draftCounts() {
   return { rows: rowDrafts.size, details: batchDetailDrafts.size };
 }
 
-/** Batch ids that still hold row or detail drafts. */
+/** Batch ids that still hold row or detail drafts in memory. */
 export function pendingBatchIds() {
   const ids = new Set(batchDetailDrafts.keys());
   for (const key of rowDrafts.keys()) ids.add(key.slice(0, key.indexOf(KEY_SEPARATOR)));
   return [...ids];
+}
+
+/**
+ * The unsent edits of every batch, by batch id, as the number of rows and detail sets each holds. A batch's edits in
+ * memory take precedence. A batch with only a stored copy (after a reload, or a tab closed with edits) is counted from
+ * storage, so the batch list can show its unsent edits before the batch is opened again.
+ */
+export function unsentBatchEdits() {
+  const edits = new Map();
+  for (const batchId of pendingBatchIds()) {
+    edits.set(batchId, { rows: batchRowDrafts(batchId).length, details: batchDetailDrafts.has(detailKey(batchId)) ? 1 : 0 });
+  }
+  for (const batchId of storedDraftIds(DRAFT_KIND)) {
+    if (edits.has(batchId)) continue;
+    const record = readStoredDraft(DRAFT_KIND, batchId);
+    if (!record) continue;
+    const rows = Object.keys(plainObject(record.draft.rows)).length;
+    const details = Object.keys(plainObject(record.draft.details)).length > 0 ? 1 : 0;
+    if (rows || details) edits.set(batchId, { rows, details });
+  }
+  return edits;
 }
 
 /** Forgets a batch's drafts, notice, and stored copy. Used after a discard or a delete. */
