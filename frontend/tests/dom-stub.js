@@ -236,6 +236,11 @@ class FakeElement extends FakeNode {
     };
   }
 
+  // Option children of a select, as the browser's HTMLSelectElement exposes them.
+  get options() {
+    return this.children.filter((child) => child.localName === "option");
+  }
+
   get dataset() {
     const element = this;
     return new Proxy({}, {

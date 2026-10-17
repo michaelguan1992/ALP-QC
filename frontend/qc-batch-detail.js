@@ -3,6 +3,7 @@
 // through the manual save controller, which also flushes them before in-app departure.
 
 import { button, dateLabel, el, errorText, field, list, notify, pageHeading, quantity, statusPill, text } from "./qc-ops-common.js";
+import { createSingleFlight } from "./qc-ui.js";
 import { applySaveStatus, batchRowDrafts, clearDraftsForBatch, createBatchRowRegistry, deleteDetailDraft, getDetailDraft, pruneSavedBatchDrafts, reconcileSavedDetailDraft, reconcileSavedRowDraft, setDetailDraft } from "./qc-batch-drafts.js";
 import { createManualSaveController } from "./qc-manual-save.js";
 import { batchReleaseBlockers } from "../core/qc-inspections.js";
@@ -24,16 +25,20 @@ function validIsoDate(value) {
 
 function renderReleaseBlockers(workspace, ctx, manualSaveController) {
   const blockerHost = el("div", { className: "qc-ops-release-blockers" });
-  const release = button("Release full batch", async () => {
-    const releaseSavedBatch = async () => {
-      const result = await ctx.run("releaseBatch", { id: workspace.batch.id });
-      if (result.ok) notify("The full batch was released.");
-    };
-    if (manualSaveController?.hasPending()) {
-      await ctx.resolveManualChanges?.("release this batch", releaseSavedBatch);
-      return;
-    }
-    await releaseSavedBatch();
+  // A second click while the release is pending is ignored, so the batch is released once.
+  const releaseFlight = createSingleFlight({ controls: () => [release] });
+  const release = button("Release full batch", () => {
+    void releaseFlight(async () => {
+      const releaseSavedBatch = async () => {
+        const result = await ctx.run("releaseBatch", { id: workspace.batch.id });
+        if (result.ok) notify("The full batch was released.");
+      };
+      if (manualSaveController?.hasPending()) {
+        await ctx.resolveManualChanges?.("release this batch", releaseSavedBatch);
+        return;
+      }
+      await releaseSavedBatch();
+    });
   }, "button button-danger");
   const refresh = () => {
     const alreadyReleased = workspace.batch.status === "released";
@@ -235,17 +240,20 @@ export function renderBatchDetail(root, ctx) {
     releasePanel = renderReleaseBlockers(workspace, ctx, manualSaveController);
     const sharedVersionAtBatchLevel = typeof batch.versionLabel === "string" && batch.versionLabel.trim() !== "" &&
       products.every((product) => product.versionLabel === batch.versionLabel);
-    const deleteBatchButton = button("Delete", async () => {
+    const deleteFlight = createSingleFlight({ controls: () => [deleteBatchButton] });
+    const deleteBatchButton = button("Delete", () => {
       if (!window.confirm(`Delete batch ${text(workspace.displayNumber ?? resolveBatchDisplayNumber(state, batch.id, batch.number), "Batch")}? This action cannot be undone.`)) return;
-      const deleteSavedBatch = async () => {
-        // The deleted batch is not re-rendered; the page moves to the batch list at once.
-        const response = await ctx.run("deleteBatch", { id: batch.id }, { render: false });
-        if (!response.ok) return;
-        clearDraftsForBatch(batch.id);
-        await ctx.navigate("batches", null, true);
-      };
-      if (manualSaveController.hasPending()) await ctx.resolveManualChanges?.("delete this batch", deleteSavedBatch);
-      else await deleteSavedBatch();
+      void deleteFlight(async () => {
+        const deleteSavedBatch = async () => {
+          // The deleted batch is not re-rendered; the page moves to the batch list at once.
+          const response = await ctx.run("deleteBatch", { id: batch.id }, { render: false });
+          if (!response.ok) return;
+          clearDraftsForBatch(batch.id);
+          await ctx.navigate("batches", null, true);
+        };
+        if (manualSaveController.hasPending()) await ctx.resolveManualChanges?.("delete this batch", deleteSavedBatch);
+        else await deleteSavedBatch();
+      });
     }, "button button-danger");
     deleteBatchButton.disabled = batch.status !== "draft";
     const headerActions = [

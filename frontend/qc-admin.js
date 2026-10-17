@@ -4,7 +4,46 @@ import { getPurchaseOrderProgress } from "../core/qc-purchasing.js";
 import { resolveBatchDisplayNumbers } from "../core/qc-batch-display.js";
 import { formatNumberedDescription } from "./qc-source-description.js";
 import { downloadAttachment, loadAssetContent } from "./qc-attachments.js";
-import { button, closeDialog, el, field, notify, readFileAsDataURL, showDialog } from "./qc-ui.js";
+import { button, closeDialog, createSingleFlight, el, field, notify, readFileAsDataURL, showDialog, uploadingLabel } from "./qc-ui.js";
+import { messageOf } from "./qc-command-rules.js";
+
+// Feedback for a dialog form whose submit failed, with the in-place "Reload latest data" action when the
+// failure means the entries are based on an old revision or may not have been saved. Reloading keeps the
+// form's entries; a further submit is blocked only until a fresh state has loaded.
+function dialogRecovery(ctx) {
+  const feedback = h("p", { className: "upload-feedback upload-feedback-error", role: "alert", hidden: true });
+  const reload = button("Reload latest data", async () => {
+    reload.disabled = true;
+    try {
+      const refreshed = await ctx.refreshState?.({ render: true });
+      if (refreshed?.ok) {
+        reload.hidden = true;
+        feedback.className = "upload-feedback upload-feedback-success";
+        feedback.textContent = "The latest data is loaded. Your entries are unchanged; submit again to apply them.";
+      } else {
+        feedback.className = "upload-feedback upload-feedback-error";
+        feedback.textContent = messageOf(refreshed?.error, "The latest data could not be loaded. Your entries are still here.");
+      }
+    } finally {
+      reload.disabled = false;
+    }
+  }, "button button-secondary");
+  reload.hidden = true;
+  return {
+    element: h("div", { className: "stack dialog-recovery" }, feedback, reload),
+    show(result) {
+      feedback.className = "upload-feedback upload-feedback-error";
+      feedback.textContent = messageOf(result?.error, "The change could not be saved.");
+      feedback.hidden = false;
+      reload.hidden = !result?.reloadRequired;
+    },
+    clear() {
+      feedback.hidden = true;
+      feedback.textContent = "";
+      reload.hidden = true;
+    },
+  };
+}
 
 const h = el;
 const today = () => {
@@ -152,14 +191,18 @@ function renderCatalog(root, ctx) {
   const variants = [...ctx.state.variants].sort((a, b) => a.familyId.localeCompare(b.familyId) || a.model.localeCompare(b.model) || a.label.localeCompare(b.label));
   const variantTable = variants.length ? h("div", { className: "table-shell variant-table" }, h("table", { className: "data-table" },
     h("thead", {}, h("tr", {}, h("th", {}, "Inspection family"), h("th", {}, "Model"), h("th", {}, "Color / variation"), h("th", {}, "Order display"), h("th", {}, "Status"), h("th", {}, "Action"))),
-    h("tbody", {}, variants.map((variant) => h("tr", {},
-      h("td", {}, familyName(ctx, variant.familyId)), h("td", {}, variant.model), h("td", {}, variant.color),
-      h("td", {}, h("strong", {}, variant.label)),
-      h("td", {}, statusBadge(variant.active ? "Active" : "Inactive", variant.active ? "green" : "warn")),
-      h("td", {}, button(variant.active ? "Deactivate" : "Activate", async () => {
-        await ctx.run("setVariantActive", { id: variant.id, active: !variant.active });
-      }, variant.active ? "button-secondary" : "button-primary")),
-    ))),
+    h("tbody", {}, variants.map((variant) => {
+      const toggle = button(variant.active ? "Deactivate" : "Activate", () => {
+        void toggleFlight(() => ctx.run("setVariantActive", { id: variant.id, active: !variant.active }));
+      }, variant.active ? "button-secondary" : "button-primary");
+      const toggleFlight = createSingleFlight({ controls: () => [toggle] });
+      return h("tr", {},
+        h("td", {}, familyName(ctx, variant.familyId)), h("td", {}, variant.model), h("td", {}, variant.color),
+        h("td", {}, h("strong", {}, variant.label)),
+        h("td", {}, statusBadge(variant.active ? "Active" : "Inactive", variant.active ? "green" : "warn")),
+        h("td", {}, toggle),
+      );
+    })),
   )) : emptyState("No product variants yet", "");
   root.append(h("div", { className: "admin-grid" },
     h("section", { className: "admin-card admin-card-wide card" },
@@ -182,21 +225,29 @@ function openVariantEditor(ctx) {
     modelSelect.replaceChildren(...(selectedFamily?.models ?? []).map((model) => h("option", { value: model }, model)));
     modelSelect.value = selectedFamily?.models?.[0] ?? "";
   });
+  const submitButton = h("button", { type: "submit", className: "button button-primary" }, "Create active variant");
+  const recovery = dialogRecovery(ctx);
+  const submitFlight = createSingleFlight({ controls: () => [submitButton] });
   const form = h("form", { className: "stack" },
     h("div", { className: "form-grid" },
       field("Inspection family", familySelect), field("Product model", modelSelect),
       field("Color", input("color", "", "text", { required: true, maxLength: 80, placeholder: "For example: Blue" })),
       field("Displayed product name", input("label", "", "text", { required: true, maxLength: 160, placeholder: "For example: S15 Blue" })),
     ),
-    h("div", { className: "form-actions" }, h("button", { type: "submit", className: "button button-primary" }, "Create active variant")),
+    recovery.element,
+    h("div", { className: "form-actions" }, submitButton),
   );
-  form.addEventListener("submit", async (event) => {
+  form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const values = new FormData(form);
-    const result = await ctx.run("createVariant", {
-      familyId: values.get("familyId"), model: values.get("model"), color: values.get("color"), label: values.get("label"),
+    void submitFlight(async () => {
+      const values = new FormData(form);
+      recovery.clear();
+      const result = await ctx.run("createVariant", {
+        familyId: values.get("familyId"), model: values.get("model"), color: values.get("color"), label: values.get("label"),
+      }, { silent: true });
+      if (result.ok || result.committed) closeDialog(true);
+      else recovery.show(result);
     });
-    if (result.ok) closeDialog(true);
   });
   showDialog("Add product variant", form);
 }
@@ -301,6 +352,9 @@ function renderVersionEditor(ctx, version, initialFamilyId) {
         ),
       );
     });
+    const submitButton = h("button", { type: "submit", className: "button button-primary" }, version ? "Save draft" : "Create draft");
+    const recovery = dialogRecovery(ctx);
+    const submitFlight = createSingleFlight({ controls: () => [submitButton] });
     const form = h("form", { className: "stack version-editor-form" },
       metadata,
       h("section", { className: "stack" },
@@ -315,13 +369,18 @@ function renderVersionEditor(ctx, version, initialFamilyId) {
         ),
         editorRows.length ? h("div", { className: "item-editor-list" }, editorRows) : emptyState("No inspection items yet", ""),
       ),
-      h("div", { className: "form-actions" }, h("button", { type: "submit", className: "button button-primary" }, version ? "Save draft" : "Create draft")),
+      recovery.element,
+      h("div", { className: "form-actions" }, submitButton),
     );
-    form.addEventListener("submit", async (event) => {
+    form.addEventListener("submit", (event) => {
       event.preventDefault();
-      const payload = readVersionForm(form, itemDrafts, family.id);
-      const result = await ctx.run(version ? "saveVersion" : "createVersion", version ? { id: version.id, ...payload } : payload);
-      if (result.ok) closeDialog(true);
+      void submitFlight(async () => {
+        const payload = readVersionForm(form, itemDrafts, family.id);
+        recovery.clear();
+        const result = await ctx.run(version ? "saveVersion" : "createVersion", version ? { id: version.id, ...payload } : payload, { silent: true });
+        if (result.ok || result.committed) closeDialog(true);
+        else recovery.show(result);
+      });
     });
     if (shouldMarkDirty) form.dataset.dirty = "true";
     showDialog(version ? `Edit draft · ${version.label}` : "Create a design version", form);
@@ -335,32 +394,46 @@ function openNewVersion(ctx, familyId) {
 
 function openCloneDialog(ctx, version) {
   const familySequence = nextSequence(ctx, version.familyId);
+  const submitButton = h("button", { type: "submit", className: "button button-primary" }, "Create draft copy");
+  const recovery = dialogRecovery(ctx);
+  const submitFlight = createSingleFlight({ controls: () => [submitButton] });
   const form = h("form", { className: "stack" },
     h("div", { className: "form-grid" },
       field("New version name", input("label", `${version.label} copy`, "text", { required: true, maxLength: 160 })),
       field("Sequence", input("sequence", familySequence, "number", { required: true, min: 1, step: 1 })),
       field("Effective date", input("effectiveDate", today(), "date", { required: true })),
     ),
-    h("div", { className: "form-actions" }, h("button", { type: "submit", className: "button button-primary" }, "Create draft copy")),
+    recovery.element,
+    h("div", { className: "form-actions" }, submitButton),
   );
-  form.addEventListener("submit", async (event) => {
+  form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const values = new FormData(form);
-    const result = await ctx.run("cloneVersion", { id: version.id, label: values.get("label"), sequence: Number(values.get("sequence")), effectiveDate: values.get("effectiveDate") });
-    if (result.ok) closeDialog(true);
+    void submitFlight(async () => {
+      const values = new FormData(form);
+      recovery.clear();
+      const result = await ctx.run("cloneVersion", { id: version.id, label: values.get("label"), sequence: Number(values.get("sequence")), effectiveDate: values.get("effectiveDate") }, { silent: true });
+      if (result.ok || result.committed) closeDialog(true);
+      else recovery.show(result);
+    });
   });
   showDialog("Clone published version", form);
 }
 
 function confirmPublish(ctx, version) {
+  const recovery = dialogRecovery(ctx);
+  const publishFlight = createSingleFlight({ controls: () => [publishButton] });
+  const publishButton = button("Publish version", () => {
+    void publishFlight(async () => {
+      recovery.clear();
+      const result = await ctx.run("publishVersion", { id: version.id }, { silent: true });
+      if (result.ok || result.committed) closeDialog(true);
+      else recovery.show(result);
+    });
+  }, "button-primary");
   showDialog("Publish immutable standards", h("div", { className: "stack" },
     h("p", {}, `Publish ${version.label} for ${familyName(ctx, version.familyId)}? Published versions cannot be edited. Future changes require a new draft copy.`),
-    h("div", { className: "button-row" },
-      button("Publish version", async () => {
-        const result = await ctx.run("publishVersion", { id: version.id });
-        if (result.ok) closeDialog(true);
-      }, "button-primary"),
-    ),
+    h("div", { className: "button-row" }, publishButton),
+    recovery.element,
   ));
 }
 
@@ -476,6 +549,9 @@ function openOrderEditor(ctx, order = null) {
         }, "button-danger")),
       );
     });
+    const submitButton = h("button", { type: "submit", className: "button button-primary" }, order ? "Save purchase order" : "Create purchase order");
+    const recovery = dialogRecovery(ctx);
+    const submitFlight = createSingleFlight({ controls: () => [submitButton] });
     const form = h("form", { className: "stack order-editor-form" },
       h("div", { className: "form-grid" },
         field("PO number", input("number", formSnapshot?.number ?? order?.number ?? "", "text", { required: true, maxLength: 100, placeholder: "For example: PO-2026-001" })),
@@ -492,17 +568,22 @@ function openOrderEditor(ctx, order = null) {
         }, "button-secondary")),
         linesUi.length ? linesUi : emptyState("No lines", ""),
       ),
-      h("div", { className: "form-actions" }, h("button", { type: "submit", className: "button button-primary" }, order ? "Save purchase order" : "Create purchase order")),
+      recovery.element,
+      h("div", { className: "form-actions" }, submitButton),
     );
-    form.addEventListener("submit", async (event) => {
+    form.addEventListener("submit", (event) => {
       event.preventDefault();
-      const values = new FormData(form);
-      const payload = {
-        number: String(values.get("number") ?? "").trim(), date: values.get("date"), supplier: String(values.get("supplier") ?? "").trim(),
-        notes: String(values.get("notes") ?? "").trim(), lines: readOrderLines(form, lineDrafts),
-      };
-      const result = await ctx.run(order ? "saveOrder" : "createOrder", order ? { id: order.id, ...payload } : payload);
-      if (result.ok) closeDialog(true);
+      void submitFlight(async () => {
+        const values = new FormData(form);
+        const payload = {
+          number: String(values.get("number") ?? "").trim(), date: values.get("date"), supplier: String(values.get("supplier") ?? "").trim(),
+          notes: String(values.get("notes") ?? "").trim(), lines: readOrderLines(form, lineDrafts),
+        };
+        recovery.clear();
+        const result = await ctx.run(order ? "saveOrder" : "createOrder", order ? { id: order.id, ...payload } : payload, { silent: true });
+        if (result.ok || result.committed) closeDialog(true);
+        else recovery.show(result);
+      });
     });
     if (markDirty) form.dataset.dirty = "true";
     showDialog(order ? `Edit purchase order · ${order.number}` : "Create purchase order", form);
@@ -578,8 +659,7 @@ function setUploadFeedback(node, message, tone = "") {
 }
 
 function openVersionAttachmentDialog(ctx, version) {
-  let totalBytes = ctx.state.assets.reduce((sum, asset) => sum + bytesForAsset(asset), 0);
-  let submitting = false;
+  const totalBytes = ctx.state.assets.reduce((sum, asset) => sum + bytesForAsset(asset), 0);
   const filePicker = input("file", "", "file", {
     accept: ".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.log,.csv,.md,.markdown",
     required: true,
@@ -588,55 +668,56 @@ function openVersionAttachmentDialog(ctx, version) {
   const limitNote = h("p", { className: "file-size" },
     `Maximum per document: ${formatBytes(DOCUMENT_MAX_BYTES)}. All stored attachment payloads together: ${formatBytes(totalBytes)} of ${formatBytes(ASSET_TOTAL_MAX_BYTES)}.`);
   const submitButton = h("button", { type: "submit", className: "button button-primary" }, "Upload attachment");
+  const recovery = dialogRecovery(ctx);
+  // The file picker and the submit button stay disabled until the upload settles.
+  const uploadFlight = createSingleFlight({ controls: () => [submitButton, filePicker] });
   const form = h("form", { className: "stack version-attachment-form" },
     field("Choose one document", filePicker),
     limitNote,
     feedback,
+    recovery.element,
     h("div", { className: "form-actions" }, submitButton),
   );
 
-  form.addEventListener("submit", async (event) => {
+  form.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (submitting) return;
-    const file = filePicker.files?.[0];
-    if (!file) { setUploadFeedback(feedback, "Choose a document to upload.", "error"); return; }
-    if (!safeLibraryType(file)) {
-      setUploadFeedback(feedback, "This file type is not supported. Use a PDF, PNG, JPEG, WebP, GIF, TXT, LOG, CSV, or MD file. HTML and SVG are not accepted.", "error");
-      return;
-    }
-    if (file.size === 0) { setUploadFeedback(feedback, "Choose a non-empty document.", "error"); return; }
-    if (file.size > DOCUMENT_MAX_BYTES) {
-      setUploadFeedback(feedback, `This document is ${formatBytes(file.size)}; the limit is ${formatBytes(DOCUMENT_MAX_BYTES)}.`, "error");
-      return;
-    }
-    if (totalBytes + file.size > ASSET_TOTAL_MAX_BYTES) {
-      setUploadFeedback(feedback, `This upload would exceed the ${formatBytes(ASSET_TOTAL_MAX_BYTES)} total attachment limit.`, "error");
-      return;
-    }
-
-    submitting = true;
-    submitButton.disabled = true;
-    filePicker.disabled = true;
-    submitButton.textContent = "Uploading…";
-    setUploadFeedback(feedback, "Uploading document…");
-    try {
-      const mimeType = fallbackMime(file);
-      const dataUrl = await readFileAsDataURL(new Blob([file], { type: mimeType }));
-      const result = await ctx.run("addDocument", { name: file.name, mimeType, dataUrl, versionId: version.id });
-      if (!result.ok) {
-        setUploadFeedback(feedback, result.error instanceof Error ? result.error.message : "The document could not be uploaded.", "error");
+    void uploadFlight(async () => {
+      const file = filePicker.files?.[0];
+      if (!file) { setUploadFeedback(feedback, "Choose a document to upload.", "error"); return; }
+      if (!safeLibraryType(file)) {
+        setUploadFeedback(feedback, "This file type is not supported. Use a PDF, PNG, JPEG, WebP, GIF, TXT, LOG, CSV, or MD file. HTML and SVG are not accepted.", "error");
         return;
       }
-      closeDialog(true);
-      notify(`Uploaded ${file.name} to ${version.label || "this version"}.`);
-    } catch (error) {
-      setUploadFeedback(feedback, error instanceof Error ? error.message : "The document could not be read.", "error");
-    } finally {
-      submitting = false;
-      submitButton.disabled = false;
-      filePicker.disabled = false;
-      submitButton.textContent = "Upload attachment";
-    }
+      if (file.size === 0) { setUploadFeedback(feedback, "Choose a non-empty document.", "error"); return; }
+      if (file.size > DOCUMENT_MAX_BYTES) {
+        setUploadFeedback(feedback, `This document is ${formatBytes(file.size)}; the limit is ${formatBytes(DOCUMENT_MAX_BYTES)}.`, "error");
+        return;
+      }
+      if (totalBytes + file.size > ASSET_TOTAL_MAX_BYTES) {
+        setUploadFeedback(feedback, `This upload would exceed the ${formatBytes(ASSET_TOTAL_MAX_BYTES)} total attachment limit.`, "error");
+        return;
+      }
+
+      recovery.clear();
+      submitButton.textContent = "Uploading…";
+      setUploadFeedback(feedback, uploadingLabel(file.size));
+      try {
+        const mimeType = fallbackMime(file);
+        const dataUrl = await readFileAsDataURL(new Blob([file], { type: mimeType }));
+        const result = await ctx.run("addDocument", { name: file.name, mimeType, dataUrl, versionId: version.id }, { silent: true });
+        if (result.ok || result.committed) {
+          closeDialog(true);
+          notify(`Uploaded ${file.name} to ${version.label || "this version"}.`);
+          return;
+        }
+        setUploadFeedback(feedback, "");
+        recovery.show(result);
+      } catch (error) {
+        setUploadFeedback(feedback, messageOf(error, "The document could not be read."), "error");
+      } finally {
+        submitButton.textContent = "Upload attachment";
+      }
+    });
   });
 
   showDialog("Upload a version attachment", form);
@@ -760,32 +841,46 @@ function renderLibrary(root, ctx) {
     value: version.id,
     label: `${familyName(ctx, version.familyId)} · ${version.label || "Version label not recorded"} (${version.status === "recorded" ? "Archived" : version.status})`,
   }))];
+  const addButton = h("button", { type: "submit", className: "button button-primary" }, "Save file to library");
+  const addStatus = h("p", { className: "upload-feedback", role: "status", ariaLive: "polite", hidden: true });
+  const addRecovery = dialogRecovery(ctx);
+  const addFlight = createSingleFlight({ controls: () => [addButton] });
   const form = h("form", { className: "backup-panel" },
     h("div", { className: "file-choice" },
       field("Choose a source file", input("file", "", "file", { accept: ".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.log,.csv,.md,.markdown", required: true })),
       h("p", { className: "file-size" }, `Per-file limit: ${formatBytes(DOCUMENT_MAX_BYTES)} · stored: ${formatBytes(totalBytes)} / ${formatBytes(ASSET_TOTAL_MAX_BYTES)}.`),
     ),
     field("Link to design version", select("versionId", versionOptions, "")),
-    h("div", { className: "form-actions" }, h("button", { type: "submit", className: "button button-primary" }, "Save file to library")),
+    addStatus,
+    addRecovery.element,
+    h("div", { className: "form-actions" }, addButton),
   );
-  form.addEventListener("submit", async (event) => {
+  form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const file = form.elements.namedItem("file")?.files?.[0];
-    if (!file) { notify("Choose a file to upload.", true); return; }
-    if (!safeLibraryType(file)) { notify("This file type is not supported. Use a PDF, PNG, JPEG, WebP, GIF, or plain-text file (TXT, LOG, CSV, MD). HTML and SVG are not accepted.", true); return; }
-    if (file.size > DOCUMENT_MAX_BYTES) { notify(`This file is ${formatBytes(file.size)}; the limit is ${formatBytes(DOCUMENT_MAX_BYTES)}.`, true); return; }
-    if (totalBytes + file.size > ASSET_TOTAL_MAX_BYTES) { notify(`The library would exceed its ${formatBytes(ASSET_TOTAL_MAX_BYTES)} total attachment limit.`, true); return; }
-    try {
-      const values = new FormData(form);
-      const mimeType = fallbackMime(file);
-      const dataUrl = await readFileAsDataURL(new Blob([file], { type: mimeType }));
-      const result = await ctx.run("addDocument", {
-        name: file.name, mimeType, dataUrl, versionId: values.get("versionId") || null,
-      });
-      if (result.ok) form.dataset.dirty = "false";
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "The file could not be read.", true);
-    }
+    void addFlight(async () => {
+      const file = form.elements.namedItem("file")?.files?.[0];
+      if (!file) { notify("Choose a file to upload.", true); return; }
+      if (!safeLibraryType(file)) { notify("This file type is not supported. Use a PDF, PNG, JPEG, WebP, GIF, or plain-text file (TXT, LOG, CSV, MD). HTML and SVG are not accepted.", true); return; }
+      if (file.size > DOCUMENT_MAX_BYTES) { notify(`This file is ${formatBytes(file.size)}; the limit is ${formatBytes(DOCUMENT_MAX_BYTES)}.`, true); return; }
+      if (totalBytes + file.size > ASSET_TOTAL_MAX_BYTES) { notify(`The library would exceed its ${formatBytes(ASSET_TOTAL_MAX_BYTES)} total attachment limit.`, true); return; }
+      addRecovery.clear();
+      addStatus.textContent = uploadingLabel(file.size);
+      addStatus.hidden = false;
+      try {
+        const values = new FormData(form);
+        const mimeType = fallbackMime(file);
+        const dataUrl = await readFileAsDataURL(new Blob([file], { type: mimeType }));
+        const result = await ctx.run("addDocument", {
+          name: file.name, mimeType, dataUrl, versionId: values.get("versionId") || null,
+        }, { silent: true });
+        if (result.ok || result.committed) form.dataset.dirty = "false";
+        else addRecovery.show(result);
+      } catch (error) {
+        notify(error instanceof Error ? error.message : "The file could not be read.", true);
+      } finally {
+        addStatus.hidden = true;
+      }
+    });
   });
   const assets = [...ctx.state.assets].filter((asset) => asset.kind === "document").sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   const files = assets.length ? h("div", { className: "asset-list" }, assets.map((asset) => {
@@ -815,38 +910,56 @@ function renderBackup(root, ctx) {
     href: ctx.service.backupSnapshotUrl(),
     download: "",
   }, "Download database snapshot");
+  const restoreButton = h("button", { type: "submit", className: "button button-secondary" }, "Validate and restore backup");
+  const restoreStatus = h("p", { className: "upload-feedback", role: "status", ariaLive: "polite", hidden: true });
+  const restoreRecovery = dialogRecovery(ctx);
+  const restoreFlight = createSingleFlight({ controls: () => [restoreButton] });
   const form = h("form", { className: "backup-panel" },
     h("div", { className: "file-choice" },
       field("Backup JSON file", input("backup", "", "file", { accept: ".json,application/json", required: true })),
       h("p", { className: "file-size" }, `Maximum backup size: ${formatBytes(BACKUP_MAX_BYTES)}.`),
     ),
-    h("div", { className: "form-actions" }, h("button", { type: "submit", className: "button button-secondary" }, "Validate and restore backup")),
+    restoreStatus,
+    restoreRecovery.element,
+    h("div", { className: "form-actions" }, restoreButton),
   );
-  form.addEventListener("submit", async (event) => {
+  form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const file = form.elements.namedItem("backup")?.files?.[0];
-    if (!file) { notify("Choose a backup JSON file.", true); return; }
-    if (file.size > BACKUP_MAX_BYTES) { notify(`This file is ${formatBytes(file.size)}; the maximum is ${formatBytes(BACKUP_MAX_BYTES)}.`, true); return; }
-    let backup;
-    try {
-      backup = JSON.parse(await file.text());
-    } catch {
-      notify("This file is not valid JSON. Choose an exported MasterQC backup.", true);
-      return;
-    }
-    try {
-      const result = await ctx.service.importBackup(backup, ctx.state.revision);
+    void restoreFlight(async () => {
+      const file = form.elements.namedItem("backup")?.files?.[0];
+      if (!file) { notify("Choose a backup JSON file.", true); return; }
+      if (file.size > BACKUP_MAX_BYTES) { notify(`This file is ${formatBytes(file.size)}; the maximum is ${formatBytes(BACKUP_MAX_BYTES)}.`, true); return; }
+      restoreRecovery.clear();
+      restoreStatus.textContent = uploadingLabel(file.size);
+      restoreStatus.hidden = false;
+      let backup;
+      try {
+        backup = JSON.parse(await file.text());
+      } catch {
+        restoreStatus.hidden = true;
+        notify("This file is not valid JSON. Choose an exported MasterQC backup.", true);
+        return;
+      }
+      const result = await ctx.run("importBackup", null, {
+        request: (revision) => ctx.service.importBackup(backup, revision),
+        silent: true,
+      });
+      restoreStatus.hidden = true;
+      if (!result.ok && !result.committed) {
+        restoreRecovery.show(result);
+        return;
+      }
+      if (!result.ok) {
+        notify("The backup was restored, but the latest data could not be reloaded. Reload before continuing.", true);
+        return;
+      }
       form.dataset.dirty = "false";
-      ctx.announceChange?.(result.revision);
-      const counts = result.counts ?? {};
+      const counts = result.result?.counts ?? {};
       const added = Object.values(counts.added ?? {}).reduce((sum, count) => sum + count, 0);
       const skipped = Object.values(counts.skipped ?? {}).reduce((sum, count) => sum + count, 0);
       const adopted = counts.adoptedSeedVariants ?? 0;
       notify(`Restore complete: ${added} records added; ${skipped} identical records skipped; ${adopted} initial catalog preferences adopted.`);
-      ctx.refresh();
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "The backup could not be restored.", true);
-    }
+    });
   });
   const assetBytes = ctx.state.assets.reduce((sum, asset) => sum + bytesForAsset(asset), 0);
   const metrics = h("div", { className: "progress-grid" },
