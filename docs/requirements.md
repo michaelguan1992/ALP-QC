@@ -231,3 +231,7 @@ See [Local App Contract](app-contract.md) for command interfaces, data shapes, m
 - Michael owns the domain, the cloud server account, and backup alerts.
 - Concurrent users must not block each other: a save is rejected as stale only when a record it changes was changed by someone else since the user's view, not whenever any other record in the workspace changed.
 
+- Development and automated tests never use real data; trial users enter real data directly into the hosted production database from the first day. At cutover the production database moves to the server, which then holds the only authoritative copy, and the repository stops tracking it.
+- No synthetic sample-data generator for now; revisit after real use shows which data shapes matter.
+- Every release is verified automatically on the server before it goes live: the release script starts the new code on an internal port against a fresh copy of the production database, checks startup, data upgrades, health, record counts, and attachments, and switches production only when all checks pass. No persistent staging environment.
+- The release process includes a release and rollback script, and open pages show a "new version available" notice so users reload onto the new code without losing edits.
