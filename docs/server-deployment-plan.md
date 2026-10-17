@@ -67,7 +67,7 @@ Use a consistent snapshot of the complete production SQLite database. It contain
 | Full application JSON export | Weekly and before changes | 12 weekly copies; pre-change copies at least 30 days | Portable recovery of business records and attachments |
 | Separate encrypted offline download | Weekly | 4 weekly copies on another device | Additional recovery path if cloud accounts are unavailable |
 
-Select daily/monthly snapshots from the successful frequent snapshots rather than creating unnecessary duplicate reads. Keep a short local recovery cache for convenience, but count only completed, verified off-site uploads toward the recovery target.
+Select daily/monthly snapshots from the successful frequent snapshots rather than creating unnecessary duplicate reads. Keep a short local recovery cache for convenience (about six hours of copies by default, plus the newest copy that reached S3), but count only completed, verified off-site uploads toward the recovery target.
 
 First-choice off-site destination: a private AWS S3 bucket in Singapore, in an account separate from the application provider. Enable versioning and Object Lock. Each copy carries its own COMPLIANCE lock: 7 days for half-hourly copies, 30 days for daily copies, and 366 days for monthly copies (see docs/deployment.md). Give the server narrowly scoped upload credentials without delete, retention-bypass, or account-administration permissions. Use unique timestamped object names; lifecycle cleanup runs under separate administration. Validate the lock policy on disposable data before applying it to production. [S3 Object Lock](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html).
 

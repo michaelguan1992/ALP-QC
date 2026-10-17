@@ -405,12 +405,27 @@ function pause() {
   return new Promise((resolve) => setTimeout(resolve, 1100));
 }
 
+// Local copies are written into staging and dated in the past, the way earlier runs would have left them.
+async function writeStagingCopy(fixture, baseName, ageMs) {
+  for (const suffix of [".sqlite.age", ".json"]) {
+    await writeFile(path.join(fixture.stagingDirectory, baseName + suffix), "old copy");
+  }
+  await setStagingCopyAge(fixture, baseName, ageMs);
+}
+
+async function setStagingCopyAge(fixture, baseName, ageMs) {
+  const when = new Date(Date.now() - ageMs);
+  for (const suffix of [".sqlite.age", ".json"]) {
+    await utimes(path.join(fixture.stagingDirectory, baseName + suffix), when, when);
+  }
+}
+
 test("the first run uploads every tier, each object under a COMPLIANCE lock with its retention", { skip: LINUX_ONLY }, async (t) => {
   if (!(await requireAge(t))) return;
   const fixture = await createBackupFixture(t);
   const revision = await seedWorkspace(fixture);
 
-  // Old local copies are removed; recent copies, the lock file, and unrelated files are kept.
+  // A copy older than the keep window that is not the newest successful copy is removed. Recent copies and unrelated files stay.
   const oldName = "masterqc-main-20261010T000000Z-r1";
   await writeFile(path.join(fixture.stagingDirectory, `${oldName}.sqlite.age`), "old encrypted");
   await writeFile(path.join(fixture.stagingDirectory, `${oldName}.json`), "{}");
@@ -464,11 +479,13 @@ test("the first run uploads every tier, each object under a COMPLIANCE lock with
   const decryptResult = await runBash(["-c", `age -d -i "${fixture.keyFile}" -o "${decrypted}" "${path.join(folder, encryptedName)}"`], process.env);
   assert.equal(decryptResult.code, 0, decryptResult.stderr);
   assert.equal(sha256(await readFile(decrypted)), manifest.sha256);
+  // The newest copy that reached S3 intact is recorded, so local pruning keeps it.
+  assert.equal(await readState(fixture, "last-copy"), encryptedName.slice(0, -".sqlite.age".length));
 
   const localNames = (await readdir(fixture.stagingDirectory)).sort();
   assert.equal(localNames.some((name) => name.endsWith(".sqlite") && name.startsWith("masterqc-")), false, "plaintext copies must not remain");
   assert.ok(localNames.includes(encryptedName), "the encrypted copy stays as the local recovery cache");
-  assert.equal(localNames.includes(`${oldName}.sqlite.age`), false, "copies older than two days are pruned");
+  assert.equal(localNames.includes(`${oldName}.sqlite.age`), false, "copies older than the keep window are pruned");
   assert.equal(localNames.includes(`${oldName}.json`), false);
   assert.ok(localNames.includes("notes.txt"));
 
@@ -632,6 +649,91 @@ test("a size mismatch after upload fails the run and suppresses the heartbeat", 
   assert.equal(mismatch.code, 1, outputOf(mismatch));
   assert.match(mismatch.stderr, /different size/);
   assert.equal((await callLines(fixture)).includes("curl heartbeat"), false, "no heartbeat after a failed verification");
+});
+
+test("local staging keeps the newest successful copy and the recent copies, and trims the rest even when uploads fail", { skip: LINUX_ONLY }, async (t) => {
+  if (!(await requireAge(t))) return;
+  const fixture = await createBackupFixture(t);
+  await seedWorkspace(fixture);
+  assert.equal((await runBackup(fixture)).code, 0);
+  const lastCopy = await readState(fixture, "last-copy");
+  assert.match(lastCopy, /^masterqc-main-\d{8}T\d{6}Z-r\d+$/);
+
+  // The newest successful copy is aged far past the window. A stale copy never reached S3, and a recent copy is inside the window.
+  await setStagingCopyAge(fixture, lastCopy, 10 * HOUR_MS);
+  const staleCopy = "masterqc-main-20261016T000000Z-r1";
+  await writeStagingCopy(fixture, staleCopy, 10 * HOUR_MS);
+  const recentCopy = "masterqc-main-20261016T120000Z-r1";
+  await writeStagingCopy(fixture, recentCopy, 1 * HOUR_MS);
+  const notes = path.join(fixture.stagingDirectory, "notes.txt");
+  await writeFile(notes, "keep me");
+  await utimes(notes, new Date(Date.now() - 10 * HOUR_MS), new Date(Date.now() - 10 * HOUR_MS));
+
+  // A changed database needs an upload, and that upload fails. The run still trims the cache before it uploads.
+  await addOrder(fixture, "PO-FAILING-UPLOAD");
+  const run = await runBackup(fixture, { FAKE_AWS_FAIL_PREFIX: "/half-hourly/" });
+  assert.equal(run.code, 1, outputOf(run));
+
+  const names = await readdir(fixture.stagingDirectory);
+  assert.ok(names.includes(`${lastCopy}.sqlite.age`) && names.includes(`${lastCopy}.json`), "the newest successful copy is kept however old it is");
+  assert.equal(names.includes(`${staleCopy}.sqlite.age`), false, "a stale copy is removed although the run failed");
+  assert.equal(names.includes(`${staleCopy}.json`), false);
+  assert.ok(names.includes(`${recentCopy}.sqlite.age`), "a copy inside the window is kept");
+  assert.ok(names.includes("notes.txt"), "unrelated files are kept");
+  assert.equal(await readState(fixture, "last-copy"), lastCopy, "a failed run does not move the newest successful copy");
+});
+
+test("a copy is trimmed at the start of the run after a newer copy reaches S3", { skip: LINUX_ONLY }, async (t) => {
+  if (!(await requireAge(t))) return;
+  const fixture = await createBackupFixture(t);
+  await seedWorkspace(fixture);
+  assert.equal((await runBackup(fixture)).code, 0);
+  const first = await readState(fixture, "last-copy");
+  await setStagingCopyAge(fixture, first, 10 * HOUR_MS);
+
+  // The first copy is still the newest successful copy when this run trims, so it stays for this run.
+  await addOrder(fixture, "PO-SECOND-COPY");
+  assert.equal((await runBackup(fixture)).code, 0);
+  const second = await readState(fixture, "last-copy");
+  assert.notEqual(second, first);
+  assert.ok((await readdir(fixture.stagingDirectory)).includes(`${first}.sqlite.age`), "the first copy is removed by the following run");
+
+  // The following run trims the first copy, which is old and no longer the newest successful copy.
+  await addOrder(fixture, "PO-THIRD-COPY");
+  assert.equal((await runBackup(fixture)).code, 0);
+  const names = await readdir(fixture.stagingDirectory);
+  assert.equal(names.includes(`${first}.sqlite.age`), false);
+  assert.equal(names.includes(`${first}.json`), false);
+  assert.ok(names.includes(`${second}.sqlite.age`) && names.includes(`${second}.json`), "the second copy is recent, so it stays");
+});
+
+test("MASTERQC_BACKUP_LOCAL_KEEP_MINUTES sets the window, and an invalid value is refused before anything changes", { skip: LINUX_ONLY }, async (t) => {
+  if (!(await requireAge(t))) return;
+  const fixture = await createBackupFixture(t);
+  await seedWorkspace(fixture);
+
+  // Copies that never reached S3: one 5 hours old (inside the default 360-minute window), one 7 hours old (outside it).
+  await writeStagingCopy(fixture, "masterqc-main-20261016T010000Z-r1", 5 * HOUR_MS);
+  await writeStagingCopy(fixture, "masterqc-main-20261016T000000Z-r1", 7 * HOUR_MS);
+  assert.equal((await runBackup(fixture)).code, 0, "the default window run");
+  let names = await readdir(fixture.stagingDirectory);
+  assert.ok(names.includes("masterqc-main-20261016T010000Z-r1.sqlite.age"), "a 5-hour copy stays inside the default window");
+  assert.equal(names.includes("masterqc-main-20261016T000000Z-r1.sqlite.age"), false, "a 7-hour copy is trimmed by the default window");
+
+  // A 240-minute window trims the 5-hour copy on the next run.
+  await pause();
+  assert.equal((await runBackup(fixture, { MASTERQC_BACKUP_LOCAL_KEEP_MINUTES: "240" })).code, 0, "the custom window run");
+  names = await readdir(fixture.stagingDirectory);
+  assert.equal(names.includes("masterqc-main-20261016T010000Z-r1.sqlite.age"), false, "a 5-hour copy is trimmed by a 240-minute window");
+
+  // Invalid windows are refused before any snapshot is taken, so nothing in staging changes.
+  const before = (await readdir(fixture.stagingDirectory)).sort();
+  for (const value of ["abc", "0", "-5", "1.5"]) {
+    const run = await runBackup(fixture, { MASTERQC_BACKUP_LOCAL_KEEP_MINUTES: value });
+    assert.equal(run.code, 1, `${value}: ${outputOf(run)}`);
+    assert.match(run.stderr, /MASTERQC_BACKUP_LOCAL_KEEP_MINUTES must be a positive whole number of minutes/);
+    assert.deepEqual((await readdir(fixture.stagingDirectory)).sort(), before, `${value}: staging must not change`);
+  }
 });
 
 test("the backup job passes bash's syntax check", { skip: process.platform === "win32" ? "POSIX shell syntax is checked on POSIX systems." : false }, async () => {

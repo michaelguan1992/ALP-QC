@@ -22,7 +22,7 @@ Two facts shape every step:
 
 Run the commands from your own computer, with an administrator profile for the AWS CLI (v2). Replace each `<placeholder>`. Bucket names are unique across all of AWS and cannot be changed.
 
-1. **Create a separate account.** Sign up for a new AWS account, not the Tencent Cloud account. Sign in as root, turn on MFA for root, and do not create root access keys. Create an administrator identity for daily work, such as IAM Identity Center with MFA. Keep the account ID and recovery codes in your password manager.
+1. **Create a separate account.** Sign up for a new AWS account, separate from the account of your server provider. Sign in as root, turn on MFA for root, and do not create root access keys. Create an administrator identity for daily work, such as IAM Identity Center with MFA. Keep the account ID and recovery codes in your password manager.
 
 2. **Select the administrator profile and region:**
 
@@ -118,12 +118,12 @@ These are estimates, not bills. The prices used are S3 Standard storage at USD 0
 | Stored copies including the one-day lifecycle delay: 477 (432 half-hourly, 32 daily, 13 monthly) | 16.7 GB, about USD 0.42 a month | 333.9 GB, about USD 8.35 a month |
 | Requests: about 3,000 PUT and about 3,000 HEAD a month | under USD 0.05 | under USD 0.05 |
 | Data into AWS | free | free |
-| Outbound traffic from the server, counted against its allowance | about 50 GB a month | about 1.05 TB a month |
+| Outbound upload traffic from the server, worst case (compare with your plan's monthly traffic allowance) | about 50 GB a month | about 1.05 TB a month |
 
 Notes:
 
 - The storage class is S3 Standard. Infrequent-access and archive classes bill a minimum storage duration longer than these copies live, so they would cost more here (verify the minimums).
-- The server's traffic allowance of about 2 TB a month covers the worst case at 700 MB, but that case uses about half of it. The skip-unchanged rule keeps traffic low while the database is idle.
+- Check the upload column against your server plan's monthly traffic allowance. This guide does not assume an allowance. The worst case at 700 MB is about 1.05 TB a month, so it can take a large share of a small allowance. The skip-unchanged rule keeps traffic low while the database is idle.
 - The plan allows USD 5–10 a month for backup storage, requests, and transfer. The estimate fits that allowance at both sizes.
 
 ## 1. Install the software
@@ -202,6 +202,8 @@ MASTERQC_BACKUP_HEARTBEAT_URL=<optional external heartbeat URL>
 ```
 
 The upload credentials are the `masterqc-backup` user from section 0, whose policy is `deploy/aws/iam-upload-policy.json`. It allows writing backup objects under `masterqc/`, and reading their size and lock fields back, and nothing else: no deletion, no retention bypass, and no bucket changes. `MASTERQC_BACKUP_S3_PREFIX` must stay `masterqc`, or the policy's `Resource` must change to match.
+
+Optional: `MASTERQC_BACKUP_LOCAL_KEEP_MINUTES` (default `360`) sets how long encrypted copies stay in the local staging folder. It must be a positive whole number of minutes. The newest copy that reached S3 intact is kept whatever its age.
 
 ### Operator names and release identity
 
@@ -372,7 +374,8 @@ Use this when changing provider or plan, for example from the Tencent Lighthouse
 - SQLite calls are synchronous in Node, so while a snapshot is copied the whole app pauses, including `/healthz`. A monitor that polls health checks should allow a few seconds of slack.
 - The Caddy and systemd files were checked only for syntax (`systemd-analyze verify`; Caddy validation was not run). Run `caddy validate` before reloading.
 - The S3 steps in section 0, the upload policy, and the lifecycle rules were not checked against a live AWS account, and the test suite uses a stub AWS CLI, so the real `aws` calls are untested. The heartbeat monitor runs outside this repository. Run the scratch-bucket test before the production bucket exists, and run a restore drill after the first real upload.
-- Local staging keeps two days of encrypted copies, about 96 at the 30-minute cadence. At 35 MB that is about 3.4 GB; at 700 MB it is about 67 GB, more than a 50 GiB disk holds. The retention is fixed at 2,880 minutes in `deploy/masterqc-backup.sh`. Shorten it, or keep fewer local copies, before the database grows past about 350 MB.
+- Local staging keeps the encrypted copies made in the last `MASTERQC_BACKUP_LOCAL_KEEP_MINUTES` (default 360, about six hours), which is about 12 copies at the 30-minute cadence, plus the newest copy that reached S3 intact. At 35 MB that is about 0.5 GB; at 700 MB it is about 9 GB. While a run encrypts, a plaintext snapshot and its encrypted copy exist together, so the peak at 700 MB is about 10.5 GB for a few minutes. Pruning runs at the start of each run, before its uploads, so a run that fails still trims the cache. A copy that never reached S3 is removed once it is older than the window.
+- Outbound upload traffic is the other size to check. The worst case at 700 MB, a database that changes at every run, is about 1.05 TB a month (section 0). Compare that figure with the monthly traffic allowance on your server plan; this guide does not assume a particular allowance.
 - The unchanged-database rule compares revision numbers. A different database that carries the same revision number would be skipped until its six-hour copy. Do not copy `/var/lib/masterqc-backups/state` between servers; a new server starts with an empty state directory (section 12).
 - Object Lock compliance cannot be undone. A copy stays, and is billed, until its lock ends. Closing the AWS account is outside Object Lock's protection, so keep the root recovery codes and the `age` private key outside the server (section 0).
 - Each object is one `put-object` call, which S3 limits to 5 GB. The database is far below that now. A much larger database needs multipart uploads first.

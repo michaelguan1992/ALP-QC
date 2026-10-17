@@ -10,13 +10,16 @@
 # A run whose revision is unchanged, and whose last half-hourly copy is less than six hours old, uploads no
 # half-hourly copy. It still sends its heartbeat, because that copy already holds the current revision.
 #
+# Copies in the staging directory are a short recovery cache. Copies older than MASTERQC_BACKUP_LOCAL_KEEP_MINUTES
+# are removed, except the newest copy that reached S3 intact.
+#
 # Settings come from the environment. systemd loads them from /etc/masterqc/env and /etc/masterqc/backup.env
 # (see docs/deployment.md). Required: MASTERQC_BACKUP_AGE_RECIPIENT, MASTERQC_BACKUP_S3_BUCKET, and the AWS CLI
 # credentials and region (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION).
 # Optional: MASTERQC_BACKUP_S3_PREFIX (default masterqc), MASTERQC_BACKUP_HEARTBEAT_URL, MASTERQC_DATA_DIR
 # (default /var/lib/masterqc), MASTERQC_BACKUP_STAGING_DIR (default /var/lib/masterqc-backups/staging),
-# MASTERQC_BACKUP_STATE_DIR (default /var/lib/masterqc-backups/state), and MASTERQC_APP_DIR (default: the release
-# that contains this script).
+# MASTERQC_BACKUP_STATE_DIR (default /var/lib/masterqc-backups/state), MASTERQC_BACKUP_LOCAL_KEEP_MINUTES (default
+# 360), and MASTERQC_APP_DIR (default: the release that contains this script).
 # Secret values are never printed.
 set -euo pipefail
 
@@ -30,8 +33,9 @@ S3_PREFIX="${MASTERQC_BACKUP_S3_PREFIX:-masterqc}"
 S3_PREFIX="${S3_PREFIX%/}"
 RECIPIENT="${MASTERQC_BACKUP_AGE_RECIPIENT:-}"
 HEARTBEAT_URL="${MASTERQC_BACKUP_HEARTBEAT_URL:-}"
-# Local copies are a short recovery cache. Two days keeps several backup cycles on the server.
-RETENTION_MINUTES=2880
+# Local copies are a short recovery cache; the off-site copies are the real backups. The default window of 360 minutes
+# keeps about six hours of runs. The newest copy that reached S3 intact is kept whatever its age.
+LOCAL_KEEP_MINUTES="${MASTERQC_BACKUP_LOCAL_KEEP_MINUTES:-360}"
 # Object Lock retention per tier, in days. deploy/aws/lifecycle.json hides each copy one day after its lock ends and
 # deletes it a day later, so change the two together.
 HALF_HOURLY_LOCK_DAYS=7
@@ -58,6 +62,7 @@ done
 if [[ -n "$HEARTBEAT_URL" ]]; then
   command -v curl >/dev/null 2>&1 || die "Required command is not installed: curl"
 fi
+[[ "$LOCAL_KEEP_MINUTES" =~ ^[1-9][0-9]*$ ]] || die "MASTERQC_BACKUP_LOCAL_KEEP_MINUTES must be a positive whole number of minutes."
 
 # One clock reading drives every decision in this run: the UTC day and month, and the Object Lock dates.
 NOW_EPOCH="$(date -u '+%s')"
@@ -149,6 +154,8 @@ upload_tier() {
   retain_epoch="$(( $(date -u '+%s') + lock_days * 86400 ))"
   upload_and_verify "$ENCRYPTED" "$S3_PREFIX/$tier/$(basename -- "$ENCRYPTED")" "$retain_epoch"
   upload_and_verify "$MANIFEST" "$S3_PREFIX/$tier/$(basename -- "$MANIFEST")" "$retain_epoch"
+  # The newest copy that reached S3 intact is the one local pruning always keeps.
+  write_state last-copy "$BASE_NAME"
   log "Uploaded and verified the $tier copy, locked for $lock_days days."
 }
 
@@ -165,6 +172,20 @@ write_state() {
   local temporary="$STATE_DIR/.$1.tmp"
   printf '%s\n' "$2" >"$temporary" || die "Could not record the $1 state."
   mv -f -- "$temporary" "$STATE_DIR/$1" || die "Could not record the $1 state."
+}
+
+# Removes local copies older than the keep window, except the newest copy that reached S3 intact. It runs before the
+# uploads, so a run that then fails still trims the cache.
+prune_local_copies() {
+  local last_copy
+  local protected=()
+  last_copy="$(read_state last-copy)"
+  if [[ -n "$last_copy" ]]; then
+    protected=(! -name "$last_copy.sqlite.age" ! -name "$last_copy.json")
+  fi
+  find "$STAGING_DIR" -maxdepth 1 -type f \
+    \( -name 'masterqc-*.age' -o -name 'masterqc-*.json' -o -name 'masterqc-*.sqlite' \) \
+    -mmin "+$LOCAL_KEEP_MINUTES" ${protected[@]+"${protected[@]}"} -delete
 }
 
 # The half-hourly state is "<revision> <Unix time of the verified upload>".
@@ -185,6 +206,8 @@ if [[ "$(read_state last-monthly)" == "$THIS_MONTH" ]]; then
   MONTHLY_DUE=0
 fi
 
+prune_local_copies
+
 if (( HALF_HOURLY_DUE )); then
   upload_tier half-hourly "$HALF_HOURLY_LOCK_DAYS"
   write_state last-half-hourly "$REVISION $(date -u '+%s')"
@@ -199,10 +222,6 @@ if (( MONTHLY_DUE )); then
   upload_tier monthly "$MONTHLY_LOCK_DAYS"
   write_state last-monthly "$THIS_MONTH"
 fi
-
-find "$STAGING_DIR" -maxdepth 1 -type f \
-  \( -name 'masterqc-*.age' -o -name 'masterqc-*.json' -o -name 'masterqc-*.sqlite' \) \
-  -mmin "+$RETENTION_MINUTES" -delete
 
 # The heartbeat comes last, so the external monitor counts a run only after every due upload is verified.
 if [[ -n "$HEARTBEAT_URL" ]]; then
