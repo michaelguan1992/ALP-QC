@@ -84,7 +84,7 @@ Saved changes go to SQLite. The retired initialization draft and AP table protot
 
 ## Hosted Deployment
 
-The same server can run as a shared service on one Linux machine behind Caddy, with HTTPS, individual Basic Auth accounts, and encrypted off-site backups. Hosted mode is enabled only by setting `MASTERQC_PUBLIC_ORIGIN`; local startup works as before. See [Hosted Deployment](docs/deployment.md) for the step-by-step procedure. That procedure has not yet been tested on a real server.
+The same server can run as a shared service on one Linux machine behind Caddy, with HTTPS, individual Basic Auth accounts, and encrypted off-site backups. Hosted mode is enabled only by setting `MASTERQC_PUBLIC_ORIGIN`; local startup works as before. See [Hosted Deployment](docs/deployment.md) for the step-by-step procedure. Later releases are installed and rolled back with `deploy/release.sh`, which verifies each release against a copy of production before it goes live. That procedure has not yet been tested on a real server.
 
 ## Development Checks
 

@@ -9,6 +9,7 @@ import {
   ensureUnique,
   fail,
   factoryKey,
+  isValidAuditActor,
   MIME_EXTENSIONS,
   isIsoTimestamp,
   normalizeDataUrl,
@@ -881,6 +882,8 @@ function validateAudit(state) {
     assertText(entry.action, "Audit action", { maxLength: 100 });
     assertText(entry.entityId, "Audit entity ID", { maxLength: 200 });
     assertText(entry.summary, "Audit summary", { maxLength: 1000, allowBlank: true });
+    // Entries written before operator identity existed have no actor. When present, it must be a valid name.
+    if (entry.actor !== undefined) assert(isValidAuditActor(entry.actor), "Audit actor must be 1 to 80 characters without control characters.");
   }
 }
 

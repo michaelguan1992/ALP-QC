@@ -36,6 +36,10 @@ qc.example.com {
 
 	reverse_proxy 127.0.0.1:4173 {
 		# Caddy forwards the original Host header. Hosted mode checks it against MASTERQC_PUBLIC_ORIGIN.
+		# The application records the operator from X-Remote-User (MASTERQC_TRUSTED_USER_HEADER). header_up replaces any
+		# value a browser sent with the Basic Auth user name, so nobody can choose the name in the audit trail. A
+		# request_header delete alone would remove the client's value without setting the operator, so it is not enough.
+		header_up X-Remote-User {http.auth.user.id}
 		transport http {
 			dial_timeout 5s
 			read_timeout 2h

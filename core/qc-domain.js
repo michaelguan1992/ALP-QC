@@ -222,7 +222,18 @@ export function ensureUnique(values, label) {
   if (new Set(values).size !== values.length) fail(`${label} must be unique.`);
 }
 
-export function addAudit(state, { idFactory, now, action, entityId, summary }) {
+// Operator names on audit entries come from the hosted proxy header: 1 to 80 characters, no control characters.
+export const AUDIT_ACTOR_MAX_LENGTH = 80;
+
+export function isValidAuditActor(value) {
+  return typeof value === "string" &&
+    value.trim() !== "" &&
+    value.length <= AUDIT_ACTOR_MAX_LENGTH &&
+    !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+// `actor` is optional. An entry records it only when a valid actor is supplied, so other entries keep their shape.
+export function addAudit(state, { idFactory, now, action, entityId, summary, actor = null }) {
   const usedIds = new Set(state.audit.map((entry) => entry.id));
   let id = "";
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -233,11 +244,16 @@ export function addAudit(state, { idFactory, now, action, entityId, summary }) {
     }
   }
   if (!id) fail("The ID generator could not create a unique audit event ID.");
-  state.audit.push({
+  const entry = {
     id,
     at: now(),
     action,
     entityId,
     summary,
-  });
+  };
+  if (actor !== null && actor !== undefined) {
+    if (!isValidAuditActor(actor)) fail("Audit actor must be 1 to 80 characters without control characters.");
+    entry.actor = actor;
+  }
+  state.audit.push(entry);
 }
