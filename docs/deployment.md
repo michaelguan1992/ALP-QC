@@ -350,7 +350,7 @@ Run the drill on a disposable server with its own data directory. Never restore 
 
 ## 12. Moving to another server
 
-Use this when changing provider or plan, for example from the Tencent Lighthouse server to a Hong Kong premium-route server. The site keeps its domain, so users keep their address, saved logins, bookmarks, and unsent browser drafts. Plan about 30 to 60 minutes without writes.
+Use this when changing provider or plan, for example from one Hong Kong server to another or to a Los Angeles premium-route server. The site keeps its domain, so users keep their address, saved logins, bookmarks, and unsent browser drafts. Plan about 30 to 60 minutes without writes.
 
 1. Prepare the new server with sections 1 to 4 and section 6, but do not point DNS at it yet. Copy `/etc/masterqc/env`, `/etc/masterqc/backup.env`, and the Caddyfile (including the Basic Auth hashes) from the old server. Keep the same `MASTERQC_PUBLIC_ORIGIN`.
 2. Optional trial: restore a recent snapshot into the new server's data directory (section 5) and have mainland and US users test it through a temporary hosts-file entry or a temporary second DNS name. Real work continues on the old server only. Discard this trial copy before the cutover.
