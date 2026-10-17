@@ -16,10 +16,10 @@ import { copyFile, mkdtemp, rm, stat } from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { pathToFileURL } from "node:url";
 import { createQCService } from "../core/qc-service.js";
 import { createSQLiteQCAdapter } from "../storage/sqlite-qc-adapter.mjs";
-import { HOST, PORT, WORKSPACE_DATABASE_FILES, getDefaultDataDirectory } from "./server.mjs";
+import { isEntryPoint } from "./entry-point.mjs";
+import { WORKSPACE_DATABASE_FILES, readServerConfig } from "./server.mjs";
 
 const USAGE = "Usage: node launcher/restore-snapshot.mjs <snapshot-file> [--workspace main|demo]";
 const JOURNAL_SUFFIXES = ["-journal", "-wal", "-shm"];
@@ -58,7 +58,7 @@ async function assertServiceStopped({ host, port }) {
     throw new Error(`Could not confirm that ${host}:${port} is free (${error.message}). Stop MasterQC Web, then run this command again.`);
   }
   if (listening) {
-    throw new Error(`MasterQC Web is running on ${host}:${port}. Stop it first (press Ctrl+C in its terminal), then run this command again.`);
+    throw new Error(`MasterQC Web is running on ${host}:${port}. Stop it first (press Ctrl+C in its terminal, or stop the masterqc service), then run this command again.`);
   }
 }
 
@@ -159,13 +159,16 @@ async function validateWithCurrentService(filePath) {
 /**
  * Replaces one workspace database with a validated SQLite snapshot. The service must be stopped.
  * The previous database is kept beside it under a timestamped name and is never deleted.
+ * By default the target directory and the listening address come from the same settings the server reads
+ * (MASTERQC_DATA_DIR, MASTERQC_LISTEN_HOST, MASTERQC_LISTEN_PORT), so the check covers the configured port.
  */
 export async function restoreSnapshot({
   snapshotPath,
   workspace = "main",
-  dataDirectory = getDefaultDataDirectory(),
-  host = HOST,
-  port = PORT,
+  config = readServerConfig(process.env),
+  dataDirectory = config.dataDirectory,
+  host = config.listenHost,
+  port = config.listenPort,
 } = {}) {
   if (typeof snapshotPath !== "string" || !snapshotPath.trim()) throw new Error("A snapshot file is required.");
   if (!Object.hasOwn(WORKSPACE_DATABASE_FILES, workspace)) throw new Error("The workspace must be main or demo.");
@@ -278,11 +281,21 @@ async function runCommand(argv) {
     return;
   }
 
+  let config;
+  try {
+    config = readServerConfig(process.env);
+  } catch (error) {
+    console.error(`Invalid MasterQC Web configuration: ${error.message}`);
+    process.exitCode = 1;
+    return;
+  }
+
   const started = Date.now();
   try {
     const { databasePath, keptPath, summary } = await restoreSnapshot({
       snapshotPath: options.snapshotPath,
       workspace: options.workspace,
+      config,
     });
     const seconds = ((Date.now() - started) / 1000).toFixed(1);
     const attachmentMiB = (summary.attachmentBytes / (1024 * 1024)).toFixed(2);
@@ -299,7 +312,6 @@ async function runCommand(argv) {
   }
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
-if (isMain) {
+if (isEntryPoint(import.meta.url)) {
   await runCommand(process.argv.slice(2));
 }

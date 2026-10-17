@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { lstat, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { pipeline } from "node:stream/promises";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { API_UPLOAD_BODY_MAX_BYTES, BACKUP_MAX_BYTES, QC_COMMAND_TYPES, createQCService } from "../core/qc-service.js";
+import { isValidAuditActor } from "../core/qc-domain.js";
+import { isEntryPoint } from "./entry-point.mjs";
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const HOST = "127.0.0.1";
@@ -30,11 +32,17 @@ const ALLOWED_WORKSPACES = new Set(["main", "demo"]);
 const ALLOWED_COMMANDS = new Set(QC_COMMAND_TYPES);
 // Addresses that mean this computer. Only these may listen, because hosted mode relies on the reverse proxy for public access.
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+// Socket addresses that mean the request came from this computer, such as the reverse proxy on the same server.
+const LOOPBACK_CLIENT_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+// Header names are HTTP tokens; Node delivers them in lower case.
+const TRUSTED_HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/;
+// Release identifiers are printable ASCII, up to 100 characters.
+const RELEASE_ID_PATTERN = /^[\x20-\x7e]{1,100}$/;
 // Time that in-flight requests get after SIGINT or SIGTERM before their connections are closed.
 const SHUTDOWN_GRACE_MS = 10_000;
 // Node's default five-minute request timeout is too short for a 64 MiB upload over a slow link.
 const REQUEST_TIMEOUT_MS = 60 * 60 * 1000;
-const GENERIC_SERVICE_ERROR = "The local QC service could not complete the request.";
+const GENERIC_SERVICE_ERROR = "The QC server could not complete the request.";
 // Core raises this message for a stale expected revision; other revision messages are ordinary validation errors.
 const STALE_REVISION_MESSAGE = "This data changed since your last view";
 // Temporary files written by the snapshot route: .snapshot-<workspace>-<uuid>.sqlite, optionally with a journal.
@@ -224,6 +232,22 @@ function parseListenPort(text) {
   return port;
 }
 
+function checkedReleaseId(value, label) {
+  if (!RELEASE_ID_PATTERN.test(value)) throw new ConfigurationError(`${label} must be 1 to 100 printable characters.`);
+  return value;
+}
+
+// The release shown to browsers and checked by the release script. MASTERQC_RELEASE_ID wins, then the RELEASE file
+// that the release script writes, then the package version. Read once at startup.
+export function readReleaseIdentifier({ env = process.env, projectRoot = PROJECT_ROOT } = {}) {
+  const fromEnvironment = environmentValue(env, "MASTERQC_RELEASE_ID");
+  if (fromEnvironment !== null) return checkedReleaseId(fromEnvironment, "MASTERQC_RELEASE_ID");
+  const releaseFile = path.join(projectRoot, "RELEASE");
+  if (existsSync(releaseFile)) return checkedReleaseId(readFileSync(releaseFile, "utf8").trim(), "The RELEASE file");
+  const { version } = JSON.parse(readFileSync(path.join(projectRoot, "package.json"), "utf8"));
+  return checkedReleaseId(String(version), "The package version");
+}
+
 // Reads the launcher settings once. Empty values count as unset. Invalid values throw a ConfigurationError.
 export function readServerConfig(env = process.env, { projectRoot = PROJECT_ROOT } = {}) {
   const listenHost = environmentValue(env, "MASTERQC_LISTEN_HOST") ?? HOST;
@@ -253,6 +277,12 @@ export function readServerConfig(env = process.env, { projectRoot = PROJECT_ROOT
     ? path.resolve(projectRoot, "data", "workspace")
     : path.resolve(dataText);
 
+  // Header names are case-insensitive. The header counts only in hosted mode (see trustedOperator).
+  const trustedHeaderText = environmentValue(env, "MASTERQC_TRUSTED_USER_HEADER");
+  if (trustedHeaderText !== null && !TRUSTED_HEADER_NAME.test(trustedHeaderText)) {
+    throw new ConfigurationError("MASTERQC_TRUSTED_USER_HEADER must be an HTTP header name such as x-remote-user.");
+  }
+
   return Object.freeze({
     hosted: publicOrigin !== null,
     listenHost,
@@ -260,6 +290,8 @@ export function readServerConfig(env = process.env, { projectRoot = PROJECT_ROOT
     publicOrigin,
     demoEnabled,
     dataDirectory,
+    trustedUserHeader: trustedHeaderText === null ? null : trustedHeaderText.toLowerCase(),
+    release: readReleaseIdentifier({ env, projectRoot }),
   });
 }
 
@@ -299,6 +331,15 @@ function send(response, statusCode, body, headers = {}) {
 
 function sendJson(response, statusCode, value) {
   send(response, statusCode, JSON.stringify(value), { "Content-Type": "application/json; charset=utf-8" });
+}
+
+// The operator name from the trusted proxy header. It counts only in hosted mode and only for loopback clients,
+// so a browser cannot set it directly. Caddy overwrites the header with the Basic Auth user name.
+function trustedOperator(request, context) {
+  if (context.trustedUserHeader === null || !context.hosted) return null;
+  if (!LOOPBACK_CLIENT_ADDRESSES.has(request.socket?.remoteAddress)) return null;
+  const value = request.headers[context.trustedUserHeader];
+  return isValidAuditActor(value) ? value : null;
 }
 
 function rawRequestPath(url) {
@@ -483,7 +524,7 @@ async function sendDatabaseSnapshot(request, response, service, workspace, conte
   // Same-origin downloads send no Origin header; a page on another site must not be able to fetch the database.
   const fetchSite = request.headers["sec-fetch-site"];
   if (fetchSite !== undefined && fetchSite !== "same-origin" && fetchSite !== "none") {
-    throw requestError(403, "Database snapshots can only be downloaded from this local application.", "origin_not_allowed");
+    throw requestError(403, "Database snapshots can only be downloaded from the MasterQC application.", "origin_not_allowed");
   }
   if (!context.snapshotDirectory) throw requestError(503, "Database snapshots are not available for this server.", "snapshot_unavailable");
   // One snapshot at a time keeps the extra copy and the database read from piling up; other callers retry later.
@@ -555,7 +596,7 @@ async function handleApiRequest(request, response, path, context) {
         throw requestError(400, "Command data must be an object.", "invalid_command_data");
       }
       requireRevision(body.expectedRevision);
-      sendJson(response, 200, await service.command(body.type, body.data, body.expectedRevision));
+      sendJson(response, 200, await service.command(body.type, body.data, body.expectedRevision, { actor: trustedOperator(request, context) }));
       return;
     }
     if (action.length === 1 && action[0] === "backup") {
@@ -575,7 +616,7 @@ async function handleApiRequest(request, response, path, context) {
       if (!body.backup || typeof body.backup !== "object" || Array.isArray(body.backup)) {
         throw requestError(400, "A backup object is required.", "invalid_backup");
       }
-      sendJson(response, 200, await service.importBackup(body.backup, body.expectedRevision));
+      sendJson(response, 200, await service.importBackup(body.backup, body.expectedRevision, { actor: trustedOperator(request, context) }));
       return;
     }
     if (action.length === 1 && action[0] === "history") {
@@ -585,7 +626,7 @@ async function handleApiRequest(request, response, path, context) {
       if (!body.historyPackage || typeof body.historyPackage !== "object" || Array.isArray(body.historyPackage)) {
         throw requestError(400, "A history package object is required.", "invalid_history_package");
       }
-      sendJson(response, 200, await service.importHistory(body.historyPackage, body.expectedRevision));
+      sendJson(response, 200, await service.importHistory(body.historyPackage, body.expectedRevision, { actor: trustedOperator(request, context) }));
       return;
     }
     if (action.length === 2 && action[0] === "assets") {
@@ -660,7 +701,7 @@ async function routeRequest(request, response, resolveTarget, origins, context) 
   const isApi = requestPath.startsWith("/api/");
   const origin = request.headers.origin;
   if (origin !== undefined && !origins.allowedOrigins.includes(origin)) {
-    if (isApi) sendJson(response, 403, { error: "Requests must come from this local application origin.", code: "origin_not_allowed" });
+    if (isApi) sendJson(response, 403, { error: "Requests must come from the MasterQC application.", code: "origin_not_allowed" });
     else send(response, 403, "Forbidden\n", { "Content-Type": "text/plain; charset=utf-8" });
     return;
   }
@@ -675,12 +716,21 @@ async function routeRequest(request, response, resolveTarget, origins, context) 
       sendJson(response, 405, { error: "Method is not allowed.", code: "method_not_allowed" });
       return;
     }
+    // The session route reads no records, so it answers even while the database is not ready.
+    if (requestPath === "/api/session") {
+      if (request.method !== "GET") {
+        sendJson(response, 405, { error: "Method is not allowed for this API route.", code: "method_not_allowed" });
+        return;
+      }
+      sendJson(response, 200, { release: context.release, actor: trustedOperator(request, context) });
+      return;
+    }
     if (request.method === "POST" && origin === undefined) {
-      sendJson(response, 403, { error: "POST requests require the local application origin.", code: "origin_required" });
+      sendJson(response, 403, { error: "POST requests require the MasterQC application origin.", code: "origin_required" });
       return;
     }
     if (!context.services) {
-      sendJson(response, 503, { error: "The local QC service is not ready.", code: "service_unavailable" });
+      sendJson(response, 503, { error: "The QC service is not ready.", code: "service_unavailable" });
       return;
     }
     await handleApiRequest(request, response, requestPath, context);
@@ -727,6 +777,8 @@ export function createRequestHandler(resolveTarget = resolveStaticTarget, {
   maxBackupBodyBytes = BACKUP_BODY_MAX_BYTES,
   snapshotDirectory = null,
   logger = SILENT_LOGGER,
+  trustedUserHeader = null,
+  release = readReleaseIdentifier(),
 } = {}) {
   const origins = createOriginPolicy({ host, port, publicOrigin });
   const context = {
@@ -736,6 +788,10 @@ export function createRequestHandler(resolveTarget = resolveStaticTarget, {
     snapshotDirectory,
     limits: { maxBodyBytes, maxBackupBodyBytes },
     snapshotGate: { holder: null },
+    release,
+    hosted: origins.hosted,
+    // Node delivers header names in lower case, so the configured name is compared in lower case too.
+    trustedUserHeader: trustedUserHeader === null ? null : String(trustedUserHeader).toLowerCase(),
   };
 
   return async (request, response) => {
@@ -813,6 +869,8 @@ export async function createStaticServer({
   publicOrigin = null,
   demoEnabled = true,
   logger = CONSOLE_LOGGER,
+  trustedUserHeader = null,
+  release = readReleaseIdentifier(),
 } = {}) {
   const directory = path.resolve(dataDirectory);
   // Invalid origin settings fail here, before any database file is opened.
@@ -833,6 +891,8 @@ export async function createStaticServer({
     demoEnabled,
     snapshotDirectory: directory,
     logger,
+    trustedUserHeader,
+    release,
   }));
   server.requestTimeout = REQUEST_TIMEOUT_MS;
   server.once("close", () => services.close?.());
@@ -928,6 +988,8 @@ export async function startServer({ open = true, config = readServerConfig() } =
       publicOrigin: config.publicOrigin,
       demoEnabled: config.demoEnabled,
       logger: CONSOLE_LOGGER,
+      trustedUserHeader: config.trustedUserHeader,
+      release: config.release,
     });
   } catch (error) {
     console.error(`Local QC database could not be opened: ${error instanceof Error ? error.message : "unknown error"}`);
@@ -947,7 +1009,7 @@ export async function startServer({ open = true, config = readServerConfig() } =
     });
     server.listen(config.listenPort, config.listenHost, () => {
       if (config.hosted) {
-        console.log(`MasterQC Web is listening on ${url} and serves ${config.publicOrigin}.`);
+        console.log(`MasterQC Web is listening on ${url} and serves ${config.publicOrigin} (release ${config.release}).`);
       } else {
         console.log(`MasterQC Web 已启动：${url}`);
       }
@@ -959,8 +1021,7 @@ export async function startServer({ open = true, config = readServerConfig() } =
   });
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
-if (isMain) {
+if (isEntryPoint(import.meta.url)) {
   const unknownArguments = process.argv.slice(2).filter((argument) => argument !== "--no-open");
   if (unknownArguments.length > 0) {
     console.error("参数不受支持。可选参数：--no-open");

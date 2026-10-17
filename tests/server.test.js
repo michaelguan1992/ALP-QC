@@ -1,8 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   CANONICAL_URL,
   ConfigurationError,
@@ -11,9 +15,12 @@ import {
   checkStartupRequirements,
   createRequestHandler,
   parsePublicOrigin,
+  readReleaseIdentifier,
   readServerConfig,
   resolveStaticTarget,
 } from "../launcher/server.mjs";
+
+const execFileAsync = promisify(execFile);
 
 // Calls the request handler in-process, the way the HTTP server would, without opening a socket.
 async function invoke(handler, { method = "GET", url = "/", headers = {}, body = undefined } = {}) {
@@ -292,14 +299,17 @@ test("QC HTTP routes carry lightweight mode and expose on-demand asset reads", a
 });
 
 test("readServerConfig keeps the local defaults when no hosted settings are present", () => {
-  const config = readServerConfig({}, { projectRoot: path.resolve("/srv/masterqc") });
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const config = readServerConfig({}, { projectRoot });
   assert.deepEqual({ ...config }, {
     hosted: false,
     listenHost: "127.0.0.1",
     listenPort: 4173,
     publicOrigin: null,
     demoEnabled: true,
-    dataDirectory: path.resolve("/srv/masterqc", "data", "workspace"),
+    dataDirectory: path.resolve(projectRoot, "data", "workspace"),
+    trustedUserHeader: null,
+    release: JSON.parse(readFileSync(path.join(projectRoot, "package.json"), "utf8")).version,
   });
   assert.equal(Object.isFrozen(config), true);
 });
@@ -517,7 +527,7 @@ test("error mapping hides internal faults, keeps business messages, and honors e
     assert.equal(response.status, testCase.status, testCase.name);
     const body = response.json();
     if (testCase.generic) {
-      assert.equal(body.error, "The local QC service could not complete the request.", testCase.name);
+      assert.equal(body.error, "The QC server could not complete the request.", testCase.name);
       assert.equal(response.text.includes("ENOSPC"), false, `${testCase.name} leaked its message`);
       assert.equal(response.text.includes("/var/lib"), false, `${testCase.name} leaked a path`);
     } else {
@@ -531,5 +541,69 @@ test("error mapping hides internal faults, keeps business messages, and honors e
     } else {
       assert.equal(logs.error.length, 0, testCase.name);
     }
+  }
+});
+
+// Creates a project-like directory with a package.json, and optionally a RELEASE file, for release identifier tests.
+async function releaseProject(t, { releaseFile = null } = {}) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "masterqc-release-test-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(path.join(directory, "package.json"), JSON.stringify({ name: "masterqc-web", version: "3.2.1" }));
+  if (releaseFile !== null) await writeFile(path.join(directory, "RELEASE"), releaseFile);
+  return directory;
+}
+
+test("the release identifier comes from the environment, then the RELEASE file, then the package version", async (t) => {
+  const plain = await releaseProject(t);
+  assert.equal(readReleaseIdentifier({ env: {}, projectRoot: plain }), "3.2.1", "the package version is the last resort");
+
+  const withFile = await releaseProject(t, { releaseFile: "20261017T010203Z-abc1234\n" });
+  assert.equal(readReleaseIdentifier({ env: {}, projectRoot: withFile }), "20261017T010203Z-abc1234", "the RELEASE file is trimmed");
+  assert.equal(readReleaseIdentifier({ env: { MASTERQC_RELEASE_ID: "  from-env  " }, projectRoot: withFile }), "from-env");
+  assert.equal(readServerConfig({ MASTERQC_RELEASE_ID: "configured" }, { projectRoot: withFile }).release, "configured");
+  assert.equal(readServerConfig({}, { projectRoot: withFile }).release, "20261017T010203Z-abc1234");
+});
+
+test("an invalid release identifier stops startup and names its source", async (t) => {
+  const withFile = await releaseProject(t, { releaseFile: "" });
+  assert.throws(() => readReleaseIdentifier({ env: {}, projectRoot: withFile }), (error) => {
+    assert.ok(error instanceof ConfigurationError);
+    assert.match(error.message, /The RELEASE file must be 1 to 100 printable characters/);
+    return true;
+  });
+  const plain = await releaseProject(t);
+  assert.throws(() => readReleaseIdentifier({ env: { MASTERQC_RELEASE_ID: "x".repeat(101) }, projectRoot: plain }), /MASTERQC_RELEASE_ID must be 1 to 100 printable characters/);
+  assert.throws(() => readReleaseIdentifier({ env: { MASTERQC_RELEASE_ID: "tab\there" }, projectRoot: plain }), /MASTERQC_RELEASE_ID must be 1 to 100 printable characters/);
+  assert.equal(readReleaseIdentifier({ env: { MASTERQC_RELEASE_ID: "x".repeat(100) }, projectRoot: plain }).length, 100);
+});
+
+test("a script started through a symlinked directory is still its entry point", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "masterqc-entry-test-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const entryPointUrl = new URL("../launcher/entry-point.mjs", import.meta.url).href;
+  const releaseDirectory = path.join(directory, "releases", "release-one");
+  await mkdir(releaseDirectory, { recursive: true });
+  await writeFile(path.join(releaseDirectory, "probe.mjs"), [
+    `import { isEntryPoint } from ${JSON.stringify(entryPointUrl)};`,
+    "console.log(String(isEntryPoint(import.meta.url)));",
+    "console.log(String(isEntryPoint(\"file:///nowhere/else.mjs\")));",
+    "",
+  ].join("\n"));
+  // The `current` link is a directory symlink, so the path used to start the script goes through it.
+  await symlink(releaseDirectory, path.join(directory, "current"));
+  const { stdout } = await execFileAsync(process.execPath, [path.join(directory, "current", "probe.mjs")]);
+  assert.deepEqual(stdout.trim().split("\n"), ["true", "false"]);
+});
+
+test("the trusted operator header is read as a lower-case name and invalid names stop startup", () => {
+  assert.equal(readServerConfig({ MASTERQC_TRUSTED_USER_HEADER: "X-Remote-User" }).trustedUserHeader, "x-remote-user");
+  assert.equal(readServerConfig({ MASTERQC_TRUSTED_USER_HEADER: "" }).trustedUserHeader, null, "blank counts as unset");
+  assert.equal(readServerConfig({}).trustedUserHeader, null);
+  for (const value of ["bad header", "x-remote-user:", "name\u0001", "a".repeat(65)]) {
+    assert.throws(() => readServerConfig({ MASTERQC_TRUSTED_USER_HEADER: value }), (error) => {
+      assert.ok(error instanceof ConfigurationError, value);
+      assert.match(error.message, /^MASTERQC_TRUSTED_USER_HEADER must be an HTTP header name/);
+      return true;
+    });
   }
 });

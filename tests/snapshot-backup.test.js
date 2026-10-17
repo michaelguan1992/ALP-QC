@@ -593,3 +593,72 @@ test("the HTTP facade exposes the same-origin snapshot URL for each workspace", 
   assert.equal(createQCHttpService({ workspace: "demo", baseUrl: "http://127.0.0.1:4173/" }).backupSnapshotUrl(),
     "http://127.0.0.1:4173/api/qc/demo/backup/snapshot");
 });
+
+// Runs the restore command with only the given settings, so the developer's own MASTERQC_* variables cannot leak in.
+function runRestoreCommand(args, settings) {
+  return new Promise((resolve) => {
+    execFile(process.execPath, [RESTORE_SCRIPT, ...args], { env: { PATH: process.env.PATH ?? "", ...settings }, encoding: "utf8" }, (error, stdout, stderr) => {
+      resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout, stderr });
+    });
+  });
+}
+
+test("the restore command refuses while the configured listening port is in use, and leaves the configured database unchanged", async (t) => {
+  const configuredDirectory = await temporaryDirectory(t);
+  const sourceDirectory = await temporaryDirectory(t);
+  const livePath = path.join(configuredDirectory, LIVE_FILE);
+  const liveService = openService(livePath);
+  await seedWorkspace(liveService, "configured");
+  await liveService.close();
+  const liveHash = await sha256OfFile(livePath);
+  const snapshotPath = path.join(sourceDirectory, "source.sqlite");
+  await copyFile(livePath, snapshotPath);
+
+  const busy = net.createServer();
+  await new Promise((resolve) => busy.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => busy.close(resolve)));
+  const { port } = busy.address();
+
+  const refused = await runRestoreCommand([snapshotPath], {
+    MASTERQC_DATA_DIR: configuredDirectory,
+    MASTERQC_LISTEN_HOST: "127.0.0.1",
+    MASTERQC_LISTEN_PORT: String(port),
+  });
+  assert.equal(refused.code, 1);
+  assert.match(refused.stderr, new RegExp(`Restore failed: MasterQC Web is running on 127\\.0\\.0\\.1:${port}\\. Stop it first`));
+  assert.equal(await sha256OfFile(livePath), liveHash, "the configured database is unchanged");
+  assert.deepEqual((await listRestoreLeftovers(configuredDirectory)), []);
+});
+
+test("the restore command writes into the configured data directory on the configured port", async (t) => {
+  const configuredDirectory = await temporaryDirectory(t);
+  const sourceDirectory = await temporaryDirectory(t);
+  const sourceService = openService(path.join(sourceDirectory, "source.sqlite"));
+  const sourceState = await seedWorkspace(sourceService, "configured-restore");
+  const snapshotPath = path.join(sourceDirectory, "configured-snapshot.sqlite");
+  await sourceService.createSnapshot(snapshotPath);
+  await sourceService.close();
+
+  const restored = await runRestoreCommand([snapshotPath], {
+    MASTERQC_DATA_DIR: configuredDirectory,
+    MASTERQC_LISTEN_PORT: String(await freePort()),
+  });
+  assert.equal(restored.code, 0, restored.stderr);
+  assert.ok(restored.stdout.includes(`Restored the main workspace into ${path.join(configuredDirectory, LIVE_FILE)}`), restored.stdout);
+  const reopened = openService(path.join(configuredDirectory, LIVE_FILE));
+  try {
+    assert.deepEqual(await reopened.getState(), sourceState);
+  } finally {
+    await reopened.close();
+  }
+});
+
+test("the restore command reports invalid server settings with status 1 and writes nothing", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const snapshotPath = path.join(directory, "snapshot.sqlite");
+  await writeFile(snapshotPath, "not used");
+  const result = await runRestoreCommand([snapshotPath], { MASTERQC_LISTEN_PORT: "70000", MASTERQC_DATA_DIR: directory });
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Invalid MasterQC Web configuration: MASTERQC_LISTEN_PORT must be a whole number from 1 to 65535\./);
+  assert.deepEqual(await readdir(directory), ["snapshot.sqlite"]);
+});

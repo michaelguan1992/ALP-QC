@@ -6,6 +6,7 @@ import {
   DOCUMENT_MAX_BYTES,
   fail,
   failWithStatus,
+  isValidAuditActor,
   normalizeDataUrl,
   PHOTO_MAX_BYTES,
   ASSET_TOTAL_MAX_BYTES,
@@ -204,6 +205,21 @@ function projectCommandChanges(type, state, entityId, auditStart) {
 
 function hasS15TrialCleanupAudit(state) {
   return state.audit.some((event) => event.action === "removeS15TrialVersion" && event.entityId === S15_TRIAL_VERSION_ID);
+}
+
+// The operator identity arrives from the launcher, never from a browser request. Null means no identity.
+function optionalAuditActor(actor) {
+  if (actor === undefined || actor === null) return null;
+  if (!isValidAuditActor(actor)) fail("Audit actor must be 1 to 80 characters without control characters.");
+  return actor;
+}
+
+// Stamps the actor on audit entries that an import appended. Entries copied from a backup keep their own data.
+function attributeImportAudit(state, auditStart, actor, copiedAuditIds = new Set()) {
+  if (actor === null) return;
+  for (const entry of state.audit.slice(auditStart)) {
+    if (!copiedAuditIds.has(entry.id)) entry.actor = actor;
+  }
 }
 
 export function createQCService(adapter, options = {}) {
@@ -412,7 +428,9 @@ export function createQCService(adapter, options = {}) {
     return (await getState({ mode: "lightweight" })).revision;
   }
 
-  async function command(type, data = {}, expectedRevision) {
+  // The options object carries only `actor`, which the launcher sets from its trusted header. Browsers never send it.
+  async function command(type, data = {}, expectedRevision, commandOptions = {}) {
+    const actor = optionalAuditActor(commandOptions?.actor);
     await ensureOpen();
     const handler = COMMANDS.get(type);
     if (!handler) fail(`Unknown QC command: ${String(type)}.`);
@@ -458,7 +476,7 @@ export function createQCService(adapter, options = {}) {
         };
       }
       state.revision += 1;
-      addAudit(state, { idFactory, now, action: outcome.action || type, entityId: outcome.entityId, summary: outcome.summary || type });
+      addAudit(state, { idFactory, now, action: outcome.action || type, entityId: outcome.entityId, summary: outcome.summary || type, actor });
       validateState(state, validationOptions(state));
       logUpdate = { revision: state.revision, keys: writeSet };
       return {
@@ -479,8 +497,8 @@ export function createQCService(adapter, options = {}) {
     return result;
   }
 
-  async function saveBatchChanges(data, expectedRevision) {
-    return command("saveBatchChanges", data, expectedRevision);
+  async function saveBatchChanges(data, expectedRevision, commandOptions = {}) {
+    return command("saveBatchChanges", data, expectedRevision, commandOptions);
   }
 
   async function getAsset(assetId) {
@@ -537,18 +555,23 @@ export function createQCService(adapter, options = {}) {
     return adapter.createSnapshot(targetPath);
   }
 
-  async function importBackup(backup, expectedRevision) {
+  async function importBackup(backup, expectedRevision, importOptions = {}) {
+    const actor = optionalAuditActor(importOptions?.actor);
     const savedBackup = clone(backup);
     if (savedBackup?.state?.history?.sources?.length) await verifyHistoryStateAssets(savedBackup.state);
     validateBackup(savedBackup);
     const omittedBackupTrial = removeAuthorizedS15TrialVersion(savedBackup.state);
+    // Audit entries that come from the backup keep their original data, so the actor only marks entries this import creates.
+    const copiedAuditIds = new Set(savedBackup.state.audit.map((entry) => entry.id));
     await ensureOpen();
     restoreId += 1;
     return transactUntracked((current) => {
       const state = current === null ? createInitialQCState() : current;
       validateState(state);
       validateExpectedRevision(expectedRevision, state);
+      const auditStart = state.audit.length;
       const outcome = applyBackupImport(state, savedBackup, { idFactory, now, validation: validationOptions(state) });
+      attributeImportAudit(outcome.state, auditStart, actor, copiedAuditIds);
       const trialCleanup = removeAuthorizedS15TrialVersion(outcome.state);
       const shouldAuditCleanup = (trialCleanup.versionIds.length > 0 || omittedBackupTrial.versionIds.length > 0) &&
         !hasS15TrialCleanupAudit(outcome.state);
@@ -575,6 +598,7 @@ export function createQCService(adapter, options = {}) {
           action: "removeS15TrialVersion",
           entityId: S15_TRIAL_VERSION_ID,
           summary: "Removed or omitted the authorized empty S15 trial version 26.09.05 during restore.",
+          actor,
         });
       }
       validateState(outcome.state);
@@ -594,7 +618,8 @@ export function createQCService(adapter, options = {}) {
     }, { includeAssetContent: false, contentAssetIds: incomingAssetIds(savedBackup.state.assets) });
   }
 
-  async function importHistory(historyPackage, expectedRevision) {
+  async function importHistory(historyPackage, expectedRevision, importOptions = {}) {
+    const actor = optionalAuditActor(importOptions?.actor);
     const savedPackage = clone(historyPackage);
     await verifyHistoryPackage(savedPackage);
     await ensureOpen();
@@ -603,7 +628,9 @@ export function createQCService(adapter, options = {}) {
       const state = current === null ? createInitialQCState() : current;
       validateState(state);
       validateExpectedRevision(expectedRevision, state);
+      const auditStart = state.audit.length;
       const outcome = applyHistoryImport(state, savedPackage, { idFactory, now, validation: validationOptions(state) });
+      attributeImportAudit(outcome.state, auditStart, actor);
       return { state: outcome.state, result: outcome.result };
     }, { includeAssetContent: false, contentAssetIds: incomingAssetIds(savedPackage.assets) });
   }

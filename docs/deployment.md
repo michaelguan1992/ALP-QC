@@ -1,6 +1,6 @@
 # Hosted Deployment (Ubuntu 24.04)
 
-> **Status: NOT yet tested on a real server.** The code paths were checked locally: unit tests, `systemd-analyze verify` on the unit files, an `age` round trip, and the hosted server started with the production settings on a development machine. The steps below have not been run on Ubuntu 24.04, behind Caddy, with real S3 storage, or in a restore drill. Treat them as a draft until the restore drill in section 9 passes on a disposable server.
+> **Status: NOT yet tested on a real server.** The code paths were checked locally: unit tests, `systemd-analyze verify` on the unit files, an `age` round trip, and the hosted server started with the production settings on a development machine. The release script (`deploy/release.sh`) and its verification checks were exercised only by the automated tests, with a stub service manager and synthetic data; they have not run on Ubuntu 24.04 with systemd, Caddy, or real S3 storage. The steps below have not been run on Ubuntu 24.04, behind Caddy, with real S3 storage, or in a restore drill. Treat them as a draft until the restore drill in section 11 passes on a disposable server.
 
 This setup runs one Node process and one SQLite database on one Linux server. Caddy terminates HTTPS and enforces individual Basic Auth accounts. Encrypted snapshots go to off-site object storage every 30 minutes. The decision record is [Shared Server Deployment and Data Recovery Plan](server-deployment-plan.md). This guide does not authorize a purchase.
 
@@ -56,7 +56,7 @@ sudo rm -rf "/opt/masterqc/releases/$RELEASE/data/workspace" "/opt/masterqc/rele
 sudo ln -sfn "/opt/masterqc/releases/$RELEASE" /opt/masterqc/current
 ```
 
-Replace `<tag>` with the release tag. A new release is a new directory followed by a changed `current` link. Never copy the database into a release directory.
+Replace `<tag>` with the release tag. Use this manual procedure for the first installation only. Later releases use `deploy/release.sh` (section 9), which creates the new directory and switches the `current` link after verification. Never copy the database into a release directory.
 
 ## 4. Configure the service and backups
 
@@ -88,6 +88,11 @@ MASTERQC_BACKUP_HEARTBEAT_URL=<optional external heartbeat URL>
 
 The upload credentials need `s3:PutObject` and `s3:GetObject` (for the size check) and nothing else. They must not allow deletion.
 
+### Operator names and release identity
+
+- `MASTERQC_TRUSTED_USER_HEADER=x-remote-user` (in `env.example`) names the request header that Caddy fills with the Basic Auth user name. The application records that name as `actor` on each audit entry that a request creates, so the audit trail shows who made a change. The header counts only for hosted requests from this computer, and Caddy overwrites any value that a browser sends (see `deploy/Caddyfile.example`). Leave the setting empty to record no operator. The name is for the audit trail only; it does not grant or limit access.
+- Each release directory holds a `RELEASE` file that `deploy/release.sh` writes as `<UTC time>-<short commit>`. `GET /api/session` reports that value as `release`. `MASTERQC_RELEASE_ID` overrides the file. Without either, the package version is reported.
+
 ## 5. Import the first data
 
 Stop the service before any database change:
@@ -100,12 +105,11 @@ On the current computer, open **Backup and restore** and choose **Download datab
 
 ```sh
 sudo install -m 0600 -o masterqc -g masterqc ./masterqc-main-<UTC time>.sqlite /var/lib/masterqc-backups/import.sqlite
-sudo -u masterqc env MASTERQC_DATA_DIR=/var/lib/masterqc \
-  node /opt/masterqc/current/launcher/restore-snapshot.mjs /var/lib/masterqc-backups/import.sqlite
+sudo -u masterqc sh -c 'set -a; . /etc/masterqc/env; set +a; node /opt/masterqc/current/launcher/restore-snapshot.mjs /var/lib/masterqc-backups/import.sqlite'
 sudo rm -f /var/lib/masterqc-backups/import.sqlite
 ```
 
-The restore checks SQLite integrity, the MasterQC format, and every attachment digest before it writes `/var/lib/masterqc/masterqc-main.sqlite`. Do not copy the file by hand, because that skips these checks. `restore-snapshot.mjs` refuses to run while something listens on `127.0.0.1:4173`, but that check is hard-coded to that port. Always stop the service first.
+The restore checks SQLite integrity, the MasterQC format, and every attachment digest before it writes `/var/lib/masterqc/masterqc-main.sqlite`. Do not copy the file by hand, because that skips these checks. The command reads the same settings as the service (`MASTERQC_DATA_DIR`, `MASTERQC_LISTEN_HOST`, and `MASTERQC_LISTEN_PORT`), so the sourced environment file above makes it check the configured port. It refuses to run while the service listens there. Always stop the service first.
 
 ## 6. Start the services
 
@@ -159,10 +163,46 @@ A successful run prints `Verified ...` for each upload, then `Success heartbeat 
 - Logs: `journalctl -u masterqc -f` for the app (one line per API and health request), `journalctl -u caddy -f` for the proxy.
 - Stop: `sudo systemctl stop masterqc`. The server finishes in-flight requests for up to 10 seconds, then closes.
 - Add or remove a user: edit `basic_auth` in `/etc/caddy/Caddyfile`, run `caddy validate`, then `systemctl reload caddy`. Removing a line revokes that account.
-- Update the release: deploy a new release directory (section 3), then `sudo systemctl restart masterqc`. Take a Backup-page snapshot first.
+- Update the release: run `deploy/release.sh` as section 9 describes. Do not copy a release directory and restart by hand, because the script verifies each release before it goes live.
 - Watch disk usage on `/var/lib/masterqc` and `/var/lib/masterqc-backups`. The plan requires disk and billing alerts from outside this server.
 
-## 9. Restore drill (required before launch and monthly after)
+## 9. Releasing a new version
+
+`deploy/release.sh` installs a release only after the new code proves itself against a fresh copy of production. Run it as root from the release that is running now:
+
+```sh
+sudo /opt/masterqc/current/deploy/release.sh <git-ref>
+```
+
+`<git-ref>` is a tag, a commit, or a branch name; a branch resolves to `origin/<branch>`. The script needs the clone at `/opt/masterqc/repo` (created with `git clone` once), a running service, and the `current` link from section 3. The steps are:
+
+1. It fetches the clone and extracts the ref into `/opt/masterqc/releases/<UTC time>-<short commit>/`. It writes the `RELEASE` file and removes the tracked database and the PDF import sources from that copy. A release never contains the production database.
+2. It reads the record counts from the running service over loopback. It then takes a snapshot with `scripts/backup-snapshot.mjs` from the running release, and keeps that snapshot in `/var/lib/masterqc-backups/pre-release/`. The script never deletes that directory. If saves change the revision while the snapshot is taken, it tries again, up to three times.
+3. It copies the snapshot into a fresh directory under `/var/lib/masterqc-backups/verify/` and starts the new release there on `127.0.0.1:4180`, as the `masterqc` account. `scripts/verify-release.mjs` then checks the following. `/healthz` answers. The startup upgrades succeed. `batches`, `issues`, `orders`, and `assets` keep exactly their counts. Every other record collection keeps at least its count. Each attachment reads back at its recorded decoded size. The verification server stops and its copy is deleted.
+4. Only after verification passes does it point `previous` at the running release and `current` at the new one, then restart `masterqc`. It waits up to 60 seconds for `/healthz` and for `/api/session` to report the new `release`. If the new service does not become healthy, the script points `current` back at the previous release, restarts, and prints the restore command from section 10.
+5. It keeps the five newest releases. It never removes the current or the previous release.
+
+A failure before step 4 leaves production untouched. The script prints the reason and exits with status 1. A verification failure also prints the pre-release snapshot path. The first release of a new installation is installed by hand (section 3). Later releases use the script.
+
+Optional settings for the script: `MASTERQC_ROOT` (default `/opt/masterqc`), `MASTERQC_DATA_DIR` (default `/var/lib/masterqc`), `MASTERQC_BACKUPS_DIR` (default `/var/lib/masterqc-backups`), `MASTERQC_ENV_FILE` (default `/etc/masterqc/env`), `MASTERQC_VERIFY_PORT` (default `4180`), `MASTERQC_SERVICE_UNIT` (default `masterqc.service`), `MASTERQC_SERVICE_USER` (default `masterqc`; empty runs the verification as root), and the timeouts `MASTERQC_HEALTH_TIMEOUT` and `MASTERQC_VERIFY_TIMEOUT`. The defaults match the paths in this guide.
+
+## 10. Rolling back
+
+```sh
+sudo /opt/masterqc/current/deploy/release.sh --rollback
+```
+
+The script swaps `current` and `previous`, restarts `masterqc`, and waits for the health check to report the older release. Running it again swaps back to the release it left. Rollback changes no data. If the newer release had already upgraded the database and the older code needs the earlier data, restore the pre-release snapshot that the script prints (the newest file in `/var/lib/masterqc-backups/pre-release/`) while the service is stopped:
+
+```sh
+sudo systemctl stop masterqc.service
+sudo -u masterqc sh -c 'set -a; . /etc/masterqc/env; set +a; node /opt/masterqc/current/launcher/restore-snapshot.mjs /var/lib/masterqc-backups/pre-release/<snapshot>.sqlite'
+sudo systemctl start masterqc.service
+```
+
+The restore command replaces the database and keeps the previous file beside it. It is never run automatically. After a rollback, `current` is the older release, so the restore command uses its code.
+
+## 11. Restore drill (required before launch and monthly after)
 
 Run the drill on a disposable server with its own data directory. Never restore over production.
 
@@ -187,9 +227,11 @@ Run the drill on a disposable server with its own data directory. Never restore 
    ```
 6. Record the elapsed time and the most recent saved work that was lost, and confirm both with the owner.
 
-## 10. Known limits and open items
+## 12. Known limits and open items
 
-- `restore-snapshot.mjs` checks only `127.0.0.1:4173` before it swaps the database. If you change `MASTERQC_LISTEN_PORT`, stop the service with `systemctl` before any restore, and fix the script's check.
+- The release script and its checks were tested only with a stub service manager, synthetic data, and a development machine. Before relying on the script in production, run one ordinary release and one rollback on a disposable copy of the server. Check that the `masterqc` account can read `/var/lib/masterqc-backups/pre-release/`.
+- A release that intentionally removes records during its startup cleanup (for example, a superseded version) fails the count check. The script then leaves production unchanged, and the release has to be reviewed before it is installed.
+- The script never deletes `/var/lib/masterqc-backups/pre-release/`. Each release adds one full database copy and each verification run adds none, so watch the disk and prune old snapshots by hand once they are no longer needed.
 - Backups read the live database. A large `VACUUM INTO` plus `integrity_check` can hold a read lock long enough for saves to wait on the 5-second busy timeout. Measure this on the real server.
 - SQLite calls are synchronous in Node, so while a snapshot is copied the whole app pauses, including `/healthz`. A monitor that polls health checks should allow a few seconds of slack.
 - The Caddy and systemd files were checked only for syntax (`systemd-analyze verify`; Caddy validation was not run). Run `caddy validate` before reloading.

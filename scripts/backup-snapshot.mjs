@@ -8,7 +8,8 @@ import { chmodSync, createReadStream, existsSync, linkSync, mkdirSync, readFileS
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parseArgs } from "node:util";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { isEntryPoint } from "../launcher/entry-point.mjs";
 import { WORKSPACE_DATABASE_FILES } from "../launcher/server.mjs";
 
 const USAGE = "Usage: node scripts/backup-snapshot.mjs --data-dir <directory> --out-dir <directory> [--workspace main|demo]";
@@ -188,7 +189,6 @@ async function runCommand(argv) {
   }
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
-if (isMain) {
+if (isEntryPoint(import.meta.url)) {
   await runCommand(process.argv.slice(2));
 }
