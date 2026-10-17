@@ -133,7 +133,7 @@ function renderBatchList(root, ctx) {
   if (hasAnyBatchDrafts()) {
     const counts = draftCounts();
     sections.unshift(el("section", { className: "card qc-ops-draft-warning" },
-      el("strong", {}, "Unsaved edits are held in this tab"),
+      el("strong", {}, "Unsaved edits are kept in this browser until saved"),
       el("p", {}, `${counts.rows} inspection row(s) and ${counts.details} batch detail set(s) need saving.`),
       ...pendingBatchIds().map((batchId) => {
         const batch = batches.find((item) => item.id === batchId);

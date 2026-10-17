@@ -92,13 +92,25 @@ test("unregistering disposes the controller and clears it as the active guard", 
 
 test("a failed departure save keeps the page open and says why", async () => {
   const registry = createManualSaveRegistry();
-  const { controller } = savingController({ save: async () => ({ ok: false, error: new Error("stale revision; reload the latest data") }) });
+  const { controller } = savingController({ save: async () => ({ ok: false, error: new Error("Quantity must be a positive whole number.") }) });
   registry.register(controller);
   let left = false;
 
   assert.equal(await registry.resolve("leave", () => { left = true; }), false);
   assert.equal(left, false);
-  assert.match(lastToast(), /could not be saved: stale revision; reload the latest data/);
+  assert.match(lastToast(), /could not be saved: Quantity must be a positive whole number\./);
+  assert.equal(controller.hasPending(), true);
+});
+
+test("a stale departure save keeps the page open without a toast, because the page explains it in place", async () => {
+  const registry = createManualSaveRegistry();
+  const staleError = Object.assign(new Error("Someone else changed this record. Reload the latest data, then reapply your change."), { code: "stale_revision", status: 409 });
+  const { controller } = savingController({ save: async () => ({ ok: false, error: staleError }) });
+  registry.register(controller);
+  const toastsBefore = dom.toastHost.children.length;
+
+  assert.equal(await registry.resolve("leave", () => {}), false);
+  assert.equal(dom.toastHost.children.length, toastsBefore);
   assert.equal(controller.hasPending(), true);
 });
 

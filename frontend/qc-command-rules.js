@@ -4,6 +4,8 @@
 export const STALE_REVISION_MESSAGE = "Someone else changed this record. Reload the latest data, then reapply your change.";
 export const REVISION_RETRY_BLOCKED_MESSAGE = "Reload the latest data before saving again.";
 export const SHARED_CHANGE_MESSAGE = "Newer changes from other users are available.";
+// Short header text for a stale save. The full explanation is shown once, in the banner above the page.
+export const NOT_SAVED_SEE_MESSAGE = "Not saved — see message above";
 
 // Only errors without a structured status or code, such as those from an older server, fall back to the message.
 const LEGACY_STALE_MESSAGE = /revision|stale|reload|changed in another|changed since your last view|another (?:tab|browser|window) changed/i;

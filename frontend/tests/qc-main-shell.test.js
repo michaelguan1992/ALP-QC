@@ -30,9 +30,10 @@ globalThis.BroadcastChannel = class FakeBroadcastChannel {
 const { createInitialQCState } = await import("../../core/qc-domain.js");
 const requests = [];
 let serverRevision = 4;
+let stateDown = false;
 
-function json(value) {
-  return new Response(JSON.stringify(value), { status: 200, headers: { "Content-Type": "application/json" } });
+function json(value, status = 200) {
+  return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
 }
 
 globalThis.fetch = async (url, init = {}) => {
@@ -41,7 +42,7 @@ globalThis.fetch = async (url, init = {}) => {
   requests.push(`${init.method ?? "GET"} ${path}`);
   const state = { ...createInitialQCState(), revision: serverRevision };
   if (path.endsWith("/initialize")) return json(state);
-  if (path.endsWith("/state/lightweight")) return json(state);
+  if (path.endsWith("/state/lightweight")) return stateDown ? json({ error: "The server is down for this test." }, 500) : json(state);
   if (path.endsWith("/revision")) return json({ revision: serverRevision });
   return new Response(JSON.stringify({ error: "Not part of this test.", code: "route_not_found" }), { status: 404 });
 };
@@ -77,4 +78,21 @@ test("a newer revision from another tab shows a notice without reloading, and Re
 
   assert.equal(requests.slice(before).includes("GET /api/qc/main/state/lightweight"), true);
   assert.equal(noticeElement().hidden, true);
+});
+
+test("while the blocking banner explains a failed reload, the informational notice stays hidden", async () => {
+  serverRevision = 10;
+  channels[0].listeners.forEach((listener) => listener({ data: { revision: 10 } }));
+  await flush();
+  assert.equal(noticeElement().hidden, false);
+
+  stateDown = true;
+  dom.click(findButton(noticeElement(), "Reload"));
+  await flush();
+  stateDown = false;
+
+  const banner = dom.document.querySelector("#stale-warning");
+  assert.equal(banner.hidden, false);
+  assert.match(banner.textContent, /could not be loaded/);
+  assert.equal(noticeElement().hidden, true, "only one reload action is offered while the banner stands");
 });

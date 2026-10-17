@@ -73,6 +73,10 @@ function saveStatusText() {
   return dom.dialog()?.querySelector(".qc-ops-issue-save-status")?.textContent ?? "";
 }
 
+function noticeText() {
+  return dom.dialog()?.querySelector(".qc-draft-notice")?.textContent ?? "";
+}
+
 test("reloading after a stale Issue save keeps the Issue edits and other drafts, and saves nothing", async () => {
   clearIssueDrafts();
   const issueA = issueFixture({ id: "issue-a", number: "ISS-1" });
@@ -114,13 +118,15 @@ test("reloading after a stale Issue save keeps the Issue edits and other drafts,
   await flush();
   dom.window.removeEventListener("masterqc:discard-operation-drafts", onDiscard);
 
+  // Bea saved the owner meanwhile, so Ann's edit is not applied. The notice says so, and the user can type it again.
   assert.deepEqual(discardEvents, []);
-  assert.equal(storedIssueDraft("issue-a").owner, "Ann");
+  assert.equal(storedIssueDraft("issue-a"), undefined);
   assert.equal(storedIssueDraft("issue-b").discussionText, "Ask the supplier.");
   assert.equal(context.commands.filter((command) => command.type === "saveIssue").length, 1);
   assert.equal(dom.dialog().open, true);
-  assert.equal(fieldNamed(dom.dialog(), "owner").value, "Ann");
-  assert.equal(saveStatusText(), "Unsaved changes");
+  assert.equal(fieldNamed(dom.dialog(), "owner").value, "Bea");
+  assert.equal(saveStatusText(), "Saved");
+  assert.match(noticeText(), /Not restored because someone else changed it: Disposition owner \(your value: Ann\)/);
 });
 
 test("Close issue with unsaved edits keeps the dialog open and shows a failed closure in it", async () => {

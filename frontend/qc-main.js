@@ -5,6 +5,8 @@ import { button, el, notify, showDialog, closeDialog, hasUnsavedDialogForm } fro
 import { createManualSaveRegistry } from "./qc-manual-save-registry.js";
 import { createQCSession } from "./qc-session.js";
 import { SHARED_CHANGE_MESSAGE, messageOf } from "./qc-command-rules.js";
+import { configureDraftRecovery, purgeExpiredStoredDrafts } from "./qc-draft-recovery.js";
+import { RELEASE_NOTICE_MESSAGE, createReleaseWatch, readServerSession } from "./qc-server-session.js";
 
 const app = document.querySelector("#app");
 const routes = new Set(["batches", "batch-report", "issues", "catalog", "standards", "orders", "library", "settings", "backup"]);
@@ -15,6 +17,8 @@ let currentRoute = "batches";
 let selectedId = null;
 let renderNumber = 0;
 let channel = null;
+let releaseWatch = null;
+let releaseAvailable = false;
 const saves = createManualSaveRegistry();
 
 function updateNotices({ blocking, sharedChange }) {
@@ -24,8 +28,30 @@ function updateNotices({ blocking, sharedChange }) {
     const message = warning.querySelector(".stale-message");
     if (message) message.textContent = blocking;
   }
+  // While the blocking banner explains a rejected save, the informational notice stays out of the way.
   const notice = document.querySelector("#shared-change-notice");
-  if (notice) notice.hidden = !sharedChange;
+  if (notice) notice.hidden = !sharedChange || Boolean(blocking);
+}
+
+function updateReleaseNotice() {
+  const notice = document.querySelector("#release-notice");
+  if (notice) notice.hidden = !releaseAvailable;
+}
+
+/** Reloads for a newer release. Pending edits are saved first, or the user decides; unsent edits survive a reload in this browser. */
+async function reloadForNewRelease() {
+  const reload = () => {
+    location.reload();
+  };
+  if (saves.hasPending()) {
+    await saves.resolve("reload this page", reload);
+    return;
+  }
+  if (hasUnsavedForm()) {
+    promptToDiscard("reload", reload);
+    return;
+  }
+  reload();
 }
 
 const session = createQCSession({
@@ -192,9 +218,13 @@ function renderApp() {
     el("span", { className: "stale-message" }, notices.blocking),
     button("Reload latest data", requestRefresh, "button-secondary"),
   ));
-  workspace.append(el("div", { id: "shared-change-notice", className: "shared-change-notice", hidden: !notices.sharedChange, role: "status" },
+  workspace.append(el("div", { id: "shared-change-notice", className: "shared-change-notice", hidden: !notices.sharedChange || Boolean(notices.blocking), role: "status" },
     el("span", {}, SHARED_CHANGE_MESSAGE),
     button("Reload", requestRefresh, "button-secondary"),
+  ));
+  workspace.append(el("div", { id: "release-notice", className: "release-notice", hidden: !releaseAvailable, role: "status" },
+    el("span", {}, RELEASE_NOTICE_MESSAGE),
+    button("Reload now", reloadForNewRelease, "button-secondary"),
   ));
   const main = el("main", { className: "app-main", id: "main-content" });
   const slot = el("div", { className: "page-render-slot" });
@@ -314,7 +344,21 @@ window.addEventListener("beforeunload", (event) => {
 
 async function start() {
   try {
-    session.setInitialState(await service.initialize({ mode: "lightweight" }));
+    const [initialState, serverSession] = await Promise.all([
+      service.initialize({ mode: "lightweight" }),
+      readServerSession(),
+    ]);
+    // Unsent edits are kept per origin, workspace, and signed-in user. Without a known user, "anonymous" is used.
+    configureDraftRecovery({ origin: location.origin, workspace: service.workspace, actor: serverSession?.actor ?? "anonymous" });
+    purgeExpiredStoredDrafts();
+    releaseWatch = createReleaseWatch({
+      startRelease: serverSession?.release ?? null,
+      onNewRelease: () => {
+        releaseAvailable = true;
+        updateReleaseNotice();
+      },
+    });
+    session.setInitialState(initialState);
     const initial = readRoute();
     currentRoute = initial.route;
     selectedId = initial.id;
@@ -323,10 +367,19 @@ async function start() {
     channel.addEventListener("message", (event) => {
       session.noteRemoteRevision(event.data?.revision);
     });
-    window.setInterval(() => { void session.checkForSharedChanges(); }, 5000);
-    window.addEventListener("focus", () => { void session.checkForSharedChanges(); });
+    // The release is checked on this same poll, at most every five minutes, and again when the page regains focus.
+    window.setInterval(() => {
+      void session.checkForSharedChanges();
+      releaseWatch?.tick();
+    }, 5000);
+    window.addEventListener("focus", () => {
+      void session.checkForSharedChanges();
+      void releaseWatch?.check();
+    });
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") void session.checkForSharedChanges();
+      if (document.visibilityState !== "visible") return;
+      void session.checkForSharedChanges();
+      void releaseWatch?.check();
     });
     renderApp();
   } catch (error) {
