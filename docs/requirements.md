@@ -105,7 +105,7 @@ Remaining decisions and scope boundaries:
 - The local service serves allowlisted application files and routes business operations through the existing core service to SQLite storage. The database directory is not served as static files.
 - SQLite serves browsers on this computer through the local application backend. LAN access, shared multi-computer hosting, and user accounts remain outside this phase.
 - Existing IndexedDB data belongs to the original browser and fixed website origin. Migrate it explicitly with the existing full backup format and validated additive restore, including attachments; never clear the source browser. Subsequent app loads and saved changes use the shared local database. Copying the project together with its production database moves a saved snapshot to another computer; this is not continuous synchronization.
-- Concrete code implementation uses a Luna Max subagent. The primary agent coordinates, reviews, and verifies the work.
+- Concrete code implementation uses a Claude Haiku subagent at maximum reasoning effort (Haiku Max; changed from Luna Max on 2026-10-17). The primary agent coordinates, reviews, and verifies the work.
 
 ## Complete Local Edition Scope
 
@@ -223,3 +223,11 @@ See [Local App Contract](app-contract.md) for command interfaces, data shapes, m
 - Everyday sidebar navigation contains only Batches, Issues, Standards, and Purchase orders, without category labels. Show one storage indicator, `On this computer`; keep the demo workspace's separate banner. Put Backup and restore below the everyday links. Put initialization and prototype references in a secondary disclosure on that page.
 - Use restrained, neutral surfaces and borders, modest radii, and clear focus states. Keep the active route easy to recognize, preserve readable inputs and numeric affordances, and reserve green row emphasis for important checks.
 - Remove repeated explanatory copy and duplicate modal footer close actions when the modal header already provides a safe close control. Keep business data, validation messages, and consequential confirmations visible.
+
+## Trial Hosting Decisions (2026-10-17)
+
+- The first hosted edition is trust-based: every signed-in team member may perform every operation, including deletion, publication, export, and restore. Access credentials keep outsiders out; they do not create roles.
+- Batch and Issue edits are kept as browser-local drafts so an accidental refresh or tab close does not lose them. The user accepted that shared computers then retain unsent business data in that browser until the draft is saved or discarded.
+- Michael owns the domain, the cloud server account, and backup alerts.
+- Concurrent users must not block each other: a save is rejected as stale only when a record it changes was changed by someone else since the user's view, not whenever any other record in the workspace changed.
+

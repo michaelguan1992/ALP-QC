@@ -102,7 +102,7 @@ Put business rules in `core/` and database implementation in `storage/`. See [Ar
 
 Browsers on one computer share the local service database. Copying the project with its production database includes the saved records and attachments. Two computers then make independent local changes; Git does not provide live synchronization. Snapshot restore (service stopped) and additive JSON restore remain available for data transfer.
 
-Concrete implementation uses Luna Max subagents; the primary agent coordinates requirements, integration, review, and acceptance. The Lark edition and its live data remain outside this project's mutation scope.
+Concrete implementation uses Claude Haiku subagents at maximum reasoning effort (Haiku Max); the primary agent coordinates requirements, integration, review, and acceptance. The Lark edition and its live data remain outside this project's mutation scope.
 
 ## Verification Boundaries
 

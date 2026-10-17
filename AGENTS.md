@@ -8,7 +8,7 @@
 
 ## Work Assignment
 
-- The user specified that concrete code implementation should be delegated to a subagent using `gpt-6-luna` with reasoning effort `max` (Luna Max). Give each delegate a defined scope, file ownership, and acceptance criteria.
+- The user specified (2026-10-17, replacing the earlier Luna Max rule) that concrete code implementation should be delegated to a Claude subagent using the latest Haiku model with reasoning effort `max` (Haiku Max). Give each delegate a defined scope, file ownership, and acceptance criteria.
 - The primary agent handles requirement clarification, interface design, integration, code review, and acceptance. When broader model coverage is needed, use a subagent that does not inherit the full conversation history and provide the necessary context explicitly.
 - If the specified model is unavailable, explain the blocker and ask about an alternative. Do not silently switch models.
 
