@@ -1,0 +1,37 @@
+{
+  "Rules": [
+    {
+      "ID": "masterqc-half-hourly",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "masterqc/half-hourly/" },
+      "Expiration": { "Days": 8 },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 1 }
+    },
+    {
+      "ID": "masterqc-daily",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "masterqc/daily/" },
+      "Expiration": { "Days": 31 },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 1 }
+    },
+    {
+      "ID": "masterqc-monthly",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "masterqc/monthly/" },
+      "Expiration": { "Days": 367 },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 1 }
+    },
+    {
+      "ID": "masterqc-delete-markers",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "masterqc/" },
+      "Expiration": { "ExpiredObjectDeleteMarker": true }
+    },
+    {
+      "ID": "abort-incomplete-uploads",
+      "Status": "Enabled",
+      "Filter": {},
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    }
+  ]
+}

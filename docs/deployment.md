@@ -1,6 +1,6 @@
 # Hosted Deployment (Ubuntu 24.04)
 
-> **Status: NOT yet tested on a real server.** The code paths were checked locally: unit tests, `systemd-analyze verify` on the unit files, an `age` round trip, and the hosted server started with the production settings on a development machine. The release script (`deploy/release.sh`) and its verification checks were exercised only by the automated tests, with a stub service manager and synthetic data; they have not run on Ubuntu 24.04 with systemd, Caddy, or real S3 storage. The steps below have not been run on Ubuntu 24.04, behind Caddy, with real S3 storage, or in a restore drill. Treat them as a draft until the restore drill in section 11 passes on a disposable server.
+> **Status: NOT yet tested on a real server.** The code paths were checked locally: unit tests, `systemd-analyze verify` on the unit files, an `age` round trip, and the hosted server started with the production settings on a development machine. The release script (`deploy/release.sh`) and its verification checks were exercised only by the automated tests, with a stub service manager and synthetic data; they have not run on Ubuntu 24.04 with systemd, Caddy, or real S3 storage. The steps below have not been run on Ubuntu 24.04, behind Caddy, with real S3 storage, or in a restore drill. Treat them as a draft until the restore drill in section 11 passes on a disposable server. The AWS steps in section 0 and the backup job's S3 calls were also not run against real AWS; the automated tests use a stub AWS CLI.
 
 This setup runs one Node process and one SQLite database on one Linux server. Caddy terminates HTTPS and enforces individual Basic Auth accounts. Encrypted snapshots go to off-site object storage every 30 minutes. The decision record is [Shared Server Deployment and Data Recovery Plan](server-deployment-plan.md). This guide does not authorize a purchase.
 
@@ -9,7 +9,122 @@ The repository is public. Use placeholders in every file you create on the serve
 ## 0. Before you start
 
 - Point a DNS record such as `qc.example.com` at the server's public IPv4 address, and wait for it to resolve.
-- Prepare one bcrypt password hash per user (section 6), an S3 bucket with versioning and Object Lock in a separate account, and an `age` key pair. The private key stays off the server.
+- Prepare one bcrypt password hash per user (section 6), an S3 bucket in Singapore with Object Lock in a separate AWS account, an upload-only access key (`masterqc-backup`), and an `age` key pair. The private key stays off the server. The owner does the AWS steps once, from a personal computer.
+
+### Set up AWS S3 (Singapore)
+
+> **Not run against real AWS.** These commands were written for this guide and tested only against a stub. Run the scratch-bucket test in step 3 before you create the production bucket in step 4.
+
+Two facts shape every step:
+
+- A compliance-mode lock cannot be shortened, removed, or bypassed, not even by the account's root user. A locked copy is stored and billed until its lock ends. Test with one-day locks on a scratch bucket first.
+- Keep these off the server: the root sign-in with its MFA device and recovery codes, administrator credentials, and the `age` private key.
+
+Run the commands from your own computer, with an administrator profile for the AWS CLI (v2). Replace each `<placeholder>`. Bucket names are unique across all of AWS and cannot be changed.
+
+1. **Create a separate account.** Sign up for a new AWS account, not the Tencent Cloud account. Sign in as root, turn on MFA for root, and do not create root access keys. Create an administrator identity for daily work, such as IAM Identity Center with MFA. Keep the account ID and recovery codes in your password manager.
+
+2. **Select the administrator profile and region:**
+
+   ```sh
+   export AWS_PROFILE=<your administrator profile>
+   export AWS_REGION=ap-southeast-1
+   ```
+
+3. **Test the lock on a scratch bucket.** Use test data only:
+
+   ```sh
+   SCRATCH=masterqc-scratch-<random-suffix>
+   aws s3api create-bucket --bucket "$SCRATCH" --region ap-southeast-1 \
+     --create-bucket-configuration LocationConstraint=ap-southeast-1 \
+     --object-lock-enabled-for-bucket
+   echo "lock test" > scratch.txt
+   aws s3api put-object --bucket "$SCRATCH" --key test/scratch.txt --body fileb://scratch.txt \
+     --checksum-algorithm SHA256 --object-lock-mode COMPLIANCE \
+     --object-lock-retain-until-date <one day from now in UTC, for example 2026-10-18T12:00:00Z>
+   VERSION_ID="$(aws s3api list-object-versions --bucket "$SCRATCH" --prefix test/scratch.txt \
+     --query 'Versions[0].VersionId' --output text)"
+   aws s3api delete-object --bucket "$SCRATCH" --key test/scratch.txt --version-id "$VERSION_ID"
+   ```
+
+   The last command must fail, with a message that the object is protected by Object Lock or that access is denied. If it succeeds, stop: the lock is not in effect, and the production bucket must not be created yet. After the one-day lock ends, the test version and the scratch bucket can be deleted.
+
+4. **Create the production bucket** with Object Lock enabled. Object Lock also turns on versioning, and it cannot be turned off again once it is on.
+
+   ```sh
+   BUCKET=<your-unique-bucket-name>
+   aws s3api create-bucket --bucket "$BUCKET" --region ap-southeast-1 \
+     --create-bucket-configuration LocationConstraint=ap-southeast-1 \
+     --object-lock-enabled-for-bucket
+   aws s3api put-public-access-block --bucket "$BUCKET" \
+     --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+   aws s3api put-bucket-encryption --bucket "$BUCKET" \
+     --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+   aws s3api get-object-lock-configuration --bucket "$BUCKET"
+   aws s3api get-bucket-versioning --bucket "$BUCKET"
+   ```
+
+   The last two commands must show Object Lock `Enabled` and versioning `Enabled`. Public access stays blocked, and encryption uses SSE-S3, which means keys managed by S3. The console equivalent is Create bucket, Region Asia Pacific (Singapore), Object Lock Enable, all four Block Public Access options on, and Default encryption SSE-S3. Console labels change, so the CLI commands are the reference.
+
+5. **Optional: a one-day default lock.** Do this only after step 3 passes. Any object uploaded without its own lock then gets a one-day COMPLIANCE lock. The backup job sets its own, longer lock on every object, so the default only guards against a mistaken upload. Keep it at one day:
+
+   ```sh
+   aws s3api put-object-lock-configuration --bucket "$BUCKET" \
+     --object-lock-configuration '{"ObjectLockEnabled":"Enabled","Rule":{"DefaultRetention":{"Mode":"COMPLIANCE","Days":1}}}'
+   ```
+
+6. **Apply the lifecycle rules** from a checkout of this repository. If you change `MASTERQC_BACKUP_S3_PREFIX` from `masterqc`, first edit the prefixes in `deploy/aws/lifecycle.json` and the `Resource` in the upload policy:
+
+   ```sh
+   aws s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" \
+     --lifecycle-configuration file://deploy/aws/lifecycle.json
+   aws s3api get-bucket-lifecycle-configuration --bucket "$BUCKET"
+   ```
+
+   The rules hide each copy one day after its lock ends and delete it a day after that. Object Lock blocks deletion of a locked copy until its lock ends, lifecycle rules included, so the lock always comes first.
+
+7. **Create the upload-only user.** The policy file `deploy/aws/iam-upload-policy.json` contains the placeholder `YOUR-BUCKET-NAME`. Fill it in on a copy outside the repository:
+
+   ```sh
+   aws iam create-user --user-name masterqc-backup
+   sed "s/YOUR-BUCKET-NAME/$BUCKET/g" deploy/aws/iam-upload-policy.json > "$HOME/masterqc-upload-policy.json"
+   aws iam put-user-policy --user-name masterqc-backup --policy-name masterqc-backup-upload \
+     --policy-document "file://$HOME/masterqc-upload-policy.json"
+   rm -f "$HOME/masterqc-upload-policy.json"
+   aws iam create-access-key --user-name masterqc-backup
+   ```
+
+   The last command prints the access key once. Save `AccessKeyId` and `SecretAccessKey` in your password manager, then write them into `/etc/masterqc/backup.env` on the server (section 4). Do not paste them into chat, email, or the repository. The user gets no console password and no other policy.
+
+8. **Set a budget alert.** In AWS Budgets, create a monthly cost budget with an email alert, for example at USD 10, so that a misconfigured upload loop is noticed early.
+
+Where each secret lives:
+
+| Secret | Where it lives | On the server |
+| --- | --- | --- |
+| Root sign-in, MFA device, recovery codes | Password manager and a second secure location | Never |
+| Administrator identity | Your computer and password manager | Never |
+| Upload key (`masterqc-backup`) | `/etc/masterqc/backup.env` (root-only) and password manager | Yes, by design |
+| `age` private recovery key | Password manager and a second secure location | Never |
+| `age` public recipient | `/etc/masterqc/backup.env` | Yes (public) |
+
+#### Monthly cost estimate
+
+These are estimates, not bills. The prices used are S3 Standard storage at USD 0.025 per GB-month, PUT at USD 0.005 per 1,000 requests, and HEAD at USD 0.0004 per 1,000 requests, for Asia Pacific (Singapore). They were not checked against a live AWS price list. **Verify every price on the AWS pricing page before you rely on this table.** The table assumes the worst case: a database that changes at every 30-minute run.
+
+| Item | 35 MB database | 700 MB database |
+| --- | --- | --- |
+| Stored copies under the lock periods: 378 (336 half-hourly, 30 daily, 12 monthly) | 13.2 GB, about USD 0.33 a month | 264.6 GB, about USD 6.62 a month |
+| Stored copies including the one-day lifecycle delay: 477 (432 half-hourly, 32 daily, 13 monthly) | 16.7 GB, about USD 0.42 a month | 333.9 GB, about USD 8.35 a month |
+| Requests: about 3,000 PUT and about 3,000 HEAD a month | under USD 0.05 | under USD 0.05 |
+| Data into AWS | free | free |
+| Outbound traffic from the server, counted against its allowance | about 50 GB a month | about 1.05 TB a month |
+
+Notes:
+
+- The storage class is S3 Standard. Infrequent-access and archive classes bill a minimum storage duration longer than these copies live, so they would cost more here (verify the minimums).
+- The server's traffic allowance of about 2 TB a month covers the worst case at 700 MB, but that case uses about half of it. The skip-unchanged rule keeps traffic low while the database is idle.
+- The plan allows USD 5–10 a month for backup storage, requests, and transfer. The estimate fits that allowance at both sizes.
 
 ## 1. Install the software
 
@@ -39,7 +154,7 @@ Install Caddy from the official Debian and Ubuntu repository ([instructions](htt
 ```sh
 sudo useradd --system --home-dir /var/lib/masterqc --shell /usr/sbin/nologin masterqc
 sudo install -d -o masterqc -g masterqc -m 0750 /var/lib/masterqc
-sudo install -d -o masterqc -g masterqc -m 0700 /var/lib/masterqc-backups /var/lib/masterqc-backups/staging
+sudo install -d -o masterqc -g masterqc -m 0700 /var/lib/masterqc-backups /var/lib/masterqc-backups/staging /var/lib/masterqc-backups/state
 sudo install -d -o root -g root -m 0755 /opt/masterqc /opt/masterqc/releases
 sudo install -d -o root -g masterqc -m 0750 /etc/masterqc
 ```
@@ -86,7 +201,7 @@ AWS_DEFAULT_REGION=<bucket region>
 MASTERQC_BACKUP_HEARTBEAT_URL=<optional external heartbeat URL>
 ```
 
-The upload credentials need `s3:PutObject` and `s3:GetObject` (for the size check) and nothing else. They must not allow deletion.
+The upload credentials are the `masterqc-backup` user from section 0, whose policy is `deploy/aws/iam-upload-policy.json`. It allows writing backup objects under `masterqc/`, and reading their size and lock fields back, and nothing else: no deletion, no retention bypass, and no bucket changes. `MASTERQC_BACKUP_S3_PREFIX` must stay `masterqc`, or the policy's `Resource` must change to match.
 
 ### Operator names and release identity
 
@@ -148,7 +263,7 @@ sudo systemctl start masterqc-backup.service
 journalctl -u masterqc-backup.service -n 50 --no-pager
 ```
 
-A successful run prints `Verified ...` for each upload, then `Success heartbeat delivered.` when a heartbeat URL is set.
+A run that uploads prints `Verified ...` for each object and `Uploaded and verified the <tier> copy` for each tier. A run whose database is unchanged prints `unchanged:`, uploads nothing, and still sends the heartbeat. A successful run ends with `Success heartbeat delivered.` when a heartbeat URL is set.
 
 ## 7. Verify the first deployment
 
@@ -156,7 +271,11 @@ A successful run prints `Verified ...` for each upload, then `Success heartbeat 
 - Save a batch edit, refresh the page, and confirm the value remains.
 - `https://qc.example.com/?workspace=demo` shows no demo data. The demo API returns `404` with `workspace_not_found`.
 - On the server, `curl -sS -o /dev/null -w '%{http_code}\n' -H 'Host: qc.example.com' -X POST -H 'Content-Type: application/json' --data '{}' http://127.0.0.1:4173/api/qc/main/initialize` prints `403`, because the request has no Origin.
-- The bucket holds one `.sqlite.age` object and one `.json` manifest per run, with versioning and Object Lock enabled.
+- Under `masterqc/half-hourly/`, the bucket holds one `.sqlite.age` object and one `.json` manifest for each run that uploads. A run uploads when the database revision changed or the last half-hourly copy is six hours old. The first run of each UTC day also writes `masterqc/daily/`, and the first run of each UTC month writes `masterqc/monthly/`. Every object is under a `COMPLIANCE` lock.
+- Run the job again without changing any data. The second run prints `unchanged:`, uploads nothing, and still sends the heartbeat.
+- Read one copy's lock with the administrator profile on your own computer: `aws s3api head-object --bucket <bucket> --key <key> --query '[ContentLength,ObjectLockMode,ObjectLockRetainUntilDate]' --output text`. A half-hourly copy shows `COMPLIANCE` and a date about seven days ahead.
+- On the server, check that the upload key cannot delete. Load the upload credentials for one command, for example `sudo sh -c 'set -a; . /etc/masterqc/backup.env; set +a; aws s3api delete-object --bucket <bucket> --key masterqc/access-check-missing'`. It must fail with `AccessDenied`. The key does not exist, so a permitted delete would change nothing, and this check never touches a real copy.
+- The external monitor alerts when no heartbeat arrives for about 45 minutes. Do not alert on the age of the newest object. An unchanged database is not copied for up to six hours, but its newest copy still holds the current revision.
 
 ## 8. Operate the service
 
@@ -206,7 +325,7 @@ The restore command replaces the database and keeps the previous file beside it.
 
 Run the drill on a disposable server with its own data directory. Never restore over production.
 
-1. Download the newest object and its manifest from the bucket: `aws s3 cp s3://<bucket>/<prefix>/<name>.sqlite.age .` and the matching `.json`.
+1. Download the newest suitable object and its manifest from the bucket: `aws s3 cp s3://<bucket>/<prefix>/<tier>/<name>.sqlite.age .` and the matching `.json`. Choose `<tier>` by need: `half-hourly` for the latest saved work, `daily` for a mistake found later, or `monthly` for older history. The upload credentials cannot list the bucket, so run this step with the administrator profile on your own computer, then copy the files to the drill server.
 2. Decrypt with the recovery private key, which stays outside the server: `age -d -i recovery-key.txt -o restored.sqlite <name>.sqlite.age`.
 3. Compare `sha256sum restored.sqlite` with the `sha256` field in the manifest.
 4. Restore into an empty data directory with the service stopped. The service user must be able to read the file, so copy it into the drill directory first:
@@ -252,7 +371,14 @@ Use this when changing provider or plan, for example from the Tencent Lighthouse
 - Backups read the live database. A large `VACUUM INTO` plus `integrity_check` can hold a read lock long enough for saves to wait on the 5-second busy timeout. Measure this on the real server.
 - SQLite calls are synchronous in Node, so while a snapshot is copied the whole app pauses, including `/healthz`. A monitor that polls health checks should allow a few seconds of slack.
 - The Caddy and systemd files were checked only for syntax (`systemd-analyze verify`; Caddy validation was not run). Run `caddy validate` before reloading.
-- The S3 bucket's versioning, Object Lock, upload-only credentials, and heartbeat monitor are configured outside this repository.
+- The S3 steps in section 0, the upload policy, and the lifecycle rules were not checked against a live AWS account, and the test suite uses a stub AWS CLI, so the real `aws` calls are untested. The heartbeat monitor runs outside this repository. Run the scratch-bucket test before the production bucket exists, and run a restore drill after the first real upload.
+- Local staging keeps two days of encrypted copies, about 96 at the 30-minute cadence. At 35 MB that is about 3.4 GB; at 700 MB it is about 67 GB, more than a 50 GiB disk holds. The retention is fixed at 2,880 minutes in `deploy/masterqc-backup.sh`. Shorten it, or keep fewer local copies, before the database grows past about 350 MB.
+- The unchanged-database rule compares revision numbers. A different database that carries the same revision number would be skipped until its six-hour copy. Do not copy `/var/lib/masterqc-backups/state` between servers; a new server starts with an empty state directory (section 12).
+- Object Lock compliance cannot be undone. A copy stays, and is billed, until its lock ends. Closing the AWS account is outside Object Lock's protection, so keep the root recovery codes and the `age` private key outside the server (section 0).
+- Each object is one `put-object` call, which S3 limits to 5 GB. The database is far below that now. A much larger database needs multipart uploads first.
+- An interrupted run can leave an encrypted copy in S3 without its manifest. It is harmless, and the lifecycle rules remove it on the same schedule as any other copy in its tier.
+- A run that outlasts the 30-minute timer makes the next run exit with `Another backup is still running`, and that run sends no heartbeat. Measure upload time at 700 MB on the real server link.
+- Retention dates come from the server clock. A clock that runs fast shortens every lock, and one that runs slow lengthens it. Confirm that time synchronization is active with `timedatectl`.
 - Not implemented: the plan's recommended automatic write block when off-site coverage is older than 55 minutes, and alerts from outside the server.
 - Hosted mode also accepts requests to `127.0.0.1:4173` without Basic Auth, because loopback is how Caddy and local tools reach the app. Any local account on the server can therefore use the app directly. Keep shell access limited to administrators.
 - Basic Auth controls access only, and every signed-in user may perform every operation. With `MASTERQC_TRUSTED_USER_HEADER` set, new audit entries record the signed-in name; the manual confirmation names on Issues remain unauthenticated business fields.
