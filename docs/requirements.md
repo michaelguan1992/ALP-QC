@@ -235,7 +235,7 @@ See [Local App Contract](app-contract.md) for command interfaces, data shapes, m
 - No synthetic sample-data generator for now; revisit after real use shows which data shapes matter.
 - Every release is verified automatically on the server before it goes live: the release script starts the new code on an internal port against a fresh copy of the production database, checks startup, data upgrades, health, record counts, and attachments, and switches production only when all checks pass. No persistent staging environment.
 - The release process includes a release and rollback script, and open pages show a "new version available" notice so users reload onto the new code without losing edits.
-- Hosting (2026-10-17): Tencent Cloud Lighthouse Hong Kong from the international site, monthly billing, chosen for low cost; mainland carriers vary, so the trial must cover Telecom, Unicom, and Mobile at evening peak. US users are on the West Coast. The trial may start on the server's IP address with a Let's Encrypt IP certificate; buying a domain before production data moves is recommended but not yet decided, because changing the site address later strands browser drafts and saved logins.
+- Hosting (2026-10-17): Tencent Cloud Lighthouse Hong Kong from the international site, monthly billing, chosen for low cost; mainland carriers vary, so the trial must cover Telecom, Unicom, and Mobile at evening peak. US users are on the West Coast. The owner buys a domain now and the trial starts on that domain, so the address never changes: moving to another server (for example a Hong Kong premium-route server) later only changes the DNS record, and users keep saved logins and unsent browser drafts.
 
 ## Browser Draft Recovery (2026-10-17)
 

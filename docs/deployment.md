@@ -227,7 +227,24 @@ Run the drill on a disposable server with its own data directory. Never restore 
    ```
 6. Record the elapsed time and the most recent saved work that was lost, and confirm both with the owner.
 
-## 12. Known limits and open items
+## 12. Moving to another server
+
+Use this when changing provider or plan, for example from the Tencent Lighthouse server to a Hong Kong premium-route server. The site keeps its domain, so users keep their address, saved logins, bookmarks, and unsent browser drafts. Plan about 30 to 60 minutes without writes.
+
+1. Prepare the new server with sections 1 to 4 and section 6, but do not point DNS at it yet. Copy `/etc/masterqc/env`, `/etc/masterqc/backup.env`, and the Caddyfile (including the Basic Auth hashes) from the old server. Keep the same `MASTERQC_PUBLIC_ORIGIN`.
+2. Optional trial: restore a recent snapshot into the new server's data directory (section 5) and have mainland and US users test it through a temporary hosts-file entry or a temporary second DNS name. Real work continues on the old server only. Discard this trial copy before the cutover.
+3. A day before the cutover, lower the DNS record's TTL to 300 seconds.
+4. Cutover:
+   1. Ask users to finish and save their edits. Unsent drafts stay in each browser and survive the move, but saving first keeps the window short.
+   2. On the old server, stop writes: `sudo systemctl stop masterqc`. Keep the old server running otherwise.
+   3. Create the final snapshot from the stopped database with `scripts/backup-snapshot.mjs` and copy it and its manifest to the new server. Check `sha256sum` against the manifest.
+   4. On the new server, with the service stopped, restore it with `launcher/restore-snapshot.mjs` into an empty data directory (section 5), then start the service.
+   5. Point the DNS record at the new server's IP address. Caddy obtains a certificate once the name resolves to the new server.
+   6. Verify with section 7, open a few batches and attachments, and confirm that the newest saved record is present.
+5. Start the backup timer on the new server only, and confirm one successful upload. Disable the backup timer on the old server so two servers never write backups for the same workspace.
+6. Keep the old server stopped but intact for at least a week as a frozen copy, then cancel it. Never start its service again once the new server has accepted writes, because its data would diverge.
+
+## 13. Known limits and open items
 
 - The release script and its checks were tested only with a stub service manager, synthetic data, and a development machine. Before relying on the script in production, run one ordinary release and one rollback on a disposable copy of the server. Check that the `masterqc` account can read `/var/lib/masterqc-backups/pre-release/`.
 - A release that intentionally removes records during its startup cleanup (for example, a superseded version) fails the count check. The script then leaves production unchanged, and the release has to be reviewed before it is installed.
@@ -237,6 +254,5 @@ Run the drill on a disposable server with its own data directory. Never restore 
 - The Caddy and systemd files were checked only for syntax (`systemd-analyze verify`; Caddy validation was not run). Run `caddy validate` before reloading.
 - The S3 bucket's versioning, Object Lock, upload-only credentials, and heartbeat monitor are configured outside this repository.
 - Not implemented: the plan's recommended automatic write block when off-site coverage is older than 55 minutes, and alerts from outside the server.
-- The frontend's offline message still names `http://127.0.0.1:4173`. Hosted users see it only if the service is unreachable.
 - Hosted mode also accepts requests to `127.0.0.1:4173` without Basic Auth, because loopback is how Caddy and local tools reach the app. Any local account on the server can therefore use the app directly. Keep shell access limited to administrators.
-- Basic Auth controls access only. The app keeps its manual confirmation names and does not identify users.
+- Basic Auth controls access only, and every signed-in user may perform every operation. With `MASTERQC_TRUSTED_USER_HEADER` set, new audit entries record the signed-in name; the manual confirmation names on Issues remain unauthenticated business fields.
