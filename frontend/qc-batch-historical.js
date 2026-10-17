@@ -3,11 +3,13 @@
 // save through the same manual save controller as operational batches.
 
 import { button, dateLabel, el, errorText, list, pageHeading, text } from "./qc-ops-common.js";
-import { applySaveStatus, batchRowDrafts, clearDraftsForBatch, createBatchRowRegistry, pruneSavedBatchDrafts, reconcileSavedRowDraft } from "./qc-batch-drafts.js";
+import { applySaveStatus, batchRowDrafts, clearDraftsForBatch, createBatchRowRegistry, dismissBatchDraftNotice, openBatchDrafts, persistBatchDraftsNow, rebaseBatchDrafts, reconcileSavedRowDraft } from "./qc-batch-drafts.js";
 import { createManualSaveController } from "./qc-manual-save.js";
+import { NOT_SAVED_SEE_MESSAGE, isStaleRevisionError } from "./qc-command-rules.js";
+import { renderDraftNotice } from "./qc-draft-notice.js";
 import { displayColorLabel } from "../core/qc-batch-display.js";
 import { findHistoricalSourceRow, historicalResultValues } from "../core/qc-historical-batches.js";
-import { batchProductLabel, sourceValue } from "./qc-batch-model.js";
+import { batchProductLabel, operationalTaskTitle, sourceValue } from "./qc-batch-model.js";
 import { batchAttachments, renderBatchAttachments } from "./qc-batch-attachments.js";
 import { makeOperationalInspectionTable, settleRowDraftAfterSave } from "./qc-batch-rows.js";
 
@@ -99,7 +101,17 @@ export function renderHistoricalBatchDetail(root, ctx, workspace) {
   };
   const saveError = el("p", { className: "qc-ops-form-error qc-ops-save-error", role: "alert" });
   const saveStatus = el("span", { hidden: true });
-  pruneSavedBatchDrafts(batch, list(workspace.rows), { historical: true });
+  let saveFailureIsStale = false;
+  let restoreNoticeElement = null;
+  // Restores stored drafts when this page has none, and reconciles every draft with the saved results first.
+  const draftNotice = openBatchDrafts(batch.id, {
+    rows: list(workspace.rows),
+    details: null,
+    revision: ctx.state?.revision ?? null,
+    historical: true,
+    readOnly: workspace.batch.status === "released",
+    describeRow: (row) => operationalTaskTitle(row, workspace, state),
+  });
   const hasChanges = () => batchRowDrafts(batch.id).length > 0;
   const readSnapshot = () => ({
     rows: batchRowDrafts(batch.id).map(([rowId, draft]) => {
@@ -143,10 +155,17 @@ export function renderHistoricalBatchDetail(root, ctx, workspace) {
       })),
     }, { manualSave: true, render: false, silent: true }),
     onError: (error) => {
-      saveError.textContent = `This page remains open because the changes could not be saved: ${errorText(error, "Check the highlighted changes and try again.")}`;
+      saveFailureIsStale = isStaleRevisionError(error);
+      saveError.textContent = saveFailureIsStale
+        ? NOT_SAVED_SEE_MESSAGE
+        : `This page remains open because the changes could not be saved: ${errorText(error, "Check the highlighted changes and try again.")}`;
     },
     onSaved: (snapshot, response) => {
+      saveFailureIsStale = false;
       saveError.textContent = "";
+      dismissBatchDraftNotice(batch.id);
+      restoreNoticeElement?.remove();
+      restoreNoticeElement = null;
       const latestState = response.state || ctx.state || state;
       const savedBatch = list(latestState.batches).find((candidate) => candidate.id === batch.id) ||
         list(response.result?.changes?.batches).find((candidate) => candidate.id === batch.id);
@@ -162,6 +181,9 @@ export function renderHistoricalBatchDetail(root, ctx, workspace) {
         const rowInputState = rows.inputState(savedRow.id);
         if (rowInputState) settleRowDraftAfterSave(batch.id, savedRow.id, rowInputState, currentRow, { historical: true });
       }
+      // The saved results are now the page's own, so every draft that is still changed is judged against them.
+      rebaseBatchDrafts(batch.id);
+      persistBatchDraftsNow(batch.id);
     },
     onDiscard: () => {
       clearDraftsForBatch(batch.id);
@@ -171,9 +193,12 @@ export function renderHistoricalBatchDetail(root, ctx, workspace) {
         rowInputState.updateStatus();
       }
       saveError.textContent = "";
+      saveFailureIsStale = false;
+      restoreNoticeElement?.remove();
+      restoreNoticeElement = null;
     },
     onStatus: (status) => {
-      applySaveStatus(saveStatus, status);
+      applySaveStatus(saveStatus, status === "Save failed" && saveFailureIsStale ? "" : status);
       rows.applyStatus(batch.id, status);
     },
   });
@@ -186,12 +211,24 @@ export function renderHistoricalBatchDetail(root, ctx, workspace) {
     saveError,
     makeOperationalInspectionTable(workspace, state, ctx, manualSaveController, onRowDraftChange)
   );
+  // "Discard restored edits" discards this batch's unsent results through the controller, which also resets the inputs.
+  const restoreAction = () => {
+    if (draftNotice?.applied > 0) {
+      if (!manualSaveController.discardAll()) return;
+    } else {
+      dismissBatchDraftNotice(batch.id);
+    }
+    restoreNoticeElement?.remove();
+    restoreNoticeElement = null;
+  };
+  restoreNoticeElement = draftNotice ? renderDraftNotice(draftNotice, { onAction: restoreAction }) : null;
 
   root.replaceChildren(
     pageHeading("Batches", "", [
       button("All batches", () => ctx.navigate("batches"), "button button-secondary"),
       button("View report", () => ctx.navigate("batch-report", batch.id), "button button-secondary"),
     ]),
+    ...(restoreNoticeElement ? [restoreNoticeElement] : []),
     metadata,
     intro,
     renderBatchAttachments(attachmentsWorkspace, state, ctx),

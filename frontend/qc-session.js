@@ -95,10 +95,10 @@ export function createQCSession({
       return { ok: false, error, unknownOutcome: true, reloadRequired: true };
     }
     if (isStaleRevisionError(error)) {
+      // The banner above the page carries the message, so a stale save raises no toast.
       staleGuard = { generation };
       blocking = STALE_REVISION_MESSAGE;
       publish();
-      if (!options.silent) notify(STALE_REVISION_MESSAGE, true);
       return { ok: false, error: staleRevisionError(error), stale: true, reloadRequired: true };
     }
     if (!options.silent) notify(messageOf(error), true);
@@ -110,10 +110,10 @@ export function createQCSession({
       if (!state) return { ok: false, error: new Error("The QC workspace is not ready.") };
 
       if (staleGuard && staleGuard.generation === generation) {
+        // The banner already explains that the data must be reloaded, so the refusal raises no toast either.
         const error = new Error(REVISION_RETRY_BLOCKED_MESSAGE);
         error.code = "stale_revision";
         error.status = 409;
-        if (!options.silent) notify(error.message, true);
         return { ok: false, error, stale: true, blocked: true, reloadRequired: true };
       }
 

@@ -154,7 +154,22 @@ test("a 409 status without a code is treated as stale, and the message is normal
 
   assert.equal(result.stale, true);
   assert.equal(result.error.message, STALE_REVISION_MESSAGE);
-  assert.deepEqual(log.notify, [{ message: STALE_REVISION_MESSAGE, isError: true }]);
+  assert.equal(session.notices.blocking, STALE_REVISION_MESSAGE);
+  assert.deepEqual(log.notify, [], "the banner carries the message, so a stale save raises no toast");
+});
+
+test("a retry refused after a stale save raises no toast either, because the banner already says reload", async () => {
+  const service = fakeService(4);
+  service.nextCommand = async () => { throw failure("Conflict.", { status: 409 }); };
+  const { session, log } = makeSession(service);
+
+  await session.run("saveBatchChanges", { batchId: "batch-1", rows: [] });
+  const retry = await session.run("saveBatchChanges", { batchId: "batch-1", rows: [] });
+
+  assert.equal(retry.blocked, true);
+  assert.equal(retry.error.message, REVISION_RETRY_BLOCKED_MESSAGE);
+  assert.equal(service.commands.length, 1);
+  assert.deepEqual(log.notify, []);
 });
 
 test("an ordinary validation failure is not stale and leaves the state unchanged", async () => {

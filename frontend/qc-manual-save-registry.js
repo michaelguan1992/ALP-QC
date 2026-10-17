@@ -1,4 +1,5 @@
 import { REPLACED_PAGE_MESSAGE } from "./qc-manual-save.js";
+import { isStaleRevisionError } from "./qc-command-rules.js";
 import { button, captureDialogState, closeDialog, el, notify, restoreDialogState, showDialog } from "./qc-ui.js";
 
 /**
@@ -61,8 +62,12 @@ export function createManualSaveRegistry() {
       const saved = await controller.saveBeforeExit();
       if (version !== exitVersion) return false;
       if (!saved) {
-        const reason = controller.getLastError?.()?.message || "Check the highlighted changes and try again.";
-        notify(`This page remains open because the changes could not be saved: ${reason}`, true);
+        // A stale save is explained by the banner and the page header, so it raises no toast.
+        const lastError = controller.getLastError?.();
+        if (!isStaleRevisionError(lastError)) {
+          const reason = lastError?.message || "Check the highlighted changes and try again.";
+          notify(`This page remains open because the changes could not be saved: ${reason}`, true);
+        }
         return false;
       }
       if (active() !== controller) {
